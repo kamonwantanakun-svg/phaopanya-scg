@@ -1675,7 +1675,7 @@ function saveAliasEnrichCheckpoint_(source, idx, totalProcessed) {
  * loadAliasEnrichCheckpoint_ — [REF-003] Load checkpoint with 24h stale protection
  *   Mirror pattern ของ loadHardeningAliasCheckpoint_ (19_Hardening.gs:497)
  * @param {string} source - 'SCG_RAW' or 'FACT_DELIVERY'
- * @return {{idx: number, totalProcessed: number}|null}
+ * @return {Object} {idx: number, totalProcessed: number}|null}
  * @private
  */
 function loadAliasEnrichCheckpoint_(source) {
@@ -1814,7 +1814,7 @@ Identical structure — change source param to `'FACT_DELIVERY'` and function na
 ```javascript
 /**
  * acquireMatchEngineLock_ — [REF-004] SECTION A: Lock + AuthZ + validateConfig
- * @return {{lock: object, startTime: Date}|null} null if cannot acquire
+ * @return {Object} {lock: object, startTime: Date}|null} null if cannot acquire
  * @private
  */
 function acquireMatchEngineLock_() {
@@ -1837,7 +1837,7 @@ function acquireMatchEngineLock_() {
 /**
  * prepareMatchEngineContext_ — [REF-004] SECTION B: Load source + caches + checkpoint
  * @param {Date} startTime
- * @return {{allRows: Array, totalRows: number, startIdx: number, factBatch: Array, reviewBatch: Array, successRows: Array, failedRows: Array, personMap: Object, placeMap: Object}}
+ * @return {Object} {allRows: Array, totalRows: number, startIdx: number, factBatch: Array, reviewBatch: Array, successRows: Array, failedRows: Array, personMap: Object, placeMap: Object}}
  * @private
  */
 function prepareMatchEngineContext_(startTime) {
@@ -1864,7 +1864,7 @@ function prepareMatchEngineContext_(startTime) {
  *   เหลือเฉพาะ loop logic (~30 บรรทัด)
  * @param {Object} ctx - context from prepareMatchEngineContext_
  * @param {Date} startTime
- * @return {{completed: boolean, lastIdx: number}} completed=true ถ้าจบลูป
+ * @return {Object} {completed: boolean, lastIdx: number}} completed=true ถ้าจบลูป
  * @private
  */
 function runMatchEngineLoop_(ctx, startTime) {
@@ -2147,7 +2147,7 @@ Total: 22 files × ~65 lines reduced = ~1,430 lines saved
 ```javascript
 /**
  * acquireAliasHistoryLock_ — [REF-006] SECTION A
- * @return {{lock, startTime}|null}
+ * @return {Object} {lock, startTime}|null}
  * @private
  */
 function acquireAliasHistoryLock_() {
@@ -2166,7 +2166,7 @@ function acquireAliasHistoryLock_() {
 /**
  * prepareAliasHistoryContext_ — [REF-006] SECTION B
  * @param {Date} startTime
- * @return {{factData: Array, personCanonicalMap: Object, personUuidMap: Object, existingAliasSet: Set, existingGlobalAliasSet: Set, aliasRows: Array, globalAliasRows: Array, startIdx: number, totalRows: number}}
+ * @return {Object} {factData: Array, personCanonicalMap: Object, personUuidMap: Object, existingAliasSet: Set, existingGlobalAliasSet: Set, aliasRows: Array, globalAliasRows: Array, startIdx: number, totalRows: number}}
  * @private
  */
 function prepareAliasHistoryContext_(startTime) {
@@ -2182,7 +2182,7 @@ function prepareAliasHistoryContext_(startTime) {
  * runAliasHistoryLoop_ — [REF-006] SECTION C
  * @param {Object} ctx
  * @param {Date} startTime
- * @return {{completed: boolean, lastIdx: number}}
+ * @return {Object} {completed: boolean, lastIdx: number}}
  * @private
  */
 function runAliasHistoryLoop_(ctx, startTime) {
@@ -2389,7 +2389,7 @@ function findPersonCandidates(cleanName, phone) {
 ```javascript
 /**
  * reprocAcquireLock_ — [REF-008] Lock + TimeGuard setup
- * @return {{lock, startTime, timeLimit}|null}
+ * @return {Object} {lock, startTime, timeLimit}|null}
  * @private
  */
 function reprocAcquireLock_() {
@@ -2407,7 +2407,7 @@ function reprocAcquireLock_() {
 
 /**
  * reprocWarmCaches_ — [REF-008] Cache warming (loadAllPersons_, loadAllPlaces_, buildGlobalAliasDedupSet_)
- * @return {{personMap: Object, placeMap: Object, existingGlobalAliasSet: Set}}
+ * @return {Object} {personMap: Object, placeMap: Object, existingGlobalAliasSet: Set}}
  * @private
  */
 function reprocWarmCaches_() {
@@ -2426,7 +2426,7 @@ function reprocWarmCaches_() {
 
 /**
  * reprocLoadData_ — [REF-008] Load Q_REVIEW + FACT_DELIVERY + build RI/FI maps
- * @return {{reviewData: Array, factData: Array, RI: Object, FI: Object, reviewSheet: object, factSheet: object}|null}
+ * @return {Object} {reviewData: Array, factData: Array, RI: Object, FI: Object, reviewSheet: object, factSheet: object}|null}
  * @private
  */
 function reprocLoadData_() {
@@ -2515,7 +2515,7 @@ var MIGRATION_STEPS = [
  * runMigrationStep_ — [REF-009] Run + log + handle error สำหรับ 1 step
  * @param {Object} stepDescriptor - {name, fn, description}
  * @param {Object} ctx - migration context (checkpoint, lock, etc.)
- * @return {{success: boolean, error: string|null}}
+ * @return {Object} {success: boolean, error: string|null}}
  * @private
  */
 function runMigrationStep_(stepDescriptor, ctx) {
@@ -3372,7 +3372,7 @@ function saveAliasEnrichCheckpoint_(source, idx, totalProcessed) {
  * loadAliasEnrichCheckpoint_ — [REF-003] Load checkpoint with 24h stale protection
  *   Mirror pattern ของ loadHardeningAliasCheckpoint_ (19_Hardening.gs:497)
  * @param {string} source - 'SCG_RAW' or 'FACT_DELIVERY'
- * @return {{idx: number, totalProcessed: number}|null}
+ * @return {Object} {idx: number, totalProcessed: number}|null}
  * @private
  */
 function loadAliasEnrichCheckpoint_(source) {
@@ -3511,7 +3511,7 @@ Identical structure — change source param to `'FACT_DELIVERY'` and function na
 ```javascript
 /**
  * acquireMatchEngineLock_ — [REF-004] SECTION A: Lock + AuthZ + validateConfig
- * @return {{lock: object, startTime: Date}|null} null if cannot acquire
+ * @return {Object} {lock: object, startTime: Date}|null} null if cannot acquire
  * @private
  */
 function acquireMatchEngineLock_() {
@@ -3534,7 +3534,7 @@ function acquireMatchEngineLock_() {
 /**
  * prepareMatchEngineContext_ — [REF-004] SECTION B: Load source + caches + checkpoint
  * @param {Date} startTime
- * @return {{allRows: Array, totalRows: number, startIdx: number, factBatch: Array, reviewBatch: Array, successRows: Array, failedRows: Array, personMap: Object, placeMap: Object}}
+ * @return {Object} {allRows: Array, totalRows: number, startIdx: number, factBatch: Array, reviewBatch: Array, successRows: Array, failedRows: Array, personMap: Object, placeMap: Object}}
  * @private
  */
 function prepareMatchEngineContext_(startTime) {
@@ -3561,7 +3561,7 @@ function prepareMatchEngineContext_(startTime) {
  *   เหลือเฉพาะ loop logic (~30 บรรทัด)
  * @param {Object} ctx - context from prepareMatchEngineContext_
  * @param {Date} startTime
- * @return {{completed: boolean, lastIdx: number}} completed=true ถ้าจบลูป
+ * @return {Object} {completed: boolean, lastIdx: number}} completed=true ถ้าจบลูป
  * @private
  */
 function runMatchEngineLoop_(ctx, startTime) {
@@ -3844,7 +3844,7 @@ Total: 22 files × ~65 lines reduced = ~1,430 lines saved
 ```javascript
 /**
  * acquireAliasHistoryLock_ — [REF-006] SECTION A
- * @return {{lock, startTime}|null}
+ * @return {Object} {lock, startTime}|null}
  * @private
  */
 function acquireAliasHistoryLock_() {
@@ -3863,7 +3863,7 @@ function acquireAliasHistoryLock_() {
 /**
  * prepareAliasHistoryContext_ — [REF-006] SECTION B
  * @param {Date} startTime
- * @return {{factData: Array, personCanonicalMap: Object, personUuidMap: Object, existingAliasSet: Set, existingGlobalAliasSet: Set, aliasRows: Array, globalAliasRows: Array, startIdx: number, totalRows: number}}
+ * @return {Object} {factData: Array, personCanonicalMap: Object, personUuidMap: Object, existingAliasSet: Set, existingGlobalAliasSet: Set, aliasRows: Array, globalAliasRows: Array, startIdx: number, totalRows: number}}
  * @private
  */
 function prepareAliasHistoryContext_(startTime) {
@@ -3879,7 +3879,7 @@ function prepareAliasHistoryContext_(startTime) {
  * runAliasHistoryLoop_ — [REF-006] SECTION C
  * @param {Object} ctx
  * @param {Date} startTime
- * @return {{completed: boolean, lastIdx: number}}
+ * @return {Object} {completed: boolean, lastIdx: number}}
  * @private
  */
 function runAliasHistoryLoop_(ctx, startTime) {
@@ -4086,7 +4086,7 @@ function findPersonCandidates(cleanName, phone) {
 ```javascript
 /**
  * reprocAcquireLock_ — [REF-008] Lock + TimeGuard setup
- * @return {{lock, startTime, timeLimit}|null}
+ * @return {Object} {lock, startTime, timeLimit}|null}
  * @private
  */
 function reprocAcquireLock_() {
@@ -4104,7 +4104,7 @@ function reprocAcquireLock_() {
 
 /**
  * reprocWarmCaches_ — [REF-008] Cache warming (loadAllPersons_, loadAllPlaces_, buildGlobalAliasDedupSet_)
- * @return {{personMap: Object, placeMap: Object, existingGlobalAliasSet: Set}}
+ * @return {Object} {personMap: Object, placeMap: Object, existingGlobalAliasSet: Set}}
  * @private
  */
 function reprocWarmCaches_() {
@@ -4123,7 +4123,7 @@ function reprocWarmCaches_() {
 
 /**
  * reprocLoadData_ — [REF-008] Load Q_REVIEW + FACT_DELIVERY + build RI/FI maps
- * @return {{reviewData: Array, factData: Array, RI: Object, FI: Object, reviewSheet: object, factSheet: object}|null}
+ * @return {Object} {reviewData: Array, factData: Array, RI: Object, FI: Object, reviewSheet: object, factSheet: object}|null}
  * @private
  */
 function reprocLoadData_() {
@@ -4212,7 +4212,7 @@ var MIGRATION_STEPS = [
  * runMigrationStep_ — [REF-009] Run + log + handle error สำหรับ 1 step
  * @param {Object} stepDescriptor - {name, fn, description}
  * @param {Object} ctx - migration context (checkpoint, lock, etc.)
- * @return {{success: boolean, error: string|null}}
+ * @return {Object} {success: boolean, error: string|null}}
  * @private
  */
 function runMigrationStep_(stepDescriptor, ctx) {
