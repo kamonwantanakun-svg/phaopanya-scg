@@ -1,5 +1,5 @@
 # 🚀 LMDS V5.5 — การประเมินความพร้อม Production [CMD: PREDEPLOY]
-## วันที่: 2026-06-21 | เวอร์ชัน: V5.5.017 (post-SECURITY-POSTFIX; original audit 2026-06-12)
+## วันที่: 2026-06-21 | เวอร์ชัน: V5.5.017 (post-CONSISTENCY-SYNC (V5.5.022); original audit 2026-06-12)
 
 ---
 
@@ -29,7 +29,7 @@
   - [7. Final Decision](#7-final-decision)
   - [8. Pre-Deployment Checklist (Manual Steps)](#8-pre-deployment-checklist-manual-steps-ที่ผู้ใช้ต้องทำ)
   - [9. หมายเหตุสำหรับทีมพัฒนา](#9-หมายเหตุสำหรับทีมพัฒนา)
-  - [10. Update V5.5.021 — Post-Deploy Audit Findings](#10-update-v555021--post-deploy-audit-findings)
+  - [10. Update V5.5.022 — Post-Deploy Audit Findings (Consistency Sync)](#10-update-v555021--post-deploy-audit-findings)
 
 ---
 
@@ -462,7 +462,7 @@
 
 **ผู้ประเมิน:** Automated Assessment System
 **วันที่ประเมิน:** 2026-06-12
-**เวอร์ชันโค้ด:** V5.5.017 (post-SECURITY-POSTFIX; original V5.5.004)
+**เวอร์ชันโค้ด:** V5.5.017 (post-CONSISTENCY-SYNC (V5.5.022); original V5.5.004)
 **เวอร์ชันเอกสาร:** 1.0
 **อ้างอิง:** LMDS_V5.5_REFACTOR_code_Report.md
 
@@ -515,7 +515,7 @@
 
 ### 🟢 Residual (Acceptable) Notes:
 - `getColIndex()` in `02_Schema.gs` is `@deprecated` with warning log — kept for backward compatibility (no internal callers, 0 risk)
-- `withEntryPointGuard_` applied to 3 pilot entry points (populateGeoMetadata, buildGeoDictionary, fetchDataFromSCGJWD) — remaining entry points still use manual try-catch (functional, no risk — pilot can extend in V5.5.021)
+- `withEntryPointGuard_` applied to 3 pilot entry points (populateGeoMetadata, buildGeoDictionary, fetchDataFromSCGJWD) — remaining entry points still use manual try-catch (functional, no risk — pilot can extend in V5.5.022)
 - 5 functions with names lacking `_` suffix (safeRun, fixMissingSyncStatus, scorePersonCandidate, tryMatchBranch, scorePlaceCandidate) — these are public API functions called across modules, naming acceptable
 
 ## 4. Verified Architecture Standards (V5.5.020)
@@ -598,8 +598,8 @@
 
 ---
 
-## 10. Update V5.5.021 — Post-Deploy Audit Findings
+## 10. Update V5.5.022 — Post-Deploy Audit Findings (Consistency Sync)
 
-> หลังจาก V5.5.020 GO แล้ว ได้ดำเนินการ Deep Dive Audit เพิ่มเติมใน V5.5.021 พบ findings ใหม่ 15 รายการ (5 Critical + 5 High + 5 Medium) — ดูรายละเอียดใน `LMDS_V5.5.021_Deep_Dive_Audit.md`
+> หลังจาก V5.5.020 GO แล้ว ได้ดำเนินการ Deep Dive Audit เพิ่มเติมใน V5.5.021 พบ findings ใหม่ 15 รายการ (5 Critical + 5 High + 5 Medium) — ทั้งหมดถูก implement ใน V5.5.022 แล้ว — ดูรายละเอียดใน `LMDS_V5.5.021_Deep_Dive_Audit.md` (historical audit report)
 
-**Verdict:** ✅ V5.5.020 ยังคง GO — findings V5.5.021 เป็น non-blocking improvements ที่สามารถแก้ใน V5.5.022+ ได้
+**Verdict:** ✅ V5.5.020 ยังคง GO — findings V5.5.022 แก้ Deep Dive findings ครบแล้ว (BUG-M01/M02/M03/H02/H03/C01)

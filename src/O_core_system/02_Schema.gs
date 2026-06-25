@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.021
+ * VERSION: 5.5.022
  * FILE: 02_Schema.gs
  * LMDS V5.5 — Sheet Schema Definitions
  * ===================================================
@@ -10,9 +10,9 @@
  * ===================================================
  * CHANGELOG: See /docs/CHANGELOG.md for full history.
  *   Latest 3 versions:
+ *     v5.5.022 (2026-06-26) — CONSISTENCY SYNC + DEEP DIVE FIX (BUG-M01/M02/M03/H02/H03/C01 + 6 cache/config fixes)
+ *     v5.5.021 (2026-06-22) — REFACTOR_CYCLE6_RESIDUAL (REF-005 cleanup + REF-011 pilot)
  *     v5.5.020 (2026-06-22) — REFACTOR_CYCLE6_RESIDUAL (REF-005 cleanup + REF-011 pilot)
- *     v5.5.019 (2026-06-22) — REFACTOR_CYCLE6 (12 issues — REF-001 to REF-012)
- *     v5.5.018 (2026-06-21) — REVIEW15 CLEAN CODE FIX (14 issues)
  * ===================================================
  * DEPENDENCIES:
  *   DEFINES SCHEMA FOR:

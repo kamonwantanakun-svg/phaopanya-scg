@@ -1,9 +1,9 @@
-# BLUEPRINT: LMDS Architecture V5.5.021 (REFACTOR_CYCLE6_RESIDUAL)
+# BLUEPRINT: LMDS Architecture V5.5.022 (CONSISTENCY SYNC + DEEP DIVE FIX)
 
 > เอกสารสถาปัตยกรรมระบบ LMDS (Logistics Master Data System) ฉบับเต็ม
 > ร่างสถาปัตยกรรมระดับ Core-System ชี้แจ้ง Data Schema, Pipeline Mechanics, Module Specification, Bug Status, Performance Analysis สำหรับนักพัฒนาระบบ
-> Version: 5.5.021 (REFACTOR_CYCLE6_RESIDUAL) | Last Updated: 2026-06-21
-> **15 Audit Cycles Complete** | 116 Issues FIXED (53 audit + 9 cache fix V5.5.007 + 6 cache cleanup V5.5.011 + 3 antipattern fixes V5.5.012 + 2 google maps refactor V5.5.013 + 2 driver verified cols V5.5.014 + 2 critical fix V5.5.015 + 13 performance fix V5.5.016 + 12 security postfix V5.5.021 + 14 review15 clean code fix V5.5.021) | 15/15 Immutable Laws COMPLIANT (Phase 1-3,6 of REVIEW15; Phases 4-5 deferred to next iteration) | Production Readiness: 97% GO (Security Hardened)
+> Version: 5.5.022 (REFACTOR_CYCLE6_RESIDUAL) | Last Updated: 2026-06-26
+> **18 Audit Cycles Complete** | 116 Issues FIXED (53 audit + 9 cache fix V5.5.007 + 6 cache cleanup V5.5.011 + 3 antipattern fixes V5.5.012 + 2 google maps refactor V5.5.013 + 2 driver verified cols V5.5.014 + 2 critical fix V5.5.015 + 13 performance fix V5.5.016 + 12 security postfix V5.5.017 + 14 review15 clean code fix V5.5.018) | 16/16 Immutable Laws COMPLIANT (Phase 1-3,6 of REVIEW15; Phases 4-5 deferred to next iteration) | Production Readiness: 97% GO (Security Hardened)
 
 ---
 
@@ -342,7 +342,7 @@ Hybrid Alias Architecture เป็นระบบจัดการชื่อ
 
 ### 5.3 Transaction Tables
 
-#### FACT_DELIVERY (32 คอลัมน์) — Index Constant: `FACT_IDX`
+#### FACT_DELIVERY (34 คอลัมน์) — Index Constant: `FACT_IDX`
 
 | กลุ่ม | คอลัมน์หลัก | คำอธิบาย |
 |-------|-----------|----------|
@@ -401,7 +401,7 @@ Hybrid Alias Architecture เป็นระบบจัดการชื่อ
 | `08_GeoService.gs` | 478 | Geo CRUD + Grid-based Proximity + Tiered Spatial | `resolveGeo()`, `findGeoCandidates_()`, `haversineDistance()`, `createGeoPoint()` | 01, 02, 14, 07, 15 |
 | `09_DestinationService.gs` | 426 | Destination CRUD + Trinity Intersection | `resolveDestination()`, `createDestination()`, `getDestsByPersonId()`, `getDestsByPersonAndPlace()` | 01, 02, 14 |
 | `10_MatchEngine.gs` | 1,374 | หัวใจ Pipeline: 8 Rules + Single Writer M_ALIAS + Auto-Resume | `runMatchEngine()`, `processOneRow()`, `makeMatchDecision()`, `executeDecision()`, `resolveAndPersist_()`, `autoEnrichAliasesFromFactBatch_()` | 01, 02, 05, 06-09, 11, 12, 14 |
-| `11_TransactionService.gs` | 334 | FACT_DELIVERY upsert (32-col array) | `upsertFactDelivery()`, `findFactRowByInvoice_()` | 01, 02, 06-08, 14 |
+| `11_TransactionService.gs` | 334 | FACT_DELIVERY upsert (34-col array) | `upsertFactDelivery()`, `findFactRowByInvoice_()` | 01, 02, 06-08, 14 |
 | `12_ReviewService.gs` | 702 | Human-in-the-loop management (4 decisions) | `enqueueReview()`, `applyReviewDecision()`, `applyAllPendingDecisions()` | 01, 02, 06-09, 11, 14 |
 | `13_ReportService.gs` | 276 | รายงานคุณภาพข้อมูล (autoMatchRate vs processedRate) | `buildFullQualityReport()`, `highlightHighPriorityReviews()` | 01, 02, 06-09, 12 |
 | `14_Utils.gs` | 822 | ไลบรารีใช้ร่วม — String Similarity, GPS, AI, Retry, Cache, Stats | `diceCoefficient()`, `levenshteinDistance()`, `callGeminiAPI()`, `generateShortId()`, `safeUiAlert_()`, `normalizeInvoiceNo()`, `batchUpdateEntityStats_()`, `saveChunkedCache_()`, `loadChunkedCache_()`, `buildGlobalAliasDedupSet_()` | 01 |
@@ -973,7 +973,7 @@ Migration ใช้ `MIGRATION_HybridAliasSystem()` ใน `21_AliasService.gs` 
 | V5.5.001 | 2026-06-04 | แก้ Bug 22 ไฟล์ทั้งหมด — BUGHUNT+REVIEW15+REFACTOR+PREDEPLOY ครบ, เพิ่ม RAM Cache, SearchKey matching, Falsy-value Bug, try-catch ทุก Entry Point |
 | V5.5.002 | 2026-06-11 | CRITICAL Fix Cycle — 8 Issue สำคัญ: Null-safe coordinates, Silent Data Loss ใน Review, LockService concurrency, Single Writer compliance, Chunked Cache |
 | V5.5.004 | 2026-06-11 | Security Fix Cycle — 7 ช่องโหว่ (3 HIGH, 4 MEDIUM): Cookie → ScriptProperties, Authorization Guard, Cookie Sanitization, PII Log Removal, Protected Ranges, API Key Header, Email Masking |
-| V5.5.006 | 2026-06-18 | **Cycle 5: REFACTOR** — 21 Issue (REF-001→021), 16 ไฟล์เปลี่ยน, 173 Helper Functions ใหม่, Compliance 13/16 → **16/16 PASS (100%)** (post-Consistency-Sync 28 doc inconsistencies fixed 2026-06-15) |
+| V5.5.006 | 2026-06-18 | **Cycle 5: REFACTOR** — 21 Issue (REF-001→021), 16 ไฟล์เปลี่ยน, 211 Helper Functions ใหม่ (cumulative through V5.5.022), Compliance 13/16 → **16/16 PASS (100%)** (post-Consistency-Sync 28 doc inconsistencies fixed 2026-06-15) |
 | V5.5.007 | 2026-06-18 | **Cycle 7: CACHE FIX (P0+P1)** — 9 cache issues: invalidateAllGlobalCaches 11 caches, _GEO_LATLNG_RAM_CACHE invalidator, M_PLACE chunked, saveChunkedCache_ putAll, CACHE_KEY 13 entries, safeCacheGet_/Put_/RemoveAll_ |
 | V5.5.011 | 2026-06-18 | **Cycle 8: CACHE CLEANUP (P2)** — 6 cleanup issues: clearMapsCache flush hit_count, flushLogBuffer_ in 5 entry points, populateGeoMetadata uses invalidate*Cache_*, saveChunkedCache_ orphan cleanup, getCachedDistricts_ write-back |
 | V5.5.012 | 2026-06-19 | **Cycle 9: ANTIPATTERN FIX + DOC SYNC** — 3 antipattern fixes (showVersionInfo, double normalization, headers.indexOf) + 2 doc fixes (broken cross-refs, function count standardize) + CHANGELOG sync (v5.5.011 backfilled to 20 files) |
@@ -1079,7 +1079,7 @@ Migration ใช้ `MIGRATION_HybridAliasSystem()` ใน `21_AliasService.gs` 
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                  LMDS V5.5.021 Security Layer (Post-Security Postfix) │
+│                  LMDS V5.5.022 Security Layer (Post-Security Postfix) │
 │                                                                       │
 │  ┌─────────────────────────────────────────────────────────────┐     │
 │  │ Layer 1: Secret Management                                  │     │
@@ -1091,31 +1091,31 @@ Migration ใช้ `MIGRATION_HybridAliasSystem()` ใน `21_AliasService.gs` 
 │  ┌─────────────────────────────────────────────────────────────┐     │
 │  │ Layer 2: Authorization (Least Privilege)                     │     │
 │  │  • isAuthorizedUser_() — 13/13 Destructive Entry Points    │     │
-│  │  • [V5.5.021] Deny-by-default (Script Owner fallback only)  │     │
-│  │  • [V5.5.021] Confirmation dialogs (assignMasterUuid, etc.) │     │
+│  │  • [V5.5.017] Deny-by-default (Script Owner fallback only)  │     │
+│  │  • [V5.5.017] Confirmation dialogs (assignMasterUuid, etc.) │     │
 │  └─────────────────────────────────────────────────────────────┘     │
 │                                                                       │
 │  ┌─────────────────────────────────────────────────────────────┐     │
 │  │ Layer 3: Data Minimization + PII Masking                    │     │
-│  │  • sanitizeCookie_() — CRLF + RFC 6265 charset (V5.5.021)   │     │
+│  │  • sanitizeCookie_() — CRLF + RFC 6265 charset (V5.5.022)   │     │
 │  │  • maskReviewerEmail_() — s***i@company.com (AuthZ logs)    │     │
 │  │  • PII Log Removal — Response Length Only                   │     │
-│  │  • [V5.5.021] generateMd5Hash() masking (4 PII log points)  │     │
-│  │  • [V5.5.021] Invoice hash + masked sample (MatchEngine)    │     │
-│  │  • [V5.5.021] fetchWithRetry_ body truncation (200 chars)   │     │
+│  │  • [V5.5.017] generateMd5Hash() masking (4 PII log points)  │     │
+│  │  • [V5.5.017] Invoice hash + masked sample (MatchEngine)    │     │
+│  │  • [V5.5.017] fetchWithRetry_ body truncation (200 chars)   │     │
 │  └─────────────────────────────────────────────────────────────┘     │
 │                                                                       │
 │  ┌─────────────────────────────────────────────────────────────┐     │
 │  │ Layer 4: Protected Ranges (Defense-in-Depth)                │     │
 │  │  • EMPLOYEE, M_PERSON, M_PLACE, M_ALIAS, FACT_DELIVERY     │     │
 │  │  • SOURCE (hide) + M_GEO_POINT (V5.5.004)                  │     │
-│  │  • [V5.5.021] Q_REVIEW Range Protection (A1:Q — reviewer   │     │
+│  │  • [V5.5.017] Q_REVIEW Range Protection (A1:Q — reviewer   │     │
 │  │    แก้ R-V ได้ สำหรับ DECISION/STATUS/NOTE)                  │     │
-│  │  • [V5.5.021] LMDS_ADMINS auto-added as editors            │     │
+│  │  • [V5.5.017] LMDS_ADMINS auto-added as editors            │     │
 │  └─────────────────────────────────────────────────────────────┘     │
 │                                                                       │
 │  ┌─────────────────────────────────────────────────────────────┐     │
-│  │ Layer 5: OAuth Least Privilege (V5.5.021)                   │     │
+│  │ Layer 5: OAuth Least Privilege (V5.5.022)                   │     │
 │  │  • 6 scopes (was 10) — removed drive, send_mail, projects,  │     │
 │  │    logging.read                                              │     │
 │  │  • No DriveApp/GmailApp/MailApp/DocsService usage in code   │     │

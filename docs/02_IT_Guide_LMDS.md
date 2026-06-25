@@ -244,7 +244,7 @@ autoEnrichAliasesFromFactBatch_() → M_ALIAS + M_PERSON_ALIAS + M_PLACE_ALIAS
 |:---|:---|:---|
 | LAST_PIPELINE_RUN | 2025-01-15T10:30:00 | เวลา Pipeline ล่าสุด |
 | GEO_DICT_BUILT | true | สถานะการสร้าง Geo Dictionary |
-| SCHEMA_VERSION | 5.5.021 | เวอร์ชัน Schema ปัจจุบัน |
+| SCHEMA_VERSION | 5.5.022 | เวอร์ชัน Schema ปัจจุบัน |
 
 ---
 
@@ -328,23 +328,44 @@ autoEnrichAliasesFromFactBatch_() → M_ALIAS + M_PERSON_ALIAS + M_PLACE_ALIAS
 | 6 | created_at | Date | วันที่สร้าง |
 | 7 | last_used | Date | วันที่ใช้ล่าสุด |
 
-#### FACT_DELIVERY (32 คอลัมน์)
+#### FACT_DELIVERY (34 คอลัมน์) — FACT_IDX
 
 | Index | ชื่อคอลัมน์ | คำอธิบาย |
 |:---:|:---|:---|
 | 0 | tx_id | Transaction ID (TX + 12 hex) — เช่น TXA3F7B2C9D0E1 |
-| 1 | invoice_no | เลข Invoice |
-| 2 | shipment_no | เลข Shipment |
-| 3 | person_id | FK → M_PERSON |
-| 4 | place_id | FK → M_PLACE |
-| 5 | geo_id | FK → M_GEO_POINT |
-| 6 | dest_id | FK → M_DESTINATION |
-| 7-10 | lat, lng, resolved_lat, resolved_lng | พิกัด GPS |
-| 11 | match_status | AUTO_MATCH / CREATE_NEW / NEEDS_REVIEW |
-| 12 | match_confidence | คะแนน (0-100) |
-| 13 | match_evidence | รายละเอียดการจับคู่ |
-| 14 | match_rule | กฎที่ใช้ (Rule 1-8) |
-| 15-31 | (ข้อมูลดิบเพิ่มเติม) | ข้อมูลต้นทาง |
+| 1 | source_sheet | ชีตต้นทาง |
+| 2 | source_row | แถวในชีตต้นทาง |
+| 3 | source_record_id | ID ระเบียนต้นทาง |
+| 4 | delivery_date | วันที่จัดส่ง |
+| 5 | delivery_time | เวลาที่จัดส่ง |
+| 6 | invoice_no | เลข Invoice |
+| 7 | shipment_no | เลข Shipment |
+| 8 | driver_name | ชื่อคนขับ |
+| 9 | truck_license | ทะเบียนรถ |
+| 10 | sold_to_code | รหัสเจ้าของสินค้า |
+| 11 | sold_to_name | ชื่อเจ้าของสินค้า |
+| 12 | ship_to_name | ชื่อปลายทาง |
+| 13 | ship_to_address | ที่อยู่ปลายทาง |
+| 14 | geo_resolved_addr | ที่อยู่ที่ได้จาก LatLong |
+| 15 | person_id | FK → M_PERSON |
+| 16 | place_id | FK → M_PLACE |
+| 17 | geo_id | FK → M_GEO_POINT |
+| 18 | dest_id | FK → M_DESTINATION |
+| 19 | warehouse | คลังสินค้า |
+| 20 | raw_lat | LAT ดิบจาก Source |
+| 21 | raw_lng | LNG ดิบจาก Source |
+| 22 | match_status | FULL_MATCH / GEO_ANCHOR / FUZZY_MATCH / CREATE_NEW / NEEDS_REVIEW / ERROR |
+| 23 | match_confidence | คะแนน (0-100) |
+| 24 | match_reason | เหตุผลการจับคู่ |
+| 25 | match_action | การกระทำที่ทำ |
+| 26 | resolved_lat | LAT หลัง resolve |
+| 27 | resolved_lng | LNG หลัง resolve |
+| 28 | created_at | วันที่สร้างระเบียน |
+| 29 | updated_at | วันที่อัปเดตล่าสุด |
+| 30 | record_status | สถานะระเบียน (Active/Archived) |
+| 31 | match_evidence | รายละเอียดการจับคู่ (name\|phone\|geo) |
+| 32 | driver_verified_name | ชื่อลูกค้าปลายทางจริง [ADD V5.5.014] |
+| 33 | driver_verified_addr | ชื่อสถานที่อยู่ลูกค้าปลายทางจริง [ADD V5.5.014] |
 
 #### Q_REVIEW (22 คอลัมน์)
 
@@ -483,25 +504,25 @@ function cleanAllAutoResumeTriggers() {
 | Editor | แก้ไขข้อมูล + ใช้เมนู | ADMIN |
 | Viewer | ดูข้อมูลอย่างเดียว | ผู้บริหาร |
 
-### 9.2 การป้องกัน Sheet (Protected Ranges — V5.5.021 expanded to 8 sheets + Q_REVIEW range)
+### 9.2 การป้องกัน Sheet (Protected Ranges — V5.5.017 expanded to 8 sheets + Q_REVIEW range)
 
-ฟังก์ชัน `applySheetProtection_UI()` จะ (V5.5.021 SECURITY-POSTFIX: ขยายจาก 4 → 8 sheets):
+ฟังก์ชัน `applySheetProtection_UI()` จะ (V5.5.017 SECURITY-POSTFIX: ขยายจาก 4 → 8 sheets):
 - ล็อก Sheet (8 sheets): ข้อมูลพนักงาน, M_PERSON, SCGนครหลวงJWDภูมิภาค, M_GEO_POINT, M_PLACE, M_DESTINATION, M_ALIAS, FACT_DELIVERY
 - ล็อก Q_REVIEW range (reviewer email + decision columns) — ป้องกัน tamper
 - ซ่อน Sheet ที่มีข้อมูลสำคัญ (Input, SYS_CONFIG) — *MAPS_CACHE ถูกลบใน V5.5.013; FACT_DELIVERY +2 cols ใน V5.5.014 DRIVER-VERIFIED*
 - ตั้งค่าให้เฉพาะ Admin เท่านั้นที่แก้ไขได้ (Sheet Protection Coverage: 8/19 sheets + Q_REVIEW range)
 
-### 9.3 การ Audit ด้านความปลอดภัย (12 จุดที่แก้ไขแล้ว — SEC-001→012, V5.5.021 SECURITY-POSTFIX)
+### 9.3 การ Audit ด้านความปลอดภัย (12 จุดที่แก้ไขแล้ว — SEC-001→012, V5.5.017 SECURITY-POSTFIX)
 
 | SEC ID | ช่องโหว่ | การแก้ไข | วิธีตรวจสอบ |
 |:---|:---|:---|:---|
-| SEC-001 | Cookie อยู่ในเซลล์ Spreadsheet | ย้ายไป ScriptProperties (revisit V5.5.021) | ตรวจ Sheet Input ต้องไม่มี Cookie |
-| SEC-002 | ไม่มี Authorization Guard (deny-by-default) | เพิ่ม `isAuthorizedUser_()` ครอบ 13/13 destructive ops (revisit V5.5.021) | ทดสอบกับอีเมลที่ไม่ใช่ Admin |
+| SEC-001 | Cookie อยู่ในเซลล์ Spreadsheet | ย้ายไป ScriptProperties (revisit V5.5.017) | ตรวจ Sheet Input ต้องไม่มี Cookie |
+| SEC-002 | ไม่มี Authorization Guard (deny-by-default) | เพิ่ม `isAuthorizedUser_()` ครอบ 13/13 destructive ops (revisit V5.5.017) | ทดสอบกับอีเมลที่ไม่ใช่ Admin |
 | SEC-003 | Cookie ไม่ถูก Sanitize | เพิ่ม `sanitizeCookie_()` ป้องกัน CRLF | ทดสอบใส่ Cookie ที่มี \r\n |
-| SEC-004 | PII ปรากฏใน Log | ลบ response preview จาก SYS_LOG + ขยาย masking (revisit V5.5.021) | ตรวจ SYS_LOG ต้องไม่มีข้อมูลส่วนบุคคล |
+| SEC-004 | PII ปรากฏใน Log | ลบ response preview จาก SYS_LOG + ขยาย masking (revisit V5.5.017) | ตรวจ SYS_LOG ต้องไม่มีข้อมูลส่วนบุคคล |
 | SEC-005 | ไม่มี Protected Ranges | เพิ่ม `applySheetProtection_UI()` | รันแล้วลองแก้ไข Sheet ที่ล็อก |
 | SEC-006 | API Key อยู่ใน URL | เปลี่ยนเป็น x-goog-api-key header | ตรวจ Network Request |
-| SEC-007 | Reviewer Email ไม่ถูก Mask | เพิ่ม `maskReviewerEmail_()` (revisit V5.5.021) | ตรวจ Q_REVIEW ต้องแสดง s***i@company.com |
+| SEC-007 | Reviewer Email ไม่ถูก Mask | เพิ่ม `maskReviewerEmail_()` (revisit V5.5.017) | ตรวจ Q_REVIEW ต้องแสดง s***i@company.com |
 | SEC-008 | OAuth scopes กว้างเกินไป (Least Privilege) | ลด OAuth scopes จาก 10 → 6 ตามที่ใช้จริง | ตรวจ appsscript.json manifest |
 | SEC-009 | Cookie regex ไม่ RFC 6265 compliant | `sanitizeCookie_()` ใช้ RFC 6265 compliant regex | ทดสอบ Cookie format หลากหลาย |
 | SEC-010 | PII Masking ไม่ครบ | ขยาย PII masking ใน log + audit trail ทุกจุด | ตรวจ log ต้องไม่มี PII |
@@ -889,36 +910,45 @@ SHEET = {
 
 ```javascript
 APP_CONST = {
-  STATUS_ACTIVE: 'Active',
-  STATUS_INACTIVE: 'Inactive',
-  STATUS_MERGED: 'Merged',
-  MATCH_AUTO: 'AUTO_MATCH',
-  MATCH_CREATE: 'CREATE_NEW',
-  MATCH_REVIEW: 'NEEDS_REVIEW',
-  SYNC_PENDING: 'PENDING',
-  SYNC_SUCCESS: 'SUCCESS',
-  SYNC_REVIEW: 'REVIEW',
-  SYNC_ERROR: 'ERROR',
-  COLOR_GREEN: '#d9ead3',
-  COLOR_YELLOW: '#fff2cc',
-  COLOR_RED: '#f4cccc',
-  COLOR_ORANGE: '#f6b26b',
-  COLOR_BLUE: '#cfe2f3'
+  // Status constants (3)
+  STATUS_ACTIVE:   'Active',
+  STATUS_ARCHIVED: 'Archived',
+  STATUS_MERGED:   'Merged',
+  // Color constants (4) — used for sheet cell highlighting
+  COLOR_FOUND:     '#b6d7a8',   // พบ match
+  COLOR_FALLBACK:  '#ffe599',   // fallback / รอตรวจ
+  COLOR_NOT_FOUND: '#f4cccc',   // ไม่พบ
+  COLOR_BRANCH:    '#cfe2f3',   // branch / คลังสินค้า
+  // Retry / Lock / Batch constants (3)
+  MAX_RETRIES:     3,
+  LOCK_TIMEOUT_MS: 10000,
+  PIPELINE_BATCH:  50,
+  // Match status constants (6) — used in MATCH_STATUS column
+  MATCH_FULL:   'FULL_MATCH',     // Person + Place + Geo ตรงทั้งหมด
+  MATCH_GEO:    'GEO_ANCHOR',     // เจอ Geo เดิม + Person เดิม
+  MATCH_FUZZY:  'FUZZY_MATCH',    // Score ≥ THRESHOLD_AUTO (90)
+  MATCH_NEW:    'CREATE_NEW',     // ทุกอย่างใหม่ มีพิกัด
+  MATCH_REVIEW: 'NEEDS_REVIEW',   // ต้องตรวจสอบด้วยคน
+  MATCH_ERROR:  'ERROR'           // เกิดข้อผิดพลาด
 }
 ```
+
+> **หมายเหตุ:** APP_CONST มีทั้งหมด 16 entries (3 STATUS + 4 COLOR + 3 RETRY/LOCK/BATCH + 6 MATCH)
+> ค่า SYNC_PENDING/SYNC_SUCCESS/SYNC_REVIEW/SYNC_ERROR และ COLOR_GREEN/YELLOW/RED/ORANGE/BLUE ที่เคยอยู่ในเวอร์ชันเก่า
+> ถูกลบออกตั้งแต่ V5.5.006 — ปัจจุบันใช้เฉพาะค่าด้านบนนี้เท่านั้น (ตรงกับ `01_Config.gs` บรรทัด 629-649)
 
 ---
 
 > **เอกสารฉบับนี้จัดทำสำหรับทีม IT ที่ดูแลระบบ LMDS V5.5**
 >
-> **เวอร์ชันเอกสาร:** 1.3 (ปรับปรุงตามโค้ดจริง V5.5.021 SECURITY-POSTFIX) | **วันที่:** มิถุนายน 2569
+> **เวอร์ชันเอกสาร:** 1.4 (ปรับปรุงตามโค้ดจริง V5.5.022 CONSISTENCY-SYNC) | **วันที่:** มิถุนายน 2569
 >
 > **✅ หมายเหตุ — เวอร์ชันซิงค์แล้ว:**
 >
-> 1. **APP_VERSION ในโค้ด = `5.5.021`** — ตรงกันกับ System Guide แล้ว (ความแตกต่างเดิมระหว่าง 5.5.001 และ V5.5.014 ได้รับการแก้ไขแล้ว; V5.5.021 SECURITY-POSTFIX เพิ่ม SEC-008→012, OAuth scopes 10→6, isAuthorizedUser_ 13/13, Sheet Protection 8/19 + Q_REVIEW range, Production Readiness 95%→97%)
+> 1. **APP_VERSION ในโค้ด = `5.5.022`** — ตรงกันกับ System Guide แล้ว (ความแตกต่างเดิมระหว่าง 5.5.001 และ V5.5.014 ได้รับการแก้ไขแล้ว; V5.5.017 SECURITY-POSTFIX เพิ่ม SEC-008→012, OAuth scopes 10→6, isAuthorizedUser_ 13/13, Sheet Protection 8/19 + Q_REVIEW range, Production Readiness 95%→97%)
 > 2. **Search Service ในโค้ดใช้ 2 Tier เท่านั้น** (Tier 0: M_ALIAS Fast Track + Tier 1: resolvePerson → getDestsByPersonId + NOT_FOUND) ตามนโยบาย ShipToName-Only v5.4.003 — นี่คือการใช้งานจริง (System Guide ฉบับเก่าอธิบาย 6 Tier ซึ่งเป็นแบบเก่าที่ถูกลบออกไปแล้ว)
 > 3. **ID Format ในโค้ด** ใช้ prefix + 12 hex chars (เช่น Person = `PA3F7B2C9D0E1`) แต่ System Guide แสดงแบบสั้น 6 chars (เช่น `PS3k7x`)
 > 4. **SYS_LOG auto-clean** ในโค้ด trigger เมื่อเกิน 5,001 แถว และเก็บไว้ 1,000 แถวล่าสุด (ไม่ใช่ 5,000 ตามที่ System Guide เขียน)
 > 5. **SHEET count** ในโค้ดมี 19 entries (หลัง V5.5.013 ลบ MAPS_CACHE ออก; V5.5.014 เพิ่ม 2 cols ใน FACT_DELIVERY/SOURCE/DAILY_JOB)
 >
-> **สถิติระบบ:** ฟังก์ชัน 321 | บรรทัดโค้ด ~17,399 | IDX sets 16 | Compliance 16/16 COMPLIANT (Rule 16: Security-First Design, SEC-001→012, 14 audit cycles, 102 issues fixed, 97% Production Readiness, OAuth scopes 10→6, isAuthorizedUser_ 13/13, Sheet Protection 8/19 + Q_REVIEW range)
+> **สถิติระบบ:** ฟังก์ชัน 369 | บรรทัดโค้ด ~16,077 | IDX sets 16 | Compliance 16/16 COMPLIANT (Rule 16: Security-First Design, SEC-001→012, 18 audit cycles, 116 issues fixed, 97% Production Readiness, OAuth scopes 10→6, isAuthorizedUser_ 13/13, Sheet Protection 8/19 + Q_REVIEW range)

@@ -1,6 +1,6 @@
 # 🔵 สายที่ 2: เริ่มจากชีต "ตารางงานประจำวัน"
 
-> **เอกสารประกอบ LMDS V5.5.021**
+> **เอกสารประกอบ LMDS V5.5.022**
 > อธิบาย Data Flow สายที่ 2 — การดึงข้อมูล SCG JWD รายวัน และการหาพิกัด GPS จาก Master DB
 > เกี่ยวข้องกับ: `00_App.gs`, `17_SearchService.gs`, `18_ServiceSCG.gs`, `21_AliasService.gs`, `04_SourceRepository.gs`
 
@@ -26,15 +26,17 @@ Cookie ใช้สำหรับ authentication กับเซิร์ฟเ
 
 ### ขั้นตอนที่ 1: ใส่เลข Shipment
 
-ไปชีต **"Input"** → ใส่เลข Shipment ที่ต้องการดึง ลงในคอลัมน์ A (เริ่มจาก A3 ลงไป) เช่น:
+ไปชีต **"Input"** → ใส่เลข Shipment ที่ต้องการดึง ลงในคอลัมน์ A (เริ่มจาก A4 ลงไป ตาม `SCG_CONFIG.INPUT_START_ROW = 4`) เช่น:
 
 ```
-A3: SH240624001
-A4: SH240624002
-A5: SH240624003
+A4: SH240624001
+A5: SH240624002
+A6: SH240624003
 ```
 
 เลข Shipment มาจากระบบขนส่งของ SCG โดยทั่วไปจะได้มาจากการโทรถาม SCG หรือดูจากใบขนส่ง
+
+> **Note:** ใช้เริ่มต้นที่ A4 เพราะ A1 ใช้สำหรับ Cookie (ย้ายไป Script Properties แล้วใน V5.5.017) และ A3 ใช้สำหรับ ShipmentNos string (ย้ายไป Script Properties แล้วใน V5.5.018) — ปัจจุบันทั้ง Cookie และ ShipmentNos อยู่ใน Script Properties แต่โครงสร้างคอลัมน์ A ยังคงเริ่มที่แถว 4 ตามเดิม
 
 ---
 
@@ -46,7 +48,7 @@ A5: SH240624003
 
 ### Step 1: อ่านค่า Input (`readInputConfig_`)
 - อ่าน **Cookie** จาก Script Properties (key: `SCG_COOKIE`)
-- อ่าน **เลข Shipment** จากชีต Input (A3 ลงไป)
+- อ่าน **เลข Shipment** จากชีต Input (A4 ลงไป ตาม `SCG_CONFIG.INPUT_START_ROW`)
 - รวมเลข Shipment ด้วยคอมมา คั่นด้วยจุลภาค เช่น `"SH001,SH002,SH003"`
 
 ### Step 2: เรียก SCG API (`callSCGApi_`)
@@ -203,7 +205,7 @@ ShipToName "บริษัท ไทวัสดุ จำกัด 081-234-567
 2. **Idempotency Check** — ถ้า LatLong_Actual มีพิกัดอยู่แล้ว จะข้าม ไม่ค้นซ้ำ
 3. **Two-Tier Lookup** — Tier 0 (Fast Track via Alias) → Tier 1 (Fallback via resolvePerson)
 4. **Driver Verified Propagation** — ชื่อที่คนขับยืนยันใน Source จะถูก propagate ไป Daily Job อัตโนมัติ
-5. **Chunked Cache** — M_ALIAS ขนาดใหญ่ถูกแบ่งเป็น chunk 80KB ใน CacheService (V5.5.021 Performance)
+5. **Chunked Cache** — M_ALIAS ขนาดใหญ่ถูกแบ่งเป็น chunk 80KB ใน CacheService (V5.5.016 Performance)
 6. **Module Boundary** — Group 2 (Search) เรียก Group 1 (Alias) ผ่าน `fastLookupByShipToName()` ไม่เข้าไปจัดการ cache เอง (กฎ REF-001)
 
 ---
@@ -222,4 +224,4 @@ ShipToName "บริษัท ไทวัสดุ จำกัด 081-234-567
 
 ---
 
-*เอกสารนี้เป็นส่วนหนึ่งของชุดเอกสาร LMDS V5.5.021 — ดูเอกสารที่เกี่ยวข้อง: [LMDS_สายที่1_SCG_Source.md](LMDS_สายที่1_SCG_Source.md) | [LMDS_Q_REVIEW_คู่มือ.md](LMDS_Q_REVIEW_คู่มือ.md)*
+*เอกสารนี้เป็นส่วนหนึ่งของชุดเอกสาร LMDS V5.5.022 — ดูเอกสารที่เกี่ยวข้อง: [LMDS_สายที่1_SCG_Source.md](LMDS_สายที่1_SCG_Source.md) | [LMDS_Q_REVIEW_คู่มือ.md](LMDS_Q_REVIEW_คู่มือ.md)*

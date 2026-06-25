@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.021
+ * VERSION: 5.5.022
  * FILE: 15_GoogleMapsAPI.gs
  * LMDS V5.5 — Google Maps Custom Functions (@customFunction)
  * ===================================================
@@ -13,7 +13,7 @@
  *   เพราะระบบ LMDS ไม่ได้เรียก Google Maps API ผ่าน code อีกต่อไป
  *   (DIST_FROM_WH และ RESOLVED_ADDR มาจาก AppSheet ที่ผู้ใช้ทำไว้แล้ว)
  * ===================================================
- *   v5.5.021 (2026-06-23) — SECURITY & PERFORMANCE DEEP DIVE (17 FIXES):
+ *   v5.5.022 (2026-06-26) — CONSISTENCY SYNC + DEEP DIVE FIX (consolidates V5.5.021 plan):
  *     - [17_SearchService] C1-C3 (Performance), H1-H2 (Robustness), M1-M2 (PII/Security)
  *     - [18_ServiceSCG] C4-C7 (AuthZ & Concurrency), H4-H6 (Data Integrity), M3-M6 (ReDoS & Edge Cases)
  *     - [21_AliasService] C1 update parameter signature fastLookupByShipToName

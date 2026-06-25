@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.021
+ * VERSION: 5.5.022
  * FILE: 00_App.gs
  * LMDS V5.5 — Application Entry Point & Menu Controller
  * ===================================================
@@ -10,9 +10,9 @@
  * ===================================================
  * CHANGELOG: See /docs/CHANGELOG.md for full history.
  *   Latest 3 versions:
+ *     v5.5.022 (2026-06-26) — CONSISTENCY SYNC + DEEP DIVE FIX (BUG-M01/M02/M03/H02/H03/C01 + 6 cache/config fixes)
+ *     v5.5.021 (2026-06-22) — REFACTOR_CYCLE6_RESIDUAL (REF-005 cleanup + REF-011 pilot)
  *     v5.5.020 (2026-06-22) — REFACTOR_CYCLE6_RESIDUAL (REF-005 cleanup + REF-011 pilot)
- *     v5.5.019 (2026-06-22) — REFACTOR_CYCLE6 (12 issues — REF-001 to REF-012)
- *     v5.5.018 (2026-06-21) — REVIEW15 CLEAN CODE FIX (14 issues)
  * ===================================================
  * DEPENDENCIES:
  *   REQUIRES (Load Order):
@@ -849,30 +849,30 @@ function showVersionInfo() {
     `🚚 ${APP_NAME}\n` +
     `Version: ${APP_VERSION}\n` +
     `Schema: v${SCHEMA_VERSION}\n` +
-    `Audit Cycles: 17 (CRITICAL → PERF → SECURITY → REVIEW15 → REFACTOR → SYNC → CACHE-FIX → CACHE-CLEANUP → DOC-SYNC → GOOGLE-MAPS-REFACTOR → DRIVER-VERIFIED → CRITICAL-FIX → PERFORMANCE-FIX → SECURITY-POSTFIX → REVIEW15-CLEAN-CODE-FIX → REFACTOR_CYCLE6 → REFACTOR_CYCLE6_RESIDUAL)\n\n` +
+    `Audit Cycles: 18 (CRITICAL → PERF → SECURITY → REVIEW15 → REFACTOR → SYNC → CACHE-FIX → CACHE-CLEANUP → DOC-SYNC → GOOGLE-MAPS-REFACTOR → DRIVER-VERIFIED → CRITICAL-FIX → PERFORMANCE-FIX → SECURITY-POSTFIX → REVIEW15-CLEAN-CODE-FIX → REFACTOR_CYCLE6 → REFACTOR_CYCLE6_RESIDUAL → DEEP-DIVE-AUDIT → CONSISTENCY-SYNC)\n\n` +
     `📦 Modules (22 files):\n` +
-    `  00_App.gs                v5.5.020\n` +
-    `  01_Config.gs             v5.5.020\n` +
-    `  02_Schema.gs             v5.5.020\n` +
-    `  03_SetupSheets.gs        v5.5.020\n` +
-    `  04_SourceRepository.gs   v5.5.020\n` +
-    `  05_NormalizeService.gs   v5.5.020\n` +
-    `  06_PersonService.gs      v5.5.020\n` +
-    `  07_PlaceService.gs       v5.5.020\n` +
-    `  08_GeoService.gs         v5.5.020\n` +
-    `  09_DestinationService.gs v5.5.020\n` +
-    `  10_MatchEngine.gs        v5.5.020\n` +
-    `  11_TransactionService.gs v5.5.020\n` +
-    `  12_ReviewService.gs      v5.5.020\n` +
-    `  13_ReportService.gs      v5.5.020\n` +
-    `  14_Utils.gs              v5.5.020\n` +
-    `  15_GoogleMapsAPI.gs      v5.5.020\n` +
-    `  16_GeoDictionaryBuilder.gs     v5.5.020\n` +
-    `  17_SearchService.gs      v5.5.020\n` +
-    `  18_ServiceSCG.gs         v5.5.020\n` +
-    `  19_Hardening.gs          v5.5.020\n` +
-    `  20_ThGeoService.gs       v5.5.020\n` +
-    `  21_AliasService.gs       v5.5.020\n\n` +
+    `  00_App.gs                v5.5.022\n` +
+    `  01_Config.gs             v5.5.022\n` +
+    `  02_Schema.gs             v5.5.022\n` +
+    `  03_SetupSheets.gs        v5.5.022\n` +
+    `  04_SourceRepository.gs   v5.5.022\n` +
+    `  05_NormalizeService.gs   v5.5.022\n` +
+    `  06_PersonService.gs      v5.5.022\n` +
+    `  07_PlaceService.gs       v5.5.022\n` +
+    `  08_GeoService.gs         v5.5.022\n` +
+    `  09_DestinationService.gs v5.5.022\n` +
+    `  10_MatchEngine.gs        v5.5.022\n` +
+    `  11_TransactionService.gs v5.5.022\n` +
+    `  12_ReviewService.gs      v5.5.022\n` +
+    `  13_ReportService.gs      v5.5.022\n` +
+    `  14_Utils.gs              v5.5.022\n` +
+    `  15_GoogleMapsAPI.gs      v5.5.022\n` +
+    `  16_GeoDictionaryBuilder.gs     v5.5.022\n` +
+    `  17_SearchService.gs      v5.5.022\n` +
+    `  18_ServiceSCG.gs         v5.5.022\n` +
+    `  19_Hardening.gs          v5.5.022\n` +
+    `  20_ThGeoService.gs       v5.5.022\n` +
+    `  21_AliasService.gs       v5.5.022\n\n` +
     `⚙️ Core System (Group 0): App, Config, Schema, Setup, Utils, Hardening\n` +
     `🟩 Group 1 — Master DB: Normalize, Person, Place, Geo, Dest, Match, GeoDict, ThGeo, Alias\n` +
     `🟦 Group 2 — Daily Ops: SourceRepo, Transaction, Review, Report, Maps, Search, SCG`;

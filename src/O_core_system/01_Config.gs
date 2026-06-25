@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.021
+ * VERSION: 5.5.022
  * FILE: 01_Config.gs
  * LMDS V5.5 — System Configuration & Constants
  * ===================================================
@@ -10,15 +10,15 @@
  * ===================================================
  * CHANGELOG: See /docs/CHANGELOG.md for full history.
  *   Latest 3 versions:
+ *     v5.5.022 (2026-06-26) — CONSISTENCY SYNC + DEEP DIVE FIX (BUG-M01/M02/M03/H02/H03/C01 + 6 cache/config fixes)
+ *     v5.5.021 (2026-06-22) — REFACTOR_CYCLE6_RESIDUAL (REF-005 cleanup + REF-011 pilot)
  *     v5.5.020 (2026-06-22) — REFACTOR_CYCLE6_RESIDUAL (REF-005 cleanup + REF-011 pilot)
- *     v5.5.019 (2026-06-22) — REFACTOR_CYCLE6 (12 issues — REF-001 to REF-012)
- *     v5.5.018 (2026-06-21) — REVIEW15 CLEAN CODE FIX (14 issues)
  * ===================================================
  * DEPENDENCIES:
  *   DEFINES:
  *     - APP_VERSION, SCHEMA_VERSION, APP_NAME (Metadata)
- *     - SHEET{} (7 master + 4 system + 1 source + 1 cache + 5 daily ops + 2 summaries = 20)
- *     - *_IDX{} (Person, PersonAlias, Place, PlaceAlias, Alias, Geo, Dest, Fact, Review, ThGeo, Employee, Src, Data, SysLog, MapsCache, OwnerSum, ShipmentSum = 17)
+ *     - SHEET{} (7 master + 4 system + 1 source + 5 daily ops + 2 summaries = 19; MAPS_CACHE ถูกลบใน V5.5.013)
+ *     - *_IDX{} (Person, PersonAlias, Place, PlaceAlias, Alias, Geo, Dest, Fact, Review, ThGeo, Employee, Src, Data, SysLog, OwnerSum, ShipmentSum = 16; MAPS_CACHE_IDX ถูกลบใน V5.5.013)
  *     - AI_CONFIG, SCG_CONFIG, APP_CONST (System configs)
  *     - _GLOBAL_* CACHE variables (RAM cache layer)
  *     - CACHE_KEY{} (13 entries: GLOBAL_ALIAS_ALL, GLOBAL_ALIAS_REVERSE, PERSON_ALL,
@@ -49,8 +49,8 @@
  *   ┌─────────────────────────────────────────────────────────────┐
  *   │  01_Config.gs (Configuration Hub)                            │
  *   │  ├── APP_VERSION / SCHEMA_VERSION / APP_NAME                 │
- *   │  ├── SHEET{} (20 sheet definitions)                          │
- *   │  ├── *_IDX{} (17 index constant sets)                       │
+ *   │  ├── SHEET{} (19 sheet definitions)                          │
+ *   │  ├── *_IDX{} (16 index constant sets)                       │
  *   │  ├── AI_CONFIG (Match Engine settings)                       │
  *   │  ├── SCG_CONFIG (SCG API settings)                          │
  *   │  ├── APP_CONST (Status, Colors, Lock)                        │
@@ -63,8 +63,8 @@
  * ===================================================
  */
 
-const APP_VERSION = '5.5.020';
-const SCHEMA_VERSION = '5.5.020';
+const APP_VERSION = '5.5.022';
+const SCHEMA_VERSION = '5.5.022';
 const APP_NAME    = 'LMDS V5.5';
 
 // [NEW v5.2.001] Global RAM Caches for batch runs
@@ -439,6 +439,7 @@ const DATA_IDX = Object.freeze({
 const SRC_READ_COLS = Object.keys(SRC_IDX).length;
 
 // [FIX S2 v5.5.002] TH_PROVINCES — รายชื่อจังหวัด 77 จังหวัด (ย้ายจาก 07_PlaceService.gs)
+// [FIX v5.5.022] เพิ่มบึงกาฬ (จังหวัดที่ 77 แยกจากหนองคาย พ.ศ. 2554) — ก่อนหน้านี้ขาดหายไป
 // เพื่อให้เป็น Single Source of Truth ใน Config — Rule 4 & Rule 5
 const TH_PROVINCES = Object.freeze([
   // กรุงเทพฯ และ aliases
@@ -476,6 +477,7 @@ const TH_PROVINCES = Object.freeze([
   { name: 'อุดรธานี', aliases: [] },
   { name: 'เลย', aliases: [] },
   { name: 'หนองคาย', aliases: [] },
+  { name: 'บึงกาฬ', aliases: [] },
   { name: 'มหาสารคาม', aliases: [] },
   { name: 'ร้อยเอ็ด', aliases: [] },
   { name: 'กาฬสินธุ์', aliases: [] },

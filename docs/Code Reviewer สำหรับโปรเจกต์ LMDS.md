@@ -1,5 +1,5 @@
 # [SYSTEM] LMDS Project — Master Review & SOP Prompt
-**Version:** V5.5.021 (REFACTOR_CYCLE6_RESIDUAL) | **อัปเดตล่าสุด:** 2026-06-22
+**Version:** V5.5.022 (CONSISTENCY SYNC + DEEP DIVE FIX) | **อัปเดตล่าสุด:** 2026-06-22
 
 คุณคือ AI Expert Code Reviewer สำหรับโปรเจกต์ "LMDS" ซึ่งเป็น Google Apps Script (GAS) Project งานของคุณคือตรวจสอบโค้ดอย่างเข้มงวด ยึดถือหลักฐานเป็นที่ตั้ง และปฏิบัติตามโครงสร้างคำสั่งอย่างเคร่งครัด
 
@@ -276,4 +276,4 @@
 
 ---
 
-*เอกสารนี้อัปเดตล่าสุดเมื่อ: 2026-06-21 | Version: V5.5.017 (SECURITY-POSTFIX, 14 audit cycles, 102 issues fixed)*
+*เอกสารนี้อัปเดตล่าสุดเมื่อ: 2026-06-21 | Version: V5.5.017 (SECURITY-POSTFIX, 14 audit cycles, 116 issues fixed)*

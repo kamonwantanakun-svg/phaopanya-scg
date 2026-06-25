@@ -277,7 +277,7 @@
 
 ## Security Fix Cycle (V5.5.004 — historical; current release V5.5.016 — 2026-06-21)
 
-หลังจาก Performance Fix Cycle เสร็จสิ้น ได้ดำเนินการ Security Audit และแก้ไขช่องโหว่เพิ่มเติม 7 รายการ (ปัจจุบัน V5.5.016 เป็นเวอร์ชันที่ปล่อยแล้ว — APP_VERSION = '5.5.016'):
+หลังจาก Performance Fix Cycle เสร็จสิ้น ได้ดำเนินการ Security Audit และแก้ไขช่องโหว่เพิ่มเติม 7 รายการ (ปัจจุบัน V5.5.022 เป็นเวอร์ชันที่ปล่อยแล้ว — APP_VERSION = '5.5.022'):
 
 | SEC ID | ช่องโหว่ | Severity | Verdict |
 |--------|----------|----------|---------|

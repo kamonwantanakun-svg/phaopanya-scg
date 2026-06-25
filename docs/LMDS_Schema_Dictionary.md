@@ -1,5 +1,5 @@
 # 📘 พจนานุกรมโครงสร้างข้อมูล (LMDS Schema Dictionary)
-**เวอร์ชันระบบ:** V5.5.021 (REFACTOR_CYCLE6_RESIDUAL)
+**เวอร์ชันระบบ:** V5.5.022 (CONSISTENCY SYNC + DEEP DIVE FIX)
 **วันที่สกัดข้อมูล:** 2026-06-21 ล่าสุดจากไฟล์ `01_Config.gs` และ `02_Schema.gs`
 
 เอกสารนี้ใช้สำหรับ **Cross-Check** (ตรวจสอบความถูกต้อง) ระหว่าง "ชื่อชีต", "ชื่อคอลัมน์" (Headers), และ "ตัวแปร Index ในโค้ด" เพื่อให้นักพัฒนาและ AI สามารถอ้างอิงได้อย่างถูกต้อง 100%
@@ -146,6 +146,8 @@
   - [29] `FACT_IDX.UPDATED_AT` ➡️ **"updated_at"**
   - [30] `FACT_IDX.RECORD_STATUS` ➡️ **"record_status"**
   - [31] `FACT_IDX.EVIDENCE` ➡️ **"match_evidence"**
+  - [32] `FACT_IDX.DRIVER_VERIFIED_NAME` ➡️ **"ชื่อลูกค้าปลายทางจริง"** [ADD V5.5.014]
+  - [33] `FACT_IDX.DRIVER_VERIFIED_ADDR` ➡️ **"ชื่อสถานที่อยู่ลูกค้าปลายทางจริง"** [ADD V5.5.014]
 
 ### 9. ชีต Q_REVIEW (คิวตรวจสอบด้วยคน)
 - **ตัวแปรเรียกชีต:** `SHEET.Q_REVIEW`
@@ -218,6 +220,8 @@
   - [34] `SRC_IDX.QC_ISSUE` ➡️ **"เหตุผิดปกติที่ตรวจพบ"**
   - [35] `SRC_IDX.PHOTO_TIME` ➡️ **"เวลาถ่ายรูปหน้าร้าน_หน้าบ้าน"**
   - [36] `SRC_IDX.SYNC_STATUS` ➡️ **"SYNC_STATUS"**
+  - [37] `SRC_IDX.DRIVER_VERIFIED_NAME` ➡️ **"ชื่อลูกค้าปลายทางจริง"** [ADD V5.5.014]
+  - [38] `SRC_IDX.DRIVER_VERIFIED_ADDR` ➡️ **"ชื่อสถานที่อยู่ลูกค้าปลายทางจริง"** [ADD V5.5.014]
 
 ### 11. ชีต ตารางงานประจำวัน
 - **ตัวแปรเรียกชีต:** `SHEET.DAILY_JOB`
@@ -251,6 +255,8 @@
   - [26] `DATA_IDX.LATLNG_ACTUAL` ➡️ **"LatLong_Actual"**
   - [27] `DATA_IDX.OWNER_LABEL` ➡️ **"ชื่อเจ้าของสินค้า_Invoice_ที่ต้องสแกน"**
   - [28] `DATA_IDX.SHOP_KEY` ➡️ **"ShopKey"**
+  - [29] `DATA_IDX.DRIVER_VERIFIED_NAME` ➡️ **"ชื่อลูกค้าปลายทางจริง"** [ADD V5.5.014]
+  - [30] `DATA_IDX.DRIVER_VERIFIED_ADDR` ➡️ **"ชื่อสถานที่อยู่ลูกค้าปลายทางจริง"** [ADD V5.5.014]
 
 ### 12. ชีต ข้อมูลพนักงาน
 - **ตัวแปรเรียกชีต:** `SHEET.EMPLOYEE`
@@ -351,7 +357,7 @@
 
 ระบบ LMDS V5.5 ผ่านการตรวจสอบคุณภาพโค้ดตามกฎเหล็ก 16 ข้อ (Audit Cycle: FIRST_AUDIT_REVIEW15 → FIX_REVIEW15_PLAN → APPLY_REVIEW15_FIX → VERIFY_REVIEW15_FIX → REFACTOR)
 
-**ผลลัพธ์:** Compliance 8/16 PASS → 16/16 PASS (+5 REVIEW15) → **16/16 COMPLIANT** (+2 REFACTOR) | 14+16 ไฟล์แก้ไข | 190 Helper Functions ใหม่ (18 SRP + 172 REFACTOR) | 1 Critical Bug Hot-Fixed | 21 REF issues
+**ผลลัพธ์:** Compliance 8/16 PASS → 16/16 PASS (+5 REVIEW15) → **16/16 COMPLIANT** (+2 REFACTOR) | 14+16 ไฟล์แก้ไข | 211 Helper Functions ใหม่ (18 SRP + 172 REFACTOR + 6 cache + 9 perf + 6 reprocessReviewQueue) | 1 Critical Bug Hot-Fixed | 21 REF issues
 
 การเปลี่ยนแปลงหลัก:
 - Phantom Call `invalidateGlobalAliasCache_()` → `CacheService.removeAll()` โดยตรง

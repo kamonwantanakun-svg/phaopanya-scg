@@ -17,7 +17,7 @@
 ### สถานะปัจจุบัน
 - **APP_VERSION** = '5.5.017' (SCHEMA_VERSION = '5.5.017')
 - **OAuth Scopes** = 6 (Least Privilege — ลดจาก 10)
-- **isAuthorizedUser_ Coverage** = 13/13 destructive ops (เดิม 6/10)
+- **isAuthorizedUser_ Coverage** = 13/13 destructive ops (เดิม 6/13)
 - **Sheet Protection Coverage** = 8/19 sheets (เดิม 4/19)
 - **Production Readiness (Security)** = ✅ READY (97% GO)
 
