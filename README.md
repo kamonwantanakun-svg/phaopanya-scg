@@ -700,16 +700,31 @@ LMDS_V5.5_FINAL_PACKAGE/
 │   ├── LMDS_Pipeline_Flowchart.png                   ← Flowchart Pipeline
 │   ├── LMDS_Architecture_MindMap.png                 ← Mind Map สถาปัตยกรรม
 │   ├── LMDS_Schema_Dictionary.md                     ← Schema Dictionary
-│   ├── LMDS_V5.5_CRITICAL_Fix_Cycle_Report.md        ← รายงาน Critical Fix
-│   ├── LMDS_V5.5_Performance_Fix_Verification_Report.md ← รายงาน Performance Fix
-│   ├── LMDS_V5.5_Security_Audit_Verification_Report.md  ← รายงาน Security Audit
-│   ├── LMDS_V5.5_REFACTOR_Cycle_Report.md            ← รายงาน Refactor Cycle (NEW)
+│   ├── LMDS_V5.5_CRITICAL_code_Report.md             ← รายงาน Critical Fix (V5.5.003 + V5.5.014 merged)
+│   ├── LMDS_V5.5_PERFORMANCE_code_Report.md          ← รายงาน Performance Fix (V5.5.003 + V5.5.016 merged)
+│   ├── LMDS_V5.5_SECURITY_code_Report.md             ← รายงาน Security Audit (V5.5.004 + V5.5.017)
+│   ├── LMDS_V5.5_REVIEW15_code_Report.md             ← รายงาน REVIEW15 Code Quality (V5.5.003→004 + V5.5.018)
+│   ├── LMDS_V5.5_REFACTOR_code_Report.md             ← รายงาน Refactor Cycle (V5.5.004 + V5.5.019+020 merged)
+│   ├── LMDS_V5.5_PREDEPLOY_code_Report.md            ← รายงาน Pre-Deploy (V5.5.004 + V5.5.020 merged)
+│   ├── LMDS_V5.5.018_REVIEW15_CODE_FIX_Report.md     ← รายงาน REVIEW15 Code Fix (V5.5.018)
+│   ├── LMDS_V5.5.021_Deep_Dive_Audit.md              ← 🔬 Deep Dive Audit V5.5.021 (NEW)
+│   ├── READINESS_AUDIT_FINAL.md                      ← รายงาน Production Readiness Audit สุดท้าย
+│   ├── cache_audit.md                                ← รายงาน Cache Audit
+│   ├── system_preflight_audit.md                     ← รายงาน Pre-Flight Audit
+│   ├── CHANGELOG.md                                  ← CHANGELOG รวมทุก versions
 │   ├── Code Reviewer สำหรับโปรเจกต์ LMDS.md          ← Code Reviewer Guide
 │   ├── SYS_TH_GEO+ใช้ทำอะไรได้บ้าง.md               ← Thai Geo Guide
 │   ├── 📋 กฎการเขียนโค้ด LMDS V5.5.md                ← 16 Immutable Laws
 │   ├── วิเคราะห์เปรียบเทียบ Alias Architecture.md     ← Alias Architecture Analysis
 │   ├── บันทึกการพัฒนาและปิดงานระบบ LMDS v5.2.md      ← Development Log
 │   ├── Google_Maps_Amit_Agarwal.md                    ← Google Maps Reference
+│   ├── LMDS_Column_Dictionary_TH.md                   ← Column Dictionary (TH)
+│   ├── LMDS_SYSTEM_WORKFLOW_TH.md                     ← Workflow (TH)
+│   ├── 01_SOP_Admin_LMDS.md                           ← SOP สำหรับ Admin
+│   ├── 02_IT_Guide_LMDS.md                            ← คู่มือสำหรับทีม IT
+│   ├── 03_Executive_Summary_LMDS.md                   ← สรุปผู้บริหาร
+│   ├── LMDS_V5.5_Admin_Manual.pdf                     ← Admin Manual (PDF)
+│   ├── lmds_admin_manual.html                         ← Admin Manual (HTML source)
 │   ├── LMDS_สายที่1_SCG_Source.md                     ← สายที่ 1: Source Sheet → Master DB Pipeline
 │   ├── LMDS_สายที่2_Daily_Job.md                      ← สายที่ 2: Daily Job → GPS Lookup Pipeline
 │   └── LMDS_Q_REVIEW_คู่มือ.md                        ← คู่มือ Q_REVIEW (22 คอลัมน์)
@@ -1094,6 +1109,7 @@ Match Engine Decision (8 Rules)
 | **docs/LMDS_สายที่1_SCG_Source.md** | 🟢 สายที่ 1: Source Sheet → Master DB Pipeline (V5.5.021) |
 | **docs/LMDS_สายที่2_Daily_Job.md** | 🔵 สายที่ 2: Daily Job → GPS Lookup Pipeline (V5.5.021) |
 | **docs/LMDS_Q_REVIEW_คู่มือ.md** | คู่มือ Q_REVIEW (22 คอลัมน์) — คิวรอคนตรวจสอบ (V5.5.021) |
+| **docs/LMDS_V5.5.021_Deep_Dive_Audit.md** | 🔬 Deep Dive Audit V5.5.021 — System-wide findings + Deep Dive 17/18 (V5.5.021) |
 
 > **Note**: Audit cycles 6-9 (SYNC V5.5.006, CACHE-FIX V5.5.007, CACHE-CLEANUP V5.5.008,
 > DOC-SYNC V5.5.009, CACHE-HOTFIX V5.5.010, DATA-CONSISTENCY V5.5.011) ไม่มี report แยก —

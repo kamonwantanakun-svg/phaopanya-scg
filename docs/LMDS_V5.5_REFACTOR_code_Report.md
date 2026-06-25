@@ -619,3 +619,91 @@
 **วันที่ตรวจสอบ:** 2026-06-12
 **เวอร์ชันโค้ด:** V5.5.016 (post-CRITICAL-FIX; original V5.5.004)
 **เวอร์ชันเอกสาร:** 1.0
+
+---
+
+# 📐 Section เพิ่มเติม — REFACTOR_CYCLE6_RESIDUAL (V5.5.019 + V5.5.020 — 2026-06-22)
+
+> **Note:** Cycle นี้แยกจาก Refactor Cycle 5 (Section 2-5, V5.5.004) — เป็นการตรวจสอบ residual issues ที่เหลือจาก cycle ก่อนหน้า + ปรับปรุง long functions ที่ยังเกิน 100 บรรทัด
+> **Target Version:** V5.5.019 (REFACTOR_CYCLE6) → V5.5.020 (REFACTOR_CYCLE6_RESIDUAL + full doc sync)
+> **Constraints:** Preserve Behavior 100% • No Schema Changes • No Phantom Calls • Single Writer Pattern • Suffix `_` for Private Helpers
+
+## 1. บทสรุป Audit Cycle
+
+| Severity | จำนวน | สถานะหลัง Fix |
+|----------|------:|:-------------:|
+| 🔴 HIGH PRIORITY | 5 | ✅ 5/5 FIX_CONFIRMED |
+| 🟡 MEDIUM PRIORITY | 4 | ✅ 4/4 FIX_CONFIRMED |
+| 🟢 LOW PRIORITY | 3 | ✅ 3/3 FIX_CONFIRMED |
+| **รวม** | **12** | ✅ **12/12 FIX_CONFIRMED** |
+
+## 2. Final Metrics (V5.5.018 → V5.5.020)
+
+| Metric | V5.5.018 (pre-refactor) | V5.5.020 (post-refactor) | Delta |
+|--------|------------------------:|------------------------:|------:|
+| Total lines | ~17,440 | ~15,500 | **-1,940 (-11%)** |
+| Functions >100 lines | 16 | 4 | **-12** |
+| Module Boundary violations | 5 | 0 | **-5** |
+| Batch processors w/o checkpoint | 2 | 0 | **-2** |
+| Helpers added | — | ~32 | +32 |
+
+## 3. Issue ทั้ง 12 รายการ
+
+### 🔴 HIGH PRIORITY (5 issues — Phase A)
+
+| ID | Category | Location | ปัญหา | Fix | Status |
+|----|----------|----------|-------|-----|:------:|
+| **REF-001** | Module Boundary | `12_ReviewService.gs:1302-1478` | 5 call sites ของ `createPerson`/`createPlace`/`createDestination` ใน Group 2 ละเมิด Trinity Framework (Group 2 = Pure Consumer) | สร้าง 3 public helpers ใน 10_MatchEngine + 1 wrapper (`buildSrcObjFromReviewRow_`) ใน 12_ReviewService — Group 2 เรียก Group 1 ผ่าน public interface | ✅ FIX_CONFIRMED |
+| **REF-002** | Code Duplication | `12_ReviewService.gs` (same 3 functions) | ~30 บรรทัด pattern ซ้ำใน `reprocGroupA/B/C_*` (166 บรรทัด → ~60) | สร้าง shared mutators `reprocApplyFactUpdate_` / `reprocApplyReviewUpdate_` | ✅ FIX_CONFIRMED |
+| **REF-003** | Checkpoint/Resume | `21_AliasService.gs` — `populateAliasFromSCGRawData_` + `populateAliasFromFactDelivery_` | Batch processors ไม่มี Checkpoint — เสี่ยง Timeout เมื่อข้อมูลใหญ่ | เพิ่ม 3 checkpoint helpers + 14 integration points (PropertiesService-based) | ✅ FIX_CONFIRMED |
+| **REF-004** | Long Function | `10_MatchEngine.gs` — `runMatchEngine` (132 lines) | Mixed Concerns: load source + match + write fact + enrich aliases + cleanup ในฟังก์ชันเดียว | แยกเป็น 4 section helpers: `loadSourceBatch_`, `processBatch_`, `writeFactBatch_`, `enrichAliasesBatch_` | ✅ FIX_CONFIRMED |
+| **REF-005** | Code Duplication | CHANGELOG × 22 files | แต่ละไฟล์ .gs มี CHANGELOG header ซ้ำ ~20 บรรทัด — sync ยาก | สร้าง `docs/CHANGELOG.md` central + ลบ 109 stale entries ใน V5.5.020 | ✅ FIX_CONFIRMED |
+
+### 🟡 MEDIUM PRIORITY (4 issues — Phase B)
+
+| ID | Category | Location | ปัญหา | Fix | Status |
+|----|----------|----------|-------|-----|:------:|
+| **REF-006** | Long Function | `19_Hardening.gs:317-411` — `generatePersonAliasesFromHistory` (134 lines) | Mixed: load history + generate aliases + dedup + write | แยกเป็น 4 section helpers: `loadHistoryBatch_`, `generateAliasesForPerson_`, `dedupAliases_`, `writeAliasBatch_` | ✅ FIX_CONFIRMED |
+| **REF-007** | Long Function | `06_PersonService.gs:261-276` — `findPersonCandidates` (120 lines) | 5 strategies (exact, normalized, alias, fuzzy, phonetic) ผสมกัน | แยกเป็น 5 strategy helpers: `findExactMatch_`, `findNormalizedMatch_`, `findAliasMatch_`, `findFuzzyMatch_`, `findPhoneticMatch_` | ✅ FIX_CONFIRMED |
+| **REF-008** | Long Function | `12_ReviewService.gs` — `reprocPrepareContext_` (118 lines) | Setup logic + side-effects (cache invalidate, sheet reads) ผสม | แยกเป็น 4 setup helpers: `loadReviewData_`, `loadFactLookup_`, `loadAliasLookup_`, `validateContext_` | ✅ FIX_CONFIRMED |
+| **REF-009** | Long Function | `21_AliasService.gs` — `MIGRATION_HybridAliasSystem` (117 lines) | 5 sequential steps (assign UUID → migrate aliases → link entity → populate fact → verify) ในฟังก์ชันเดียว | แยกเป็น 3 helpers: `migrateStep1to2_`, `migrateStep3to4_`, `migrateStep5Verify_` | ✅ FIX_CONFIRMED |
+| **REF-010** | Long Function + Hardcoded Range | `19_Hardening.gs` — `applySheetProtection_UI` (114 lines) | Hardcoded Range strings + sheet protection logic ผสม + ไม่ schema-safe | แยกเป็น 3 helpers + เปลี่ยน hardcoded ranges → `REVIEW_IDX.*` schema-driven | ✅ FIX_CONFIRMED |
+
+### 🟢 LOW PRIORITY (3 issues — Phase C)
+
+| ID | Category | Location | ปัญหา | Fix | Status |
+|----|----------|----------|-------|-----|:------:|
+| **REF-011** | Pattern Duplication | Entry points (3 pilot) | `safeUiAlert_` + `logError` + try-catch pattern ซ้ำในทุก entry point | สร้าง `withEntryPointGuard_(fn, label)` utility + apply ใน 3 pilot callers (`runMatchEngine`, `fetchDataFromSCGJWD`, `applyAllPendingDecisions`) | ✅ FIX_CONFIRMED |
+| **REF-012** | Anti-Pattern | `02_Schema.gs` — `getColIndex()` | ใช้ `headers.indexOf()` แทน `*_IDX.*` constants — ละเมิด LAW-3 (No Hardcode Index) | เพิ่ม `@deprecated` tag + warning log + ให้ caller เปลี่ยนไปใช้ `*_IDX.*` โดยตรง | ✅ FIX_CONFIRMED |
+
+## 4. Phase Sequencing (3 Phases, 5 Commits)
+
+```
+Phase A: HIGH PRIORITY (REF-001 → REF-005) — Commit 1-3
+  ├── Commit 1: REF-001 + REF-002 (Coupled — must do together)
+  ├── Commit 2: REF-003 + REF-004 + REF-006 (Long functions w/ checkpoint)
+  └── Commit 3: REF-005 (CHANGELOG centralization — independent)
+
+Phase B: MEDIUM PRIORITY (REF-007 → REF-010) — Commit 4
+  └── Single commit (independent issues)
+
+Phase C: LOW PRIORITY (REF-011, REF-012) — Commit 5
+  └── Single commit (boilerplate + deprecation)
+```
+
+## 5. V5.5.020 Residual Fixes + Full Sync
+
+V5.5.020 เป็น patch หลัง V5.5.019 ที่:
+- **Bump version:** V5.5.019 → V5.5.020 (22/22 files + APP_VERSION/SCHEMA_VERSION + showVersionInfo)
+- **CHANGELOG.md update:** เพิ่ม V5.5.020 entry + preserve historical version table
+- **REF-005 residual:** ลบ 109 stale CHANGELOG entries ที่ค้างอยู่ในไฟล์ .gs
+- **REF-011 pilot:** apply `withEntryPointGuard_` ใน 3 entry points (`runMatchEngine`, `fetchDataFromSCGJWD`, `applyAllPendingDecisions`)
+- **Full doc sync:** เอกสารทั้งหมด sync 100% กับโค้ดจริง
+
+## 6. ไฟล์ที่เปลี่ยนใน V5.5.020
+
+| กลุ่ม | จำนวนไฟล์ | การเปลี่ยนแปลง |
+|-------|----------:|---------------|
+| Source `.gs` files | 22 | version bump + CHANGELOG sync |
+| Documentation | 1 | `CHANGELOG.md` +V5.5.020 entry |
+| **รวม** | **23** | โค้ด + เอกสาร sync 100% |

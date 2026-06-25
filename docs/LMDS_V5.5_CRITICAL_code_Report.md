@@ -405,3 +405,127 @@
 - 18 SRP Helper Functions แยกออก
 - Time Guard + Checkpoint เพิ่ม 2 ฟังก์ชัน (buildGeoDictionary, populateGeoMetadata)
 - Critical Bug: `newRows.push(r)` → `newRows.push(aliasRow)` ใน 19_Hardening.gs
+
+---
+
+## 10. DRIVER_VERIFIED Audit Cycle (V5.5.014 — 2026-06-19)
+
+> **Note:** Cycle นี้แยกจาก Critical Fix Cycle ใน Section 2-5 (V5.5.003) — ตรวจสอบฟีเจอร์ "Driver Verified Columns" (col 32-33 ใน FACT_DELIVERY, col 37-38 ใน Source) ที่เพิ่มใน V5.5.014
+> Commands: `FIRST_AUDIT_CRITICAL` (re-run) → `FIX_CRITICAL_PLAN` → `APPLY_CRITICAL_FIX` → `VERIFY_CRITICAL_FIX`
+> **Verdict:** 🔴 CONDITIONAL — NOT READY (75%) — พบ 2 BLOCKING + 6 SHOULD_FIX → แก้ครบ 8/8 ✅ FIX_CONFIRMED
+
+### 10.1 บทสรุป Audit Cycle
+
+| Severity | จำนวน | สถานะหลัง Fix |
+|----------|------:|:-------------:|
+| 🔴 BLOCKING | 2 | ✅ 2/2 FIX_CONFIRMED |
+| 🟡 SHOULD_FIX | 6 | ✅ 6/6 FIX_CONFIRMED |
+| **รวม** | **8** | ✅ **8/8 FIX_CONFIRMED** |
+
+### 10.2 Issue ทั้ง 8 รายการ
+
+#### 🔴 CRIT-001: `factUpdateRow_` ไม่เขียน col 32-33 ใน UPDATE path
+
+| รายการ | รายละเอียด |
+|--------|-----------|
+| **Location** | `11_TransactionService.gs:219, 253-272` |
+| **Root Cause** | `upsertFactDelivery` เรียก `factUpdateRow_()` โดยไม่ส่ง `srcObj` → UPDATE path ไม่สามารถเขียน `DRIVER_VERIFIED_NAME` (col 32) และ `DRIVER_VERIFIED_ADDR` (col 33) ได้ |
+| **Scenario ที่พัง** | วันที่ 1 INSERT ลง FACT col 32='' → วันที่ 2 คนขับกรอก "ชื่อจริง ABC" ใน Source col 38 → วันที่ 3 Admin reset SYNC_STATUS → reprocess → UPDATE path → col 32 ยังว่าง |
+| **Fix** | ส่ง `srcObj` เข้า `factUpdateRow_` + เพิ่ม merge mode (เขียนเฉพาะเมื่อ srcObj มีค่า) |
+| **Risk** | ต่ำมาก — caller เดียว (`upsertFactDelivery`) |
+| **Status** | ✅ FIX_CONFIRMED |
+
+**Code Template ที่ Apply:**
+
+```javascript
+// 11_TransactionService.gs:219 — ส่ง srcObj เข้า factUpdateRow_
+return factUpdateRow_(rowRange, rowData, personId, placeId, geoId, destId,
+                      decision, resolvedLat, resolvedLng, now, srcObj);
+
+// 11_TransactionService.gs:253 — เพิ่ม parameter
+function factUpdateRow_(rowRange, rowData, personId, placeId, geoId, destId,
+                        decision, resolvedLat, resolvedLng, now, srcObj) {
+
+// 11_TransactionService.gs:268 — merge mode (ไม่เขียนทับค่าเดิมถ้า srcObj ว่าง)
+if (srcObj && srcObj.driverVerifiedName) {
+  rowData[FACT_IDX.DRIVER_VERIFIED_NAME] = srcObj.driverVerifiedName;
+}
+if (srcObj && srcObj.driverVerifiedAddr) {
+  rowData[FACT_IDX.DRIVER_VERIFIED_ADDR] = srcObj.driverVerifiedAddr;
+}
+```
+
+#### 🔴 CRIT-002: `buildSrcObjFromReview_` ไม่อ่าน DRIVER_VERIFIED จาก Source
+
+| รายการ | รายละเอียด |
+|--------|-----------|
+| **Location** | `12_ReviewService.gs:642-676` |
+| **Root Cause** | อ่าน Source sheet เพื่อหา `deliveryDate`/`deliveryTime` แต่ลืมอ่าน `SRC_IDX.DRIVER_VERIFIED_NAME` (37) และ `SRC_IDX.DRIVER_VERIFIED_ADDR` (38) → srcObj ไม่มี field `driverVerifiedName`/`Addr` |
+| **Scenario ที่พัง** | Q_REVIEW มีรายการ → Admin เลือก `MERGE_TO_CANDIDATE` หรือ `CREATE_NEW` → `applyReviewDecision` → `buildSrcObjFromReview_` → `upsertFactDelivery` → INSERT ลง FACT col 32-33 = '' |
+| **Fix** | เพิ่มการอ่าน col 37-38 + เพิ่ม field ใน return object |
+| **Risk** | ต่ำ — เพิ่ม field ใน return object ไม่กระทบ caller เดิม |
+| **Status** | ✅ FIX_CONFIRMED |
+
+**Code Template ที่ Apply:**
+
+```javascript
+// 12_ReviewService.gs:650 — เพิ่มตัวแปรเริ่มต้น
+let driverVerifiedName = '', driverVerifiedAddr = '';
+
+// 12_ReviewService.gs:660 — อ่านจาก Source
+driverVerifiedName = String(srcData[SRC_IDX.DRIVER_VERIFIED_NAME] || '').trim();
+driverVerifiedAddr = String(srcData[SRC_IDX.DRIVER_VERIFIED_ADDR] || '').trim();
+
+// 12_ReviewService.gs:674 — เพิ่มใน return object
+return {
+  // ... existing fields ...
+  driverVerifiedName: driverVerifiedName,
+  driverVerifiedAddr: driverVerifiedAddr,
+};
+```
+
+#### 🟡 SHOULD_FIX (6 รายการ)
+
+| ID | Location | ปัญหา | Fix | Status |
+|----|----------|-------|-----|:------:|
+| **CRIT-003** | `18_ServiceSCG.gs:646-648` | `copyDriverVerifiedToDailyJob_` lookup แบบ one-shot — ถ้า Source row แรกมีแค่ name ไม่มี addr → addr จาก row ถัดมาถูก skip | เปลี่ยนเป็น merge mode (เติม field ที่ว่าง) | ✅ FIX_CONFIRMED |
+| **CRIT-004** | `18_ServiceSCG.gs:640, 495` | ShopKey matching — DAILY_JOB ไม่ trim แต่ Source trim แล้ว → key ไม่ตรง → ข้อมูลไม่ถูก copy | Trim ที่ `buildDailyJobRow_` ด้วย | ✅ FIX_CONFIRMED |
+| **CRIT-005** | `21_AliasService.gs:1115-1123` | Admin recovery tools ไม่อ่าน DRIVER_VERIFIED → ถ้า auto pipeline พลาด admin ไม่สามารถ rebuild alias ได้ | เพิ่ม loop อ่าน col 32-33 | ✅ FIX_CONFIRMED |
+| **CRIT-006** | `00_App.gs:903` | `showVersionInfo` แสดง Audit Cycles 9 แทน 11 + missing Cycle 10-11 | เปลี่ยน 9 → 11 + เพิ่ม cycle list | ✅ FIX_CONFIRMED |
+| **CRIT-007** | `02_Schema.gs:458` | Comment ระบุ "37 คอลัมน์" แต่จริงเป็น 39 | เปลี่ยน 37 → 39 | ✅ FIX_CONFIRMED |
+| **CRIT-008** | หลายจุด | Deployment dependency — ถ้า admin ไม่เพิ่มคอลัมน์ใน Sheet จริง → Range error | เพิ่ม pre-flight check ใน `validateConfig()` | ✅ FIX_CONFIRMED |
+
+### 10.3 ลำดับการแก้ไข (Priority)
+
+| Priority | Issue | File | ปริมาณงาน |
+|:--------:|-------|------|----------|
+| 1 | CRIT-001 | `11_TransactionService.gs` | ~10 บรรทัด (signature + merge mode) |
+| 2 | CRIT-002 | `12_ReviewService.gs` | ~5 บรรทัด (read + return field) |
+| 3 | CRIT-003 + CRIT-004 | `18_ServiceSCG.gs` | ~15 บรรทัด (merge + trim) |
+| 4 | CRIT-006 | `00_App.gs` | ~3 บรรทัด (version label) |
+| 5 | CRIT-005, 007, 008 | หลายไฟล์ | Admin tools + comment + pre-flight (optional) |
+
+**รวม:** ~30-50 บรรทัด across 3-4 ไฟล์
+
+### 10.4 Regression Test Plan
+
+1. รัน Match Engine กับ Invoice ที่มีอยู่แล้วใน FACT → ตรวจว่า col 32-33 ถูก UPDATE ถ้า Source มีข้อมูลจริง
+2. รัน Match Engine กับ Invoice ที่ไม่มีข้อมูลจริง → ตรวจว่า col 32-33 ไม่ถูกเปลี่ยน (ยังเป็นค่าเดิม)
+3. สร้าง Q_REVIEW entry ที่ Source sheet มีข้อมูลจริง col 38 → รัน `applyAllPendingDecisions` → ตรวจ FACT_DELIVERY col 32 ว่ามีข้อมูลจริง
+4. ตรวจ `autoEnrichAliasesFromFactBatch_` ว่าอ่าน col 32-33 ได้ถูกต้องหลัง UPDATE → สร้าง DRIVER_VERIFIED alias ได้
+5. รัน `applyMasterCoordinatesToDailyJob` กับ Source sheet ที่มี name และ addr อยู่คนละแถว → ตรวจ DAILY_JOB col 29-30 ว่าครบ
+
+### 10.5 สิ่งที่ผ่านการตรวจสอบ (ไม่มีปัญหา)
+
+| Check | Result |
+|-------|:------:|
+| SRC_IDX/DATA_IDX/FACT_IDX indices ถูกต้อง | ✅ |
+| SCHEMA entries ตรงกับ IDX counts | ✅ |
+| `buildSourceObj_` อ่าน col 37-38 ถูกต้อง | ✅ |
+| `factCreateRow_` (INSERT path) เขียน col 32-33 | ✅ |
+| `autoEnrichAliases` DRIVER_VERIFIED dedup | ✅ |
+| Single Writer Pattern (M_ALIAS) — ไม่มีการละเมิด | ✅ |
+| Function name collisions (312 functions) | ✅ |
+| Phantom function calls | ✅ ไม่พบ |
+| CacheService >100KB handling (80KB chunks + batched putAll) | ✅ |
+| Entry point try-catch + Time Guard + LockService | ✅ ครบ |
