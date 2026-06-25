@@ -710,9 +710,9 @@ LMDS_V5.5_FINAL_PACKAGE/
 │   ├── วิเคราะห์เปรียบเทียบ Alias Architecture.md     ← Alias Architecture Analysis
 │   ├── บันทึกการพัฒนาและปิดงานระบบ LMDS v5.2.md      ← Development Log
 │   ├── Google_Maps_Amit_Agarwal.md                    ← Google Maps Reference
-│   ├── mindmap_temp.html
-│   ├── report_temp.html
-│   └── flowchart_temp.html
+│   ├── LMDS_สายที่1_SCG_Source.md                     ← สายที่ 1: Source Sheet → Master DB Pipeline
+│   ├── LMDS_สายที่2_Daily_Job.md                      ← สายที่ 2: Daily Job → GPS Lookup Pipeline
+│   └── LMDS_Q_REVIEW_คู่มือ.md                        ← คู่มือ Q_REVIEW (22 คอลัมน์)
 │
 └── (Audit reports are inline in docs/ — see LMDS_V5.5_*_code_Report.md files)
 ```
@@ -1091,6 +1091,9 @@ Match Engine Decision (8 Rules)
 | **docs/01_SOP_Admin_LMDS.md** | SOP สำหรับ Admin |
 | **docs/02_IT_Guide_LMDS.md** | คู่มือสำหรับทีม IT |
 | **docs/03_Executive_Summary_LMDS.md** | สรุปผู้บริหาร |
+| **docs/LMDS_สายที่1_SCG_Source.md** | 🟢 สายที่ 1: Source Sheet → Master DB Pipeline (V5.5.021) |
+| **docs/LMDS_สายที่2_Daily_Job.md** | 🔵 สายที่ 2: Daily Job → GPS Lookup Pipeline (V5.5.021) |
+| **docs/LMDS_Q_REVIEW_คู่มือ.md** | คู่มือ Q_REVIEW (22 คอลัมน์) — คิวรอคนตรวจสอบ (V5.5.021) |
 
 > **Note**: Audit cycles 6-9 (SYNC V5.5.006, CACHE-FIX V5.5.007, CACHE-CLEANUP V5.5.008,
 > DOC-SYNC V5.5.009, CACHE-HOTFIX V5.5.010, DATA-CONSISTENCY V5.5.011) ไม่มี report แยก —
