@@ -15,6 +15,8 @@
 5. [CMD: VERIFY_PERFORMANCE_FIX — ผลยืนยัน](#5-cmd-verify_performance_fix--ผลยืนยัน)
 6. [Regression Test Report](#6-regression-test-report)
 7. [สรุปผลและข้อเสนอแนะ](#7-สรุปผลและข้อเสนอแนะ)
+8. [FIRST_AUDIT_REVIEW15 — ผลการตรวจสอบคุณภาพโค้ด (2026-06-12)](#8-first_audit_review15--ผลการตรวจสอบคุณภาพโค้ด-2026-06-12)
+9. [Performance Fix Cycle V5.5.016 (2026-06-19)](#9-performance-fix-cycle-v555016-2026-06-19)
 
 ---
 
@@ -289,7 +291,7 @@
 
 **8 ไฟล์ที่แก้ไข:** `18_ServiceSCG.gs`, `14_Utils.gs`, `00_App.gs`, `01_Config.gs`, `03_SetupSheets.gs`, `19_Hardening.gs`, `21_AliasService.gs`, `12_ReviewService.gs`
 
-ดูรายละเอียดเพิ่มเติมได้ที่: `LMDS_V5.5_Security_Audit_Verification_Report.md`
+ดูรายละเอียดเพิ่มเติมได้ที่: `LMDS_V5.5_SECURITY_code_Report.md`
 
 ---
 

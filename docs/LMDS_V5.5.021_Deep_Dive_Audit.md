@@ -13,7 +13,8 @@
 3. [Deep Dive: 17_SearchService.gs (C1-C3, H1-H2, M1-M2)](#3-deep-dive-17_searchservicegs)
 4. [Deep Dive: 18_ServiceSCG.gs (C4-C7, H3-H6, M3-M6)](#4-deep-dive-18_servicescggs)
 5. [Pre-flight Audit Summary (V5.5.021)](#5-pre-flight-audit-summary-v555021)
-6. [Top 3 Quick Wins](#6-top-3-quick-wins)
+6. [Top 3 Quick Wins](#6-top-3-quick-wins-แก้ก่อนเลย)
+7. [Audit Journey (V5.5.006 → V5.5.021)](#7-audit-journey-v555006--v555021)
 
 ---
 

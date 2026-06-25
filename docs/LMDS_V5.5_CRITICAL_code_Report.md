@@ -16,6 +16,8 @@
 6. [Side Effect Analysis](#6-side-effect-analysis)
 7. [Architecture & Regression Check](#7-architecture--regression-check)
 8. [สรุปผลและข้อเสนอแนะ](#8-สรุปผลและข้อเสนอแนะ)
+9. [FIRST_AUDIT_REVIEW15 — ผลการตรวจสอบคุณภาพโค้ด (2026-06-12)](#9-first_audit_review15--ผลการตรวจสอบคุณภาพโค้ด-2026-06-12)
+10. [DRIVER_VERIFIED Audit Cycle (V5.5.014 — 2026-06-19)](#10-driver_verified-audit-cycle-v555014--2026-06-19)
 
 ---
 
@@ -385,7 +387,7 @@
 
 **ผลรวม: 7/7 ✅ FIX_CONFIRMED — ไม่พบ Regression**
 
-ดูรายละเอียดเพิ่มเติมได้ที่: `LMDS_V5.5_Security_Audit_Verification_Report.md`
+ดูรายละเอียดเพิ่มเติมได้ที่: `LMDS_V5.5_SECURITY_code_Report.md`
 
 ---
 

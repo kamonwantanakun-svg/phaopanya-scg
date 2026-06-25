@@ -3,6 +3,36 @@
 
 ---
 
+## สารบัญ
+
+**ส่วนที่ 1 — Pre-Deploy Assessment (V5.5.017 — 2026-06-21):** Original audit, 95% GO
+1. [Executive Verdict](#1-executive-verdict)
+2. [Production Readiness Score](#2-production-readiness-score)
+3. [Blocking Issues](#3-blocking-issues)
+4. [Verified Architecture Standards Checklist](#4-verified-architecture-standards-checklist)
+5. [Residual Risks (Non-Blocking)](#5-residual-risks-non-blocking)
+6. [สรุปผลการ Audit ทุกเฟส](#6-สรุปผลการ-audit-ทุกเฟส)
+7. [Pre-Deploy Checklist](#7-pre-deploy-checklist)
+8. [Codebase Statistics](#8-codebase-statistics)
+9. [Final Decision](#9-final-decision)
+- [Appendix A: Score Calculation Detail](#appendix-a-score-calculation-detail)
+- [Appendix B: Dependency Graph (Simplified)](#appendix-b-dependency-graph-simplified)
+
+**ส่วนที่ 2 — Final Production Readiness Assessment (V5.5.020 — 2026-06-22):** Updated audit, 98% GO
+- [Section เพิ่มเติม — Final Production Readiness Assessment (V5.5.020)](#section-เพิ่มเติม--final-production-readiness-assessment-v555020--2026-06-22)
+  - [1. Executive Verdict](#1-executive-verdict-1)
+  - [2. Audit Coverage Summary](#2-audit-coverage-summary)
+  - [3. Blocking Issues Tracking](#3-blocking-issues-tracking)
+  - [4. Verified Architecture Standards (V5.5.020)](#4-verified-architecture-standards-v555020)
+  - [5. Final Metrics (V5.5.020)](#5-final-metrics-v555020)
+  - [6. Residual Risks (Acceptable)](#6-residual-risks-acceptable)
+  - [7. Final Decision](#7-final-decision)
+  - [8. Pre-Deployment Checklist (Manual Steps)](#8-pre-deployment-checklist-manual-steps-ที่ผู้ใช้ต้องทำ)
+  - [9. หมายเหตุสำหรับทีมพัฒนา](#9-หมายเหตุสำหรับทีมพัฒนา)
+  - [10. Update V5.5.021 — Post-Deploy Audit Findings](#10-update-v555021--post-deploy-audit-findings)
+
+---
+
 ### 1. Executive Verdict
 
 > ✅ **GO** — พร้อมใช้งาน Production
@@ -367,10 +397,10 @@
 | **คะแนนรวม** | **95%** |
 | **Blocking Issues** | 0 |
 | **Residual Risks** | 11 (Non-Blocking) |
-| **เงื่อนไข** | ดู Section 1 — ข้อแนะนำ 5 ข้อ (ไม่มีเงื่อนไขบังคับ) |
+| **เงื่อนไข** | ดู Section 1 (ส่วนที่ 1) — ข้อแนะนำ 5 ข้อ (ไม่มีเงื่อนไขบังคับ) |
 | **แนะนำ** | Deploy ได้ — ดำเนินการตาม Pre-Deploy Checklist และติดตาม Residual Risks |
 
-> **หมายเหตุสำคัญ:** ระบบผ่านการ Audit ครบทุกเฟส ได้รับ Verdict ✅ GO ด้วยคะแนน 95% และ 16/16 Laws COMPLIANT แนะนำให้ดำเนินการตาม Pre-Deploy Checklist ใน Section 7 และติดตาม Residual Risks หลัง Deploy
+> **หมายเหตุสำคัญ:** ระบบผ่านการ Audit ครบทุกเฟส ได้รับ Verdict ✅ GO ด้วยคะแนน 95% และ 16/16 Laws COMPLIANT แนะนำให้ดำเนินการตาม Pre-Deploy Checklist ใน Section 7 (ส่วนที่ 1) และติดตาม Residual Risks หลัง Deploy
 
 #### Roadmap สำหรับ V5.6
 
@@ -434,7 +464,7 @@
 **วันที่ประเมิน:** 2026-06-12
 **เวอร์ชันโค้ด:** V5.5.017 (post-SECURITY-POSTFIX; original V5.5.004)
 **เวอร์ชันเอกสาร:** 1.0
-**อ้างอิง:** LMDS_V5.5_VERIFY_REFACTOR_FIX_Report.md
+**อ้างอิง:** LMDS_V5.5_REFACTOR_code_Report.md
 
 ---
 

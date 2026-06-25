@@ -27,8 +27,8 @@
 3. [16 Immutable Laws Compliance](#16-immutable-laws-compliance)
 4. [Audit Cycles Summary](#audit-cycles-summary)
 5. [V5.5.011 — DATA CONSISTENCY + SHIPTONAME CLEAN + Q_REVIEW NAV FIX (5 issues)](#v55011--data-consistency--shiptoname-clean--q_review-nav-fix-5-issues)
-6. [V5.5.007 + V5.5.011 — CACHE FIX & CLEANUP (15 issues)](#v55007--v55008--cache-fix--cleanup-15-issues)
-7. [V5.5.017 — SECURITY POSTFIX (12 SEC issues)](#v55017--security-postfix-12-sec-issues)
+6. [V5.5.007 + V5.5.011 — CACHE FIX & CLEANUP (15 issues)](#v55007--v55011--cache-fix--cleanup-15-issues)
+7. [V5.5.017 — SECURITY POSTFIX (12 SEC issues)](docs/LMDS_V5.5_SECURITY_code_Report.md)
 8. [V5.5.018 — REVIEW15 CLEAN CODE FIX (14 issues)](#v55018--review15-clean-code-fix-14-issues)
 9. [REFACTOR Cycle Results (Cycle 5)](#refactor-cycle-results-cycle-5)
 10. [New Architecture Patterns (V5.5 Refactor)](#new-architecture-patterns-v55-refactor)
@@ -1101,8 +1101,13 @@ Match Engine Decision (8 Rules)
 | **docs/LMDS_V5.5_SECURITY_code_Report.md** | รายงาน Security Audit (V5.5.004 + V5.5.021 Security Postfix) |
 | **docs/LMDS_V5.5_REVIEW15_code_Report.md** | รายงาน REVIEW15 Code Quality (V5.5.003→004) |
 | **docs/LMDS_V5.5_REFACTOR_code_Report.md** | รายงาน Refactor Cycle (V5.5.004) |
-| **docs/LMDS_V5.5_PREDEPLOY_code_Report.md** | รายงาน Pre-Deploy (V5.5.004) |
+| **docs/LMDS_V5.5_PREDEPLOY_code_Report.md** | รายงาน Pre-Deploy (V5.5.004 + V5.5.020 merged) |
+| **docs/LMDS_V5.5.018_REVIEW15_CODE_FIX_Report.md** | รายงาน REVIEW15 Code Fix (V5.5.018) |
+| **docs/LMDS_V5.5.021_Deep_Dive_Audit.md** | 🔬 Deep Dive Audit V5.5.021 — System-wide + 17/18 Deep Dive |
 | **docs/READINESS_AUDIT_FINAL.md** | รายงาน Production Readiness Audit สุดท้าย |
+| **docs/cache_audit.md** | รายงาน Cache Audit (V5.5.021) |
+| **docs/system_preflight_audit.md** | รายงาน Pre-Flight System Audit (V5.5.021) |
+| **docs/CHANGELOG.md** | CHANGELOG รวมทุก versions (V5.5.000 → V5.5.021) |
 | **docs/01_SOP_Admin_LMDS.md** | SOP สำหรับ Admin |
 | **docs/02_IT_Guide_LMDS.md** | คู่มือสำหรับทีม IT |
 | **docs/03_Executive_Summary_LMDS.md** | สรุปผู้บริหาร |

@@ -3,6 +3,28 @@
 
 ---
 
+## สารบัญ
+
+**ส่วนที่ 1 — Refactor Cycle 5 (V5.5.004 — 2026-06-13):** 21 REF Issues (REF-001 → REF-021)
+1. [Executive Summary](#1-executive-summary)
+2. [ขั้นตอนการตรวจสอบ 5 ข้อบังคับ](#2-ขั้นตอนการตรวจสอบ-5-ข้อบังคับ)
+3. [ผลตรวจสอบราย Issue (REF-001 ถึง REF-021)](#3-ผลตรวจสอบราย-issue-ref-001-ถึง-ref-021)
+4. [Cross-Module Reference Check](#4-cross-module-reference-check)
+5. [Architecture & Rule Compliance](#5-architecture--rule-compliance)
+6. [Regression Test Results](#6-regression-test-results)
+7. [สรุปผลการตรวจสอบ](#7-สรุปผลการตรวจสอบ)
+
+**ส่วนที่ 2 — REFACTOR_CYCLE6_RESIDUAL (V5.5.019 + V5.5.020 — 2026-06-22):** 12 REF Issues (REF-001 → REF-012 รอบใหม่)
+- [Section เพิ่มเติม — REFACTOR_CYCLE6_RESIDUAL (V5.5.019 + V5.5.020)](#section-เพิ่มเติม--refactor_cycle6_residual-v555019--v555020--2026-06-22)
+  - [1. บทสรุป Audit Cycle](#1-บทสรุป-audit-cycle)
+  - [2. Final Metrics (V5.5.018 → V5.5.020)](#2-final-metrics-v555018--v555020)
+  - [3. Issue ทั้ง 12 รายการ](#3-issue-ทั้ง-12-รายการ)
+  - [4. Phase Sequencing (3 Phases, 5 Commits)](#4-phase-sequencing-3-phases-5-commits)
+  - [5. V5.5.020 Residual Fixes + Full Sync](#5-v555020-residual-fixes--full-sync)
+  - [6. ไฟล์ที่เปลี่ยนใน V5.5.020](#6-ไฟล์ที่เปลี่ยนใน-v555020)
+
+---
+
 ### 1. Executive Summary
 
 | รายการ | ผลลัพธ์ |
