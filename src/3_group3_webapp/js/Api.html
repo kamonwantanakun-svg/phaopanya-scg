@@ -10,7 +10,7 @@
  * ===================================================
  */
 
-window.api = (function () {
+globalThis.api = (function () {
   'use strict';
 
   /**
@@ -98,5 +98,5 @@ window.api = (function () {
   };
 })();
 
-console.log('[api] LMDS API wrapper loaded —', Object.keys(window.api));
+console.log('[api] LMDS API wrapper loaded —', Object.keys(globalThis.api));
 </script>

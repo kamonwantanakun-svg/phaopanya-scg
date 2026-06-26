@@ -221,7 +221,9 @@ function maskEmailSafe_(email) {
     if (typeof maskReviewerEmail_ === 'function') {
       return maskReviewerEmail_(email);
     }
-    if (!email || email.length < 3) return '***';
+    const isEmpty = email === '' || email === null || email === undefined;
+    const isTooShort = typeof email === 'string' && email.length < 3;
+    if (isEmpty || isTooShort) return '***';
     const parts = email.split('@');
     if (parts.length !== 2) return '***';
     return parts[0][0] + '***@' + parts[1];
@@ -262,11 +264,11 @@ function getDashboardData() {
   const reviewSheet = ss.getSheetByName(SHEET.Q_REVIEW);
   const sourceSheet = ss.getSheetByName(SHEET.SOURCE);
 
-  // ตรวจว่าชีตมีอยู่จริง
+  // ตรวจว่าชีตมีอยู่จริง (Boolean() แทน !! เพื่อความชัดเจน)
   const sheetsExist = {
-    fact: !!factSheet,
-    review: !!reviewSheet,
-    source: !!sourceSheet,
+    fact: factSheet !== null,
+    review: reviewSheet !== null,
+    source: sourceSheet !== null,
   };
 
   // ─── คำนวณ stats ───
@@ -282,67 +284,15 @@ function getDashboardData() {
   };
 
   if (sheetsExist.fact) {
-    const factData = factSheet.getDataRange().getValues();
-    if (factData.length > 1) {
-      stats.factDeliveryTotal = factData.length - 1; // ลบ header
-
-      // นับ match status
-      const statusCounts = {};
-      let autoMatchCount = 0;
-      let todayCount = 0;
-      const todayStr = formatDateForCompare_(new Date());
-
-      for (let i = 1; i < factData.length; i++) {
-        const row = factData[i];
-        const status = row[FACT_IDX.MATCH_STATUS] || 'UNKNOWN';
-        statusCounts[status] = (statusCounts[status] || 0) + 1;
-
-        if (status === APP_CONST.MATCH_FULL ||
-            status === APP_CONST.MATCH_GEO ||
-            status === APP_CONST.MATCH_FUZZY) {
-          autoMatchCount++;
-        }
-
-        // ตรวจวันจัดส่ง = วันนี้
-        const deliveryDate = row[FACT_IDX.DELIVERY_DATE];
-        if (deliveryDate instanceof Date && formatDateForCompare_(deliveryDate) === todayStr) {
-          todayCount++;
-        }
-      }
-
-      stats.matchStatusCounts = statusCounts;
-      stats.autoMatchRate = stats.factDeliveryTotal > 0
-        ? Math.round((autoMatchCount / stats.factDeliveryTotal) * 1000) / 10 // 1 decimal
-        : 0;
-      stats.todayDeliveries = todayCount;
-    }
+    computeFactStats_(factSheet, stats);
   }
 
   if (sheetsExist.review) {
-    const reviewData = reviewSheet.getDataRange().getValues();
-    if (reviewData.length > 1) {
-      stats.reviewTotal = reviewData.length - 1;
-      for (let i = 1; i < reviewData.length; i++) {
-        const status = reviewData[i][REVIEW_IDX.STATUS];
-        if (status === 'PENDING' || !status) {
-          stats.reviewPending++;
-        }
-      }
-    }
+    computeReviewStats_(reviewSheet, stats);
   }
 
   if (sheetsExist.source) {
-    const sourceData = sourceSheet.getDataRange().getValues();
-    if (sourceData.length > 1) {
-      stats.sourceSheetTotal = sourceData.length - 1;
-      // นับ SYNC_STATUS != SUCCESS
-      for (let i = 1; i < sourceData.length; i++) {
-        const syncStatus = sourceData[i][SRC_IDX.SYNC_STATUS];
-        if (syncStatus && String(syncStatus).toUpperCase() !== SCG_CONFIG.SYNC_DONE_VALUE) {
-          stats.sourcePending++;
-        }
-      }
-    }
+    computeSourceStats_(sourceSheet, stats);
   }
 
   // ─── Top Issues (จาก Q_REVIEW issue_type) ───
@@ -364,6 +314,102 @@ function getDashboardData() {
 }
 
 /**
+ * computeFactStats_ — คำนวณสถิติจาก FACT_DELIVERY sheet
+ *   - นับจำนวนระเบียนทั้งหมด
+ *   - นับ match status breakdown
+ *   - คำนวณ auto match rate (FULL + GEO + FUZZY)
+ *   - นับการจัดส่งวันนี้
+ *
+ * @param {Sheet} factSheet
+ * @param {Object} stats — object ที่จะถูก mutate
+ * @private
+ */
+function computeFactStats_(factSheet, stats) {
+  const factData = factSheet.getDataRange().getValues();
+  if (factData.length <= 1) return;
+
+  stats.factDeliveryTotal = factData.length - 1; // ลบ header
+
+  const statusCounts = {};
+  let autoMatchCount = 0;
+  let todayCount = 0;
+  const todayStr = formatDateForCompare_(new Date());
+
+  for (let i = 1; i < factData.length; i++) {
+    const row = factData[i];
+    const status = row[FACT_IDX.MATCH_STATUS] || 'UNKNOWN';
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+
+    if (isAutoMatchStatus_(status)) {
+      autoMatchCount++;
+    }
+
+    const deliveryDate = row[FACT_IDX.DELIVERY_DATE];
+    if (deliveryDate instanceof Date && formatDateForCompare_(deliveryDate) === todayStr) {
+      todayCount++;
+    }
+  }
+
+  stats.matchStatusCounts = statusCounts;
+  stats.autoMatchRate = stats.factDeliveryTotal > 0
+    ? Math.round((autoMatchCount / stats.factDeliveryTotal) * 1000) / 10
+    : 0;
+  stats.todayDeliveries = todayCount;
+}
+
+/**
+ * isAutoMatchStatus_ — ตรวจว่า status เป็น auto match หรือไม่
+ * @param {string} status
+ * @return {boolean}
+ * @private
+ */
+function isAutoMatchStatus_(status) {
+  return status === APP_CONST.MATCH_FULL ||
+         status === APP_CONST.MATCH_GEO ||
+         status === APP_CONST.MATCH_FUZZY;
+}
+
+/**
+ * computeReviewStats_ — คำนวณสถิติจาก Q_REVIEW sheet
+ * @param {Sheet} reviewSheet
+ * @param {Object} stats
+ * @private
+ */
+function computeReviewStats_(reviewSheet, stats) {
+  const reviewData = reviewSheet.getDataRange().getValues();
+  if (reviewData.length <= 1) return;
+
+  stats.reviewTotal = reviewData.length - 1;
+  for (let i = 1; i < reviewData.length; i++) {
+    const status = reviewData[i][REVIEW_IDX.STATUS];
+    const isPending = status === 'PENDING' || status === '' || status === null || status === undefined;
+    if (isPending) {
+      stats.reviewPending++;
+    }
+  }
+}
+
+/**
+ * computeSourceStats_ — คำนวณสถิติจาก Source sheet
+ * @param {Sheet} sourceSheet
+ * @param {Object} stats
+ * @private
+ */
+function computeSourceStats_(sourceSheet, stats) {
+  const sourceData = sourceSheet.getDataRange().getValues();
+  if (sourceData.length <= 1) return;
+
+  stats.sourceSheetTotal = sourceData.length - 1;
+  for (let i = 1; i < sourceData.length; i++) {
+    const syncStatus = sourceData[i][SRC_IDX.SYNC_STATUS];
+    const isDone = String(syncStatus || '').toUpperCase() === SCG_CONFIG.SYNC_DONE_VALUE;
+    if (syncStatus !== null && syncStatus !== undefined && syncStatus !== '' && !isDone) {
+      stats.sourcePending++;
+    }
+  }
+}
+
+/**
  * computeTopIssues_ — นับ issue_type จาก Q_REVIEW แล้วคืน top N
  *
  * @param {Sheet} reviewSheet
@@ -379,8 +425,9 @@ function computeTopIssues_(reviewSheet, limit) {
   const counts = {};
   for (let i = 1; i < data.length; i++) {
     const status = data[i][REVIEW_IDX.STATUS];
+    const isPending = status === 'PENDING' || status === '' || status === null || status === undefined;
     // นับเฉพาะที่ยัง PENDING
-    if (status === 'PENDING' || !status) {
+    if (isPending) {
       const issueType = data[i][REVIEW_IDX.ISSUE_TYPE] || 'UNKNOWN';
       counts[issueType] = (counts[issueType] || 0) + 1;
     }

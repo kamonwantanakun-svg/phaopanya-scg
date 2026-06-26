@@ -74,7 +74,7 @@
  * DashboardView — โมดูลสำหรับ render Dashboard view
  *   เรียกจาก App.js เมื่อ route = 'dashboard'
  */
-window.DashboardView = (function () {
+globalThis.DashboardView = (function () {
   'use strict';
 
   /**
@@ -158,8 +158,8 @@ window.DashboardView = (function () {
     const primaryGrid = container.querySelector('#statCardsGrid');
     const secondaryGrid = container.querySelector('#secondaryStatCards');
 
-    if (window.StatCard && primaryGrid) {
-      window.StatCard.renderGrid(primaryGrid, [
+    if (globalThis.StatCard && primaryGrid) {
+      globalThis.StatCard.renderGrid(primaryGrid, [
         {
           label: 'FACT_DELIVERY',
           value: stats.factDeliveryTotal || 0,
@@ -195,8 +195,8 @@ window.DashboardView = (function () {
       ], 4);
     }
 
-    if (window.StatCard && secondaryGrid) {
-      window.StatCard.renderGrid(secondaryGrid, [
+    if (globalThis.StatCard && secondaryGrid) {
+      globalThis.StatCard.renderGrid(secondaryGrid, [
         {
           label: 'Source Sheet (ดิบ)',
           value: stats.sourceSheetTotal || 0,

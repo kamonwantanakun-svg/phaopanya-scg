@@ -6,31 +6,32 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LMDS V5.5 Dashboard</title>
 
-  <!-- Tailwind CSS via CDN (no build step required) -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind CSS v3.4.16 (precompiled, with SRI) -->
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.16/dist/tailwind.min.css"
+        integrity="sha384-wAkE1abywdsF0VP/+RDLxHADng231vt6gsqcjBzQFUoAQNkuN63+cJ4XDiE7LVjx"
+        crossorigin="anonymous">
+
+  <!-- Custom Tailwind config (inline, runs after Tailwind loads) -->
   <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            // Match APP_CONST in 01_Config.gs
-            'lmds-found':     '#b6d7a8',
-            'lmds-fallback':  '#ffe599',
-            'lmds-not-found': '#f4cccc',
-            'lmds-branch':    '#cfe2f3',
-          }
-        }
-      }
-    }
+    // Extend Tailwind with LMDS colors — ใช้ CSS variables แทนเพราะเป็น precompiled CSS
+    document.documentElement.style.setProperty('--color-lmds-found', '#b6d7a8');
+    document.documentElement.style.setProperty('--color-lmds-fallback', '#ffe599');
+    document.documentElement.style.setProperty('--color-lmds-not-found', '#f4cccc');
+    document.documentElement.style.setProperty('--color-lmds-branch', '#cfe2f3');
   </script>
 
-  <!-- Chart.js for charts (Phase 3, but include now) -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- Chart.js 4.4.6 (with SRI) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"
+          integrity="sha384-Sse/HDqcypGpyTDpvZOJNnG0TT3feGQUkF9H+mnRvic+LjR+K1NhTt8f51KIQ3v3"
+          crossorigin="anonymous"></script>
 
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <!-- Lucide Icons 0.460.0 (with SRI) -->
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"
+          integrity="sha384-ieG+IKD0d/ZPXyCBTMVAbqsQdns8QGJR/e26WMw7M4fkaI/rHcS/YIoi+ah9WGge"
+          crossorigin="anonymous"></script>
 
-  <!-- Inter font -->
+  <!-- Inter font (preconnect + stylesheet) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -73,7 +74,11 @@
         </div>
         <div class="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-semibold"
              id="userAvatar">
-          <?= currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U' ?>
+          <? if (currentUser.name) { ?>
+            <?= currentUser.name.charAt(0).toUpperCase() ?>
+          <? } else { ?>
+            U
+          <? } ?>
         </div>
         <button id="manualRefreshBtn"
                 class="text-gray-500 hover:text-blue-600 transition-colors"
@@ -205,14 +210,14 @@
   <!-- ────────────────────────────────────────────────────────── -->
   <script>
     // ข้อมูลที่ server ส่งมาตอนเปิดหน้า (SSR) — ใช้ทันทีโดยไม่ต้องรอ polling
-    window.__INITIAL_DATA__ = <?= JSON.stringify(initialData) ?>;
-    window.__APP_VERSION__  = '<?= appVersion ?>';
-    window.__APP_NAME__     = '<?= appName ?>';
-    window.__CURRENT_USER__ = <?= JSON.stringify(currentUser) ?>;
-    window.__DEPLOYED_AT__  = '<?= deployedAt ?>';
+    globalThis.__INITIAL_DATA__ = <?= JSON.stringify(initialData) ?>;
+    globalThis.__APP_VERSION__  = '<?= appVersion ?>';
+    globalThis.__APP_NAME__     = '<?= appName ?>';
+    globalThis.__CURRENT_USER__ = <?= JSON.stringify(currentUser) ?>;
+    globalThis.__DEPLOYED_AT__  = '<?= deployedAt ?>';
 
     // Polling config (60 วินาที)
-    window.__POLL_INTERVAL_MS__ = 60 * 1000;
+    globalThis.__POLL_INTERVAL_MS__ = 60 * 1000;
   </script>
 
   <!-- ────────────────────────────────────────────────────────── -->

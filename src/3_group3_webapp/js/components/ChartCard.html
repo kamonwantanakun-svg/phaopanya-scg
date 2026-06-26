@@ -22,7 +22,7 @@
  * ===================================================
  */
 
-window.ChartCard = (function () {
+globalThis.ChartCard = (function () {
   'use strict';
 
   let chartCounter = 0;
@@ -69,9 +69,9 @@ window.ChartCard = (function () {
 
     // สร้าง Chart.js instance
     const canvas = document.getElementById(this.canvasId);
-    if (canvas && window.Chart) {
+    if (canvas && globalThis.Chart) {
       const defaultOptions = getDefaultOptions_(this.type);
-      const mergedOptions = Object.assign({}, defaultOptions, this.options);
+      const mergedOptions = { ...defaultOptions, ...this.options };
       this.chart = new Chart(canvas, {
         type: this.type,
         data: this.data,
@@ -127,7 +127,8 @@ window.ChartCard = (function () {
     };
 
     if (type === 'bar' || type === 'line') {
-      return Object.assign({}, base, {
+      return {
+        ...base,
         scales: {
           x: {
             grid: { display: false },
@@ -139,13 +140,14 @@ window.ChartCard = (function () {
             ticks: { font: { size: 10, family: 'Inter' }, color: '#9ca3af' },
           },
         },
-      });
+      };
     }
 
     if (type === 'pie' || type === 'doughnut') {
-      return Object.assign({}, base, {
+      return {
+        ...base,
         cutout: type === 'doughnut' ? '60%' : undefined,
-      });
+      };
     }
 
     return base;

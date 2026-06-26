@@ -13,7 +13,7 @@
  * ===================================================
  */
 
-window.auth = (function () {
+globalThis.auth = (function () {
   'use strict';
 
   const STORAGE_KEY = 'lmds_session';
@@ -25,11 +25,11 @@ window.auth = (function () {
 
   /**
    * init — เริ่มต้น auth system
-   *   อ่าน user จาก SSR data (window.__CURRENT_USER__)
+   *   อ่าน user จาก SSR data (globalThis.__CURRENT_USER__)
    *   เริ่ม session check timer
    */
   function init() {
-    currentUser = window.__CURRENT_USER__ || null;
+    currentUser = globalThis.__CURRENT_USER__ || null;
     refreshSession();
 
     // ตรวจ session ทุก 1 นาที
@@ -56,7 +56,7 @@ window.auth = (function () {
    * @return {boolean}
    */
   function isAuthorized() {
-    return !!(currentUser && currentUser.authorized);
+    return currentUser !== null && currentUser !== undefined && currentUser.authorized === true;
   }
 
   /**
@@ -137,7 +137,7 @@ window.auth = (function () {
   function logout() {
     destroy();
     // Reload หน้า — ถ้า auth หมดอายุ server จะ return Unauthorized page
-    window.location.reload();
+    globalThis.location.reload();
   }
 
   return {
