@@ -196,7 +196,8 @@ function getCurrentDashboardUser_() {
       displayName = userObj.getDisplayName() || 'User';
     }
   } catch (e) {
-    // ignore — บาง context ไม่สามารถอ่าน User object ได้
+    // บาง context ไม่สามารถอ่าน User object ได้ (เช่น Web App context บางกรณี)
+    logWarn('WebApp', 'Cannot read display name from User object: ' + e.message);
   }
 
   return {

@@ -84,7 +84,7 @@ globalThis.auth = (function () {
   function checkSessionExpiry_() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
+      if (raw === null || raw === '') {
         refreshSession(); // ยังไม่เคยเก็บ → สร้างใหม่
         return;
       }
@@ -126,7 +126,8 @@ globalThis.auth = (function () {
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch (e) {
-      // ignore
+      // localStorage อาจไม่พร้อมในบาง context (incognito, sandboxed iframe)
+      console.warn('[auth] Cannot clear session from localStorage:', e);
     }
   }
 

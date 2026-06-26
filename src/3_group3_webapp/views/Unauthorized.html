@@ -69,13 +69,13 @@
               document.getElementById('userEmail').textContent = user.email;
             }
           })
-          .withFailureHandler(function() {
-            // ignore — แสดง "ไม่สามารถอ่านได้"
+          .withFailureHandler(function(err) {
+            console.warn('[Unauthorized] Failed to fetch user email from server:', err);
           })
           .getCurrentDashboardUser_();
       }
     } catch (e) {
-      // ignore
+      console.warn('[Unauthorized] google.script.run not available in this context:', e);
     }
   </script>
 

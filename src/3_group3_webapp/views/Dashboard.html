@@ -286,13 +286,12 @@ globalThis.DashboardView = (function () {
 
   /**
    * chooseMatchRateColor_ — เลือกสีการ์ด Auto Match Rate ตามเปอร์เซ็นต์
-   * @param {number} rate
+   * @param {number} rate — default 0 (ใช้ default parameter แทน reassignment)
    * @return {string} 'green' | 'yellow'
    * @private
    */
-  function chooseMatchRateColor_(rate) {
-    const safeRate = rate || 0;
-    return safeRate >= 80 ? 'green' : 'yellow';
+  function chooseMatchRateColor_(rate = 0) {
+    return rate >= 80 ? 'green' : 'yellow';
   }
 
   /**
