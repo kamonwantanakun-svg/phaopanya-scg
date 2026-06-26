@@ -90,7 +90,7 @@ globalThis.StatCard = (function () {
     // Render lucide icons ที่เพิ่ง insert
     if (globalThis.lucide) {
       container.querySelectorAll('[data-lucide]').forEach((el) => {
-        globalThis.lucide.createIcon({ name: el.getAttribute('data-lucide') });
+        globalThis.lucide.createIcon({ name: el.dataset.lucide });
       });
     }
   }

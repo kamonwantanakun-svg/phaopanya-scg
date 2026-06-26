@@ -79,152 +79,286 @@ globalThis.DashboardView = (function () {
 
   /**
    * render — วาด Dashboard ทั้งหมด
+   *   ใช้ sub-functions เพื่อรักษา Cognitive Complexity ต่ำ (≤ 15)
+   *
    * @param {Object} data — ข้อมูลจาก api.getDashboardData()
    * @param {HTMLElement} container — ที่จะวาด (#viewContainer)
    */
   function render(data, container) {
-    if (!container) return;
+    if (container === null) return;
 
     const stats = data.stats || {};
     const topIssues = data.topIssues || [];
     const sheetsExist = data.sheetsExist || {};
 
-    // ─── Last Updated ───
-    const lastUpdated = data.lastUpdated ? new Date(data.lastUpdated) : null;
-    const lastUpdatedStr = lastUpdated
-      ? lastUpdated.toLocaleString('th-TH', {
-          dateStyle: 'short',
-          timeStyle: 'medium',
-        })
-      : '—';
+    // ─── Build static HTML (sections 1-5) ───
+    let html = buildHeaderHtml_(data);
+    html += buildStatCardContainersHtml_();
+    html += buildChartsContainersHtml_();
+    html += buildMissingSheetsWarningHtml_(sheetsExist);
 
-    // ─── Build HTML ───
-    let html = '';
+    container.innerHTML = html;
 
-    // Section 1: Page header
-    html += '<div class="mb-6">';
+    // ─── Render dynamic content into containers ───
+    renderPrimaryStatCards_(stats, container);
+    renderSecondaryStatCards_(stats, container);
+    renderBreakdownAndIssues_(stats, topIssues, container);
+  }
+
+  /**
+   * buildHeaderHtml_ — Section 1: Page header พร้อม last updated
+   * @param {Object} data
+   * @return {string} HTML
+   * @private
+   */
+  function buildHeaderHtml_(data) {
+    const lastUpdatedStr = formatLastUpdated_(data.lastUpdated);
+    let html = '<div class="mb-6">';
     html += '  <h2 class="text-2xl font-bold text-gray-900">📊 Dashboard</h2>';
     html += '  <p class="text-sm text-gray-500 mt-1">';
     html += '    ภาพรวมระบบ LMDS — อัปเดตล่าสุด: ';
     html += '    <span class="font-medium text-gray-700">' + lastUpdatedStr + '</span>';
-    if (data.elapsedMs) {
-      html += '    <span class="text-xs text-gray-400">(' + data.elapsedMs + 'ms)</span>';
-    }
+    html += buildElapsedBadgeHtml_(data.elapsedMs);
     html += '  </p>';
     html += '</div>';
+    return html;
+  }
 
-    // Section 2: Primary Stat Cards (4 cards)
-    html += '<div id="statCardsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"></div>';
+  /**
+   * formatLastUpdated_ — format ISO timestamp เป็น th-TH locale string
+   * @param {string} isoString
+   * @return {string}
+   * @private
+   */
+  function formatLastUpdated_(isoString) {
+    if (isoString === '' || isoString === null || isoString === undefined) return '—';
+    const date = new Date(isoString);
+    return date.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'medium' });
+  }
 
-    // Section 3: Secondary Stat Cards (2 cards)
+  /**
+   * buildElapsedBadgeHtml_ — สร้าง badge แสดงเวลาที่ใช้ (ms) ถ้ามี
+   * @param {number|undefined} elapsedMs
+   * @return {string}
+   * @private
+   */
+  function buildElapsedBadgeHtml_(elapsedMs) {
+    if (elapsedMs === undefined || elapsedMs === null || elapsedMs === 0) return '';
+    return '    <span class="text-xs text-gray-400">(' + elapsedMs + 'ms)</span>';
+  }
+
+  /**
+   * buildStatCardContainersHtml_ — Section 2 + 3: empty containers สำหรับ StatCards
+   * @return {string}
+   * @private
+   */
+  function buildStatCardContainersHtml_() {
+    let html = '<div id="statCardsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"></div>';
     html += '<div id="secondaryStatCards" class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6"></div>';
+    return html;
+  }
 
-    // Section 4: Match Status + Top Issues (2 columns)
-    html += '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">';
-
-    // 4a: Match Status Breakdown
+  /**
+   * buildChartsContainersHtml_ — Section 4: containers สำหรับ Match Status + Top Issues
+   * @return {string}
+   * @private
+   */
+  function buildChartsContainersHtml_() {
+    let html = '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">';
     html += '<div class="bg-white border border-gray-200 rounded-lg p-4">';
     html += '  <h3 class="text-sm font-semibold text-gray-800 mb-3">สัดส่วนสถานะการจับคู่</h3>';
     html += '  <div id="matchStatusBreakdown" class="space-y-2"></div>';
     html += '</div>';
-
-    // 4b: Top Issues
     html += '<div class="bg-white border border-gray-200 rounded-lg p-4">';
     html += '  <h3 class="text-sm font-semibold text-gray-800 mb-3">⚠️ ปัญหาที่พบบ่อย (Top 5)</h3>';
     html += '  <div id="topIssuesList" class="space-y-2"></div>';
     html += '</div>';
-
     html += '</div>';
+    return html;
+  }
 
-    // Section 5: Missing Sheets Warning (ถ้ามี)
-    const missingSheets = [];
-    if (sheetsExist.fact === false) missingSheets.push('FACT_DELIVERY');
-    if (sheetsExist.review === false) missingSheets.push('Q_REVIEW');
-    if (sheetsExist.source === false) missingSheets.push('Source Sheet (SCGนครหลวงJWDภูมิภาค)');
-    if (missingSheets.length > 0) {
-      html += '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">';
-      html += '  <h3 class="text-sm font-semibold text-yellow-800 mb-2">⚠️ ชีตที่หายไป</h3>';
-      html += '  <ul class="text-sm text-yellow-700 list-disc list-inside">';
-      missingSheets.forEach((s) => {
-        html += '<li>' + s + '</li>';
-      });
-      html += '  </ul>';
-      html += '</div>';
-    }
+  /**
+   * buildMissingSheetsWarningHtml_ — Section 5: warning ถ้ามี sheet หาย
+   * @param {Object} sheetsExist
+   * @return {string}
+   * @private
+   */
+  function buildMissingSheetsWarningHtml_(sheetsExist) {
+    const missingSheets = collectMissingSheets_(sheetsExist);
+    if (missingSheets.length === 0) return '';
 
-    container.innerHTML = html;
+    let html = '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">';
+    html += '  <h3 class="text-sm font-semibold text-yellow-800 mb-2">⚠️ ชีตที่หายไป</h3>';
+    html += '  <ul class="text-sm text-yellow-700 list-disc list-inside">';
+    missingSheets.forEach((s) => {
+      html += '<li>' + s + '</li>';
+    });
+    html += '  </ul>';
+    html += '</div>';
+    return html;
+  }
 
-    // ─── Render StatCards ───
-    const primaryGrid = container.querySelector('#statCardsGrid');
-    const secondaryGrid = container.querySelector('#secondaryStatCards');
+  /**
+   * collectMissingSheets_ — รวบชื่อ sheet ที่หายไปเป็น array
+   * @param {Object} sheetsExist
+   * @return {Array<string>}
+   * @private
+   */
+  function collectMissingSheets_(sheetsExist) {
+    const mapping = [
+      { key: 'fact',   label: 'FACT_DELIVERY' },
+      { key: 'review', label: 'Q_REVIEW' },
+      { key: 'source', label: 'Source Sheet (SCGนครหลวงJWDภูมิภาค)' },
+    ];
+    const missing = [];
+    mapping.forEach((m) => {
+      if (sheetsExist[m.key] === false) {
+        missing.push(m.label);
+      }
+    });
+    return missing;
+  }
 
-    if (globalThis.StatCard && primaryGrid) {
-      globalThis.StatCard.renderGrid(primaryGrid, [
-        {
-          label: 'FACT_DELIVERY',
-          value: stats.factDeliveryTotal || 0,
-          unit: 'rows',
-          icon: 'package',
-          color: 'blue',
-          hint: 'รายการจัดส่งทั้งหมด',
-        },
-        {
-          label: 'Q_REVIEW (รอตรวจ)',
-          value: stats.reviewPending || 0,
-          unit: 'rows',
-          icon: 'alert-triangle',
-          color: stats.reviewPending > 0 ? 'yellow' : 'green',
-          hint: 'รอคนตรวจสอบ',
-        },
-        {
-          label: 'Auto Match Rate',
-          value: stats.autoMatchRate || 0,
-          unit: '%',
-          icon: 'zap',
-          color: (stats.autoMatchRate || 0) >= 80 ? 'green' : 'yellow',
-          hint: 'FULL + GEO + FUZZY',
-        },
-        {
-          label: 'การจัดส่งวันนี้',
-          value: stats.todayDeliveries || 0,
-          unit: 'rows',
-          icon: 'truck',
-          color: 'blue',
-          hint: new Date().toLocaleDateString('th-TH', { dateStyle: 'long' }),
-        },
-      ], 4);
-    }
+  /**
+   * renderPrimaryStatCards_ — วาด 4 การ์ดหลัก (FACT_DELIVERY, Q_REVIEW, Auto Match, วันนี้)
+   * @param {Object} stats
+   * @param {HTMLElement} container
+   * @private
+   */
+  function renderPrimaryStatCards_(stats, container) {
+    const grid = container.querySelector('#statCardsGrid');
+    if (grid === null || globalThis.StatCard === undefined) return;
+    globalThis.StatCard.renderGrid(grid, buildPrimaryCardConfigs_(stats), 4);
+  }
 
-    if (globalThis.StatCard && secondaryGrid) {
-      globalThis.StatCard.renderGrid(secondaryGrid, [
-        {
-          label: 'Source Sheet (ดิบ)',
-          value: stats.sourceSheetTotal || 0,
-          unit: 'rows',
-          icon: 'inbox',
-          color: 'gray',
-          hint: 'ข้อมูลดิบจาก SCG API',
-        },
-        {
-          label: 'Source รอประมวลผล',
-          value: stats.sourcePending || 0,
-          unit: 'rows',
-          icon: 'clock',
-          color: (stats.sourcePending || 0) > 0 ? 'yellow' : 'green',
-          hint: 'SYNC_STATUS ≠ SUCCESS',
-        },
-      ], 2);
-    }
+  /**
+   * buildPrimaryCardConfigs_ — สร้าง config array สำหรับ 4 การ์ดหลัก
+   * @param {Object} stats
+   * @return {Array<Object>}
+   * @private
+   */
+  function buildPrimaryCardConfigs_(stats) {
+    return [
+      {
+        label: 'FACT_DELIVERY',
+        value: stats.factDeliveryTotal || 0,
+        unit: 'rows',
+        icon: 'package',
+        color: 'blue',
+        hint: 'รายการจัดส่งทั้งหมด',
+      },
+      {
+        label: 'Q_REVIEW (รอตรวจ)',
+        value: stats.reviewPending || 0,
+        unit: 'rows',
+        icon: 'alert-triangle',
+        color: chooseReviewColor_(stats.reviewPending),
+        hint: 'รอคนตรวจสอบ',
+      },
+      {
+        label: 'Auto Match Rate',
+        value: stats.autoMatchRate || 0,
+        unit: '%',
+        icon: 'zap',
+        color: chooseMatchRateColor_(stats.autoMatchRate),
+        hint: 'FULL + GEO + FUZZY',
+      },
+      {
+        label: 'การจัดส่งวันนี้',
+        value: stats.todayDeliveries || 0,
+        unit: 'rows',
+        icon: 'truck',
+        color: 'blue',
+        hint: new Date().toLocaleDateString('th-TH', { dateStyle: 'long' }),
+      },
+    ];
+  }
 
-    // ─── Render Match Status Breakdown ───
+  /**
+   * chooseReviewColor_ — เลือกสีการ์ด Q_REVIEW ตามจำนวนที่รอ
+   * @param {number} pendingCount
+   * @return {string} 'yellow' | 'green'
+   * @private
+   */
+  function chooseReviewColor_(pendingCount) {
+    return pendingCount > 0 ? 'yellow' : 'green';
+  }
+
+  /**
+   * chooseMatchRateColor_ — เลือกสีการ์ด Auto Match Rate ตามเปอร์เซ็นต์
+   * @param {number} rate
+   * @return {string} 'green' | 'yellow'
+   * @private
+   */
+  function chooseMatchRateColor_(rate) {
+    const safeRate = rate || 0;
+    return safeRate >= 80 ? 'green' : 'yellow';
+  }
+
+  /**
+   * renderSecondaryStatCards_ — วาด 2 การ์ดรอง (Source Total, Source Pending)
+   * @param {Object} stats
+   * @param {HTMLElement} container
+   * @private
+   */
+  function renderSecondaryStatCards_(stats, container) {
+    const grid = container.querySelector('#secondaryStatCards');
+    if (grid === null || globalThis.StatCard === undefined) return;
+    globalThis.StatCard.renderGrid(grid, buildSecondaryCardConfigs_(stats), 2);
+  }
+
+  /**
+   * buildSecondaryCardConfigs_ — สร้าง config array สำหรับ 2 การ์ดรอง
+   * @param {Object} stats
+   * @return {Array<Object>}
+   * @private
+   */
+  function buildSecondaryCardConfigs_(stats) {
+    return [
+      {
+        label: 'Source Sheet (ดิบ)',
+        value: stats.sourceSheetTotal || 0,
+        unit: 'rows',
+        icon: 'inbox',
+        color: 'gray',
+        hint: 'ข้อมูลดิบจาก SCG API',
+      },
+      {
+        label: 'Source รอประมวลผล',
+        value: stats.sourcePending || 0,
+        unit: 'rows',
+        icon: 'clock',
+        color: chooseSourcePendingColor_(stats.sourcePending),
+        hint: 'SYNC_STATUS ≠ SUCCESS',
+      },
+    ];
+  }
+
+  /**
+   * chooseSourcePendingColor_ — เลือกสีการ์ด Source Pending ตามจำนวน
+   * @param {number} pendingCount
+   * @return {string} 'yellow' | 'green'
+   * @private
+   */
+  function chooseSourcePendingColor_(pendingCount) {
+    return pendingCount > 0 ? 'yellow' : 'green';
+  }
+
+  /**
+   * renderBreakdownAndIssues_ — วาด Match Status Breakdown + Top Issues
+   * @param {Object} stats
+   * @param {Array} topIssues
+   * @param {HTMLElement} container
+   * @private
+   */
+  function renderBreakdownAndIssues_(stats, topIssues, container) {
     const breakdownEl = container.querySelector('#matchStatusBreakdown');
-    if (breakdownEl) {
+    if (breakdownEl !== null) {
       renderMatchStatusBreakdown_(breakdownEl, stats.matchStatusCounts || {}, stats.factDeliveryTotal || 0);
     }
 
-    // ─── Render Top Issues ───
     const issuesEl = container.querySelector('#topIssuesList');
-    if (issuesEl) {
+    if (issuesEl !== null) {
       renderTopIssues_(issuesEl, topIssues);
     }
   }
