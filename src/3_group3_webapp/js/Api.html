@@ -1,0 +1,102 @@
+<script>
+/**
+ * js/Api.html — Promisified google.script.run wrapper
+ * ===================================================
+ * ห่อ google.script.run แบบ callback ให้เป็น Promise เพื่อใช้ async/await ได้
+ *
+ * ใช้งาน:
+ *   const data = await api.getDashboardData();
+ *   const page = await api.getFactDeliveryPage(0, 50, { status: 'FULL_MATCH' });
+ * ===================================================
+ */
+
+window.api = (function () {
+  'use strict';
+
+  /**
+   * promisify_ — แปลง google.script.run callback pattern เป็น Promise
+   *
+   * @param {string} fnName - ชื่อ server function
+   * @param {...any} args - arguments ที่จะส่งไป
+   * @return {Promise<any>}
+   * @private
+   */
+  function promisify_(fnName, ...args) {
+    return new Promise((resolve, reject) => {
+      try {
+        google.script.run
+          .withSuccessHandler((result) => {
+            resolve(result);
+          })
+          .withFailureHandler((err) => {
+            console.error('[api] ' + fnName + ' failed:', err);
+            reject(normalizeError_(err));
+          })
+          [fnName](...args);
+      } catch (err) {
+        // กรณี google.script.run ยังไม่พร้อม (เช่น ใน IDE preview)
+        console.error('[api] google.script.run not available:', err);
+        reject(normalizeError_(err));
+      }
+    });
+  }
+
+  /**
+   * normalizeError_ — ทำให้ error เป็น object ที่จัดการง่าย
+   *
+   * @param {Error|string|Object} err
+   * @return {Error} Error ที่มี .message และ .details
+   * @private
+   */
+  function normalizeError_(err) {
+    if (err instanceof Error) return err;
+    if (typeof err === 'string') return new Error(err);
+    if (err && err.message) {
+      const e = new Error(err.message);
+      e.details = err.details || err.stack;
+      return e;
+    }
+    return new Error('Unknown error');
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // Public API methods (map 1:1 กับ server functions ใน 22_WebApp.gs)
+  // ────────────────────────────────────────────────────────────
+
+  return {
+    /**
+     * ping — ทดสอบการเชื่อมต่อ + auth
+     * @return {Promise<{ok: boolean, timestamp: string, appVersion: string, user: string}>}
+     */
+    ping: () => promisify_('ping'),
+
+    /**
+     * getDashboardData — ดึงสถิติรวมสำหรับ Dashboard
+     * @return {Promise<Object>} { stats, topIssues, sheetsExist, lastUpdated, appVersion, elapsedMs }
+     */
+    getDashboardData: () => promisify_('getDashboardData'),
+
+    /**
+     * getFactDeliveryPage — Phase 2 (stub)
+     * @param {number} offset
+     * @param {number} limit
+     * @param {Object} filter
+     */
+    getFactDeliveryPage: (offset, limit, filter) =>
+      promisify_('getFactDeliveryPage', offset, limit, filter),
+
+    /**
+     * getQReviewPage — Phase 2 (stub)
+     */
+    getQReviewPage: (offset, limit, statusFilter) =>
+      promisify_('getQReviewPage', offset, limit, statusFilter),
+
+    /**
+     * getMatchEngineMetrics — Phase 3 (stub)
+     */
+    getMatchEngineMetrics: () => promisify_('getMatchEngineMetrics'),
+  };
+})();
+
+console.log('[api] LMDS API wrapper loaded —', Object.keys(window.api));
+</script>

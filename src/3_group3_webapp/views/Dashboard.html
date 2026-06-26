@@ -1,0 +1,328 @@
+<!-- views/Dashboard.html — Dashboard view template -->
+<!-- ไฟล์นี้ไม่ใช่ไฟล์ HTML แบบ standalone แต่เป็น template ที่ App.js จะ inject เข้า #viewContainer -->
+<!-- มีเฉพาะ HTML structure ส่วนที่เปลี่ยน — ไม่รวม header/sidebar (มีอยู่ใน Index.html แล้ว) -->
+
+<!--
+  Dashboard view จะถูก render โดย App.js ผ่าน window.DashboardView.render(data)
+  ดู js/App.html สำหรับ logic การ render
+-->
+
+<!-- โครงสร้างนี้เป็นเพียง reference — App.js จะสร้าง HTML จริงใน #viewContainer -->
+
+<template id="dashboard-template">
+  <!-- Section 1: Page header -->
+  <div class="mb-6">
+    <h2 class="text-2xl font-bold text-gray-900">📊 Dashboard</h2>
+    <p class="text-sm text-gray-500 mt-1">
+      ภาพรวมระบบ LMDS — อัปเดตล่าสุด:
+      <span id="lastUpdated" class="font-medium text-gray-700">—</span>
+    </p>
+  </div>
+
+  <!-- Section 2: Stat Cards Grid (4 cards) -->
+  <div id="statCardsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <!-- StatCard จะถูก render โดย StatCard.renderGrid() -->
+  </div>
+
+  <!-- Section 3: Secondary Stat Cards (2 cards) -->
+  <div id="secondaryStatCards" class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+    <!-- การ์ดรอง: Source Sheet + Review Total -->
+  </div>
+
+  <!-- Section 4: Match Status Breakdown -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+
+    <!-- Match Status Breakdown -->
+    <div class="bg-white border border-gray-200 rounded-lg p-4">
+      <h3 class="text-sm font-semibold text-gray-800 mb-3">สัดส่วนสถานะการจับคู่</h3>
+      <div id="matchStatusBreakdown" class="space-y-2">
+        <!-- Breakdown bars จะถูก render โดย JS -->
+      </div>
+    </div>
+
+    <!-- Top Issues -->
+    <div class="bg-white border border-gray-200 rounded-lg p-4">
+      <h3 class="text-sm font-semibold text-gray-800 mb-3">⚠️ ปัญหาที่พบบ่อย (Top 5)</h3>
+      <div id="topIssuesList" class="space-y-2">
+        <!-- Issue items จะถูก render โดย JS -->
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Section 5: Sheets Status (เช็กว่ามี sheet ไหนหายไปไหม) -->
+  <div id="sheetsStatusSection" class="hidden">
+    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+      <h3 class="text-sm font-semibold text-yellow-800 mb-2">⚠️ ชีตที่หายไป</h3>
+      <div id="missingSheetsList" class="text-sm text-yellow-700"></div>
+    </div>
+  </div>
+
+  <!-- Section 6: Empty state (ถ้ายังไม่มีข้อมูล) -->
+  <div id="emptyState" class="hidden bg-white border border-gray-200 rounded-lg p-12 text-center">
+    <div class="text-4xl mb-3">📭</div>
+    <h3 class="text-lg font-semibold text-gray-700 mb-1">ยังไม่มีข้อมูล</h3>
+    <p class="text-sm text-gray-500">
+      ระบบจะแสดงสถิติเมื่อมีข้อมูลใน FACT_DELIVERY และ Q_REVIEW
+    </p>
+  </div>
+
+</template>
+
+<script>
+/**
+ * DashboardView — โมดูลสำหรับ render Dashboard view
+ *   เรียกจาก App.js เมื่อ route = 'dashboard'
+ */
+window.DashboardView = (function () {
+  'use strict';
+
+  /**
+   * render — วาด Dashboard ทั้งหมด
+   * @param {Object} data — ข้อมูลจาก api.getDashboardData()
+   * @param {HTMLElement} container — ที่จะวาด (#viewContainer)
+   */
+  function render(data, container) {
+    if (!container) return;
+
+    const stats = data.stats || {};
+    const topIssues = data.topIssues || [];
+    const sheetsExist = data.sheetsExist || {};
+
+    // ─── Last Updated ───
+    const lastUpdated = data.lastUpdated ? new Date(data.lastUpdated) : null;
+    const lastUpdatedStr = lastUpdated
+      ? lastUpdated.toLocaleString('th-TH', {
+          dateStyle: 'short',
+          timeStyle: 'medium',
+        })
+      : '—';
+
+    // ─── Build HTML ───
+    let html = '';
+
+    // Section 1: Page header
+    html += '<div class="mb-6">';
+    html += '  <h2 class="text-2xl font-bold text-gray-900">📊 Dashboard</h2>';
+    html += '  <p class="text-sm text-gray-500 mt-1">';
+    html += '    ภาพรวมระบบ LMDS — อัปเดตล่าสุด: ';
+    html += '    <span class="font-medium text-gray-700">' + lastUpdatedStr + '</span>';
+    if (data.elapsedMs) {
+      html += '    <span class="text-xs text-gray-400">(' + data.elapsedMs + 'ms)</span>';
+    }
+    html += '  </p>';
+    html += '</div>';
+
+    // Section 2: Primary Stat Cards (4 cards)
+    html += '<div id="statCardsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"></div>';
+
+    // Section 3: Secondary Stat Cards (2 cards)
+    html += '<div id="secondaryStatCards" class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6"></div>';
+
+    // Section 4: Match Status + Top Issues (2 columns)
+    html += '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">';
+
+    // 4a: Match Status Breakdown
+    html += '<div class="bg-white border border-gray-200 rounded-lg p-4">';
+    html += '  <h3 class="text-sm font-semibold text-gray-800 mb-3">สัดส่วนสถานะการจับคู่</h3>';
+    html += '  <div id="matchStatusBreakdown" class="space-y-2"></div>';
+    html += '</div>';
+
+    // 4b: Top Issues
+    html += '<div class="bg-white border border-gray-200 rounded-lg p-4">';
+    html += '  <h3 class="text-sm font-semibold text-gray-800 mb-3">⚠️ ปัญหาที่พบบ่อย (Top 5)</h3>';
+    html += '  <div id="topIssuesList" class="space-y-2"></div>';
+    html += '</div>';
+
+    html += '</div>';
+
+    // Section 5: Missing Sheets Warning (ถ้ามี)
+    const missingSheets = [];
+    if (sheetsExist.fact === false) missingSheets.push('FACT_DELIVERY');
+    if (sheetsExist.review === false) missingSheets.push('Q_REVIEW');
+    if (sheetsExist.source === false) missingSheets.push('Source Sheet (SCGนครหลวงJWDภูมิภาค)');
+    if (missingSheets.length > 0) {
+      html += '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">';
+      html += '  <h3 class="text-sm font-semibold text-yellow-800 mb-2">⚠️ ชีตที่หายไป</h3>';
+      html += '  <ul class="text-sm text-yellow-700 list-disc list-inside">';
+      missingSheets.forEach((s) => {
+        html += '<li>' + s + '</li>';
+      });
+      html += '  </ul>';
+      html += '</div>';
+    }
+
+    container.innerHTML = html;
+
+    // ─── Render StatCards ───
+    const primaryGrid = container.querySelector('#statCardsGrid');
+    const secondaryGrid = container.querySelector('#secondaryStatCards');
+
+    if (window.StatCard && primaryGrid) {
+      window.StatCard.renderGrid(primaryGrid, [
+        {
+          label: 'FACT_DELIVERY',
+          value: stats.factDeliveryTotal || 0,
+          unit: 'rows',
+          icon: 'package',
+          color: 'blue',
+          hint: 'รายการจัดส่งทั้งหมด',
+        },
+        {
+          label: 'Q_REVIEW (รอตรวจ)',
+          value: stats.reviewPending || 0,
+          unit: 'rows',
+          icon: 'alert-triangle',
+          color: stats.reviewPending > 0 ? 'yellow' : 'green',
+          hint: 'รอคนตรวจสอบ',
+        },
+        {
+          label: 'Auto Match Rate',
+          value: stats.autoMatchRate || 0,
+          unit: '%',
+          icon: 'zap',
+          color: (stats.autoMatchRate || 0) >= 80 ? 'green' : 'yellow',
+          hint: 'FULL + GEO + FUZZY',
+        },
+        {
+          label: 'การจัดส่งวันนี้',
+          value: stats.todayDeliveries || 0,
+          unit: 'rows',
+          icon: 'truck',
+          color: 'blue',
+          hint: new Date().toLocaleDateString('th-TH', { dateStyle: 'long' }),
+        },
+      ], 4);
+    }
+
+    if (window.StatCard && secondaryGrid) {
+      window.StatCard.renderGrid(secondaryGrid, [
+        {
+          label: 'Source Sheet (ดิบ)',
+          value: stats.sourceSheetTotal || 0,
+          unit: 'rows',
+          icon: 'inbox',
+          color: 'gray',
+          hint: 'ข้อมูลดิบจาก SCG API',
+        },
+        {
+          label: 'Source รอประมวลผล',
+          value: stats.sourcePending || 0,
+          unit: 'rows',
+          icon: 'clock',
+          color: (stats.sourcePending || 0) > 0 ? 'yellow' : 'green',
+          hint: 'SYNC_STATUS ≠ SUCCESS',
+        },
+      ], 2);
+    }
+
+    // ─── Render Match Status Breakdown ───
+    const breakdownEl = container.querySelector('#matchStatusBreakdown');
+    if (breakdownEl) {
+      renderMatchStatusBreakdown_(breakdownEl, stats.matchStatusCounts || {}, stats.factDeliveryTotal || 0);
+    }
+
+    // ─── Render Top Issues ───
+    const issuesEl = container.querySelector('#topIssuesList');
+    if (issuesEl) {
+      renderTopIssues_(issuesEl, topIssues);
+    }
+  }
+
+  /**
+   * renderMatchStatusBreakdown_ — วาด bar chart แนวนอนของ match status
+   * @private
+   */
+  function renderMatchStatusBreakdown_(container, counts, total) {
+    const statusConfig = {
+      'FULL_MATCH':   { label: 'FULL_MATCH',    color: 'bg-green-500',  text: 'text-green-700' },
+      'GEO_ANCHOR':   { label: 'GEO_ANCHOR',    color: 'bg-blue-500',   text: 'text-blue-700' },
+      'FUZZY_MATCH':  { label: 'FUZZY_MATCH',   color: 'bg-cyan-500',   text: 'text-cyan-700' },
+      'CREATE_NEW':   { label: 'CREATE_NEW',    color: 'bg-yellow-500', text: 'text-yellow-700' },
+      'NEEDS_REVIEW': { label: 'NEEDS_REVIEW',  color: 'bg-orange-500', text: 'text-orange-700' },
+      'ERROR':        { label: 'ERROR',         color: 'bg-red-500',    text: 'text-red-700' },
+    };
+
+    if (total === 0) {
+      container.innerHTML = '<p class="text-sm text-gray-400 text-center py-4">ยังไม่มีข้อมูล</p>';
+      return;
+    }
+
+    let html = '';
+    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+    entries.forEach(([status, count]) => {
+      const config = statusConfig[status] || { label: status, color: 'bg-gray-400', text: 'text-gray-700' };
+      const percent = total > 0 ? Math.round((count / total) * 1000) / 10 : 0;
+      html +=
+        '<div>' +
+          '<div class="flex justify-between items-center text-xs mb-1">' +
+            '<span class="font-medium ' + config.text + '">' + config.label + '</span>' +
+            '<span class="text-gray-500">' + count.toLocaleString() + ' (' + percent + '%)</span>' +
+          '</div>' +
+          '<div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden">' +
+            '<div class="' + config.color + ' h-2 rounded-full transition-all duration-500" style="width: ' + percent + '%"></div>' +
+          '</div>' +
+        '</div>';
+    });
+
+    container.innerHTML = html;
+  }
+
+  /**
+   * renderTopIssues_ — วาดรายการ top issues
+   * @private
+   */
+  function renderTopIssues_(container, issues) {
+    if (!issues || issues.length === 0) {
+      container.innerHTML =
+        '<div class="text-center py-4">' +
+          '<div class="text-2xl mb-1">✅</div>' +
+          '<p class="text-sm text-gray-500">ไม่มีปัญหารอตรวจ</p>' +
+        '</div>';
+      return;
+    }
+
+    const issueLabels = {
+      'INVALID_LATLNG':          { label: 'พิกัด GPS ไม่ถูกต้อง', icon: '🗺️', color: 'bg-red-100 text-red-700' },
+      'GEO_PROVINCE_CONFLICT':   { label: 'จังหวัดจาก Geo ไม่ตรง', icon: '📍', color: 'bg-orange-100 text-orange-700' },
+      'NAME_TOO_SHORT':          { label: 'ชื่อสั้นเกินไป', icon: '✂️', color: 'bg-yellow-100 text-yellow-700' },
+      'FUZZY_AMBIGUOUS':         { label: 'ชื่อคล้ายหลายร้าน', icon: '🔀', color: 'bg-yellow-100 text-yellow-700' },
+      'GEO_NEARBY_YELLOW':       { label: 'พิกัดใกล้ (50-80m)', icon: '🎯', color: 'bg-yellow-100 text-yellow-700' },
+      'GEO_NEARBY_ORANGE':       { label: 'พิกัดใกล้ (80-100m)', icon: '🎯', color: 'bg-orange-100 text-orange-700' },
+      'NO_MATCH_NEW_ENTITY':     { label: 'ไม่เจอ มี GPS ดี', icon: '🆕', color: 'bg-blue-100 text-blue-700' },
+    };
+
+    let html = '';
+    issues.forEach((issue, idx) => {
+      const config = issueLabels[issue.issueType] || { label: issue.issueType, icon: '❓', color: 'bg-gray-100 text-gray-700' };
+      const maxCount = issues[0].count || 1;
+      const barWidth = Math.round((issue.count / maxCount) * 100);
+
+      html +=
+        '<div class="flex items-center gap-3">' +
+          '<div class="flex-shrink-0 w-7 h-7 ' + config.color + ' rounded-full flex items-center justify-center text-xs">' +
+            config.icon +
+          '</div>' +
+          '<div class="flex-1">' +
+            '<div class="flex justify-between items-center text-xs mb-1">' +
+              '<span class="font-medium text-gray-700">' + config.label + '</span>' +
+              '<span class="text-gray-500">' + issue.count + ' รายการ</span>' +
+            '</div>' +
+            '<div class="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">' +
+              '<div class="bg-gray-400 h-1.5 rounded-full" style="width: ' + barWidth + '%"></div>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    });
+
+    container.innerHTML = html;
+  }
+
+  return {
+    render: render,
+  };
+})();
+
+console.log('[DashboardView] view loaded');
+</script>

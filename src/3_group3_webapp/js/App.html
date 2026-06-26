@@ -1,0 +1,493 @@
+<script>
+/**
+ * js/App.html — Main Application Logic
+ * ===================================================
+ * ทำหน้าที่เป็น router + polling controller + view orchestrator
+ *
+ * หน้าที่หลัก:
+ * 1. init() — เริ่มต้นแอป ตั้ง polling แสดง SSR data
+ * 2. Route handling — ฟัง hashchange แล้ว render view ที่ถูกต้อง
+ * 3. Polling — ทุก 60 วินาที refresh view ปัจจุบัน
+ * 4. Toast notifications — แสดง error/success messages
+ * 5. Session management — ฟัง auth:session-expired
+ * ===================================================
+ */
+
+(function () {
+  'use strict';
+
+  // ────────────────────────────────────────────────────────────
+  // Constants
+  // ────────────────────────────────────────────────────────────
+  const POLL_INTERVAL_MS = window.__POLL_INTERVAL_MS__ || 60000;
+  const REFRESH_COUNTDOWN_UPDATE_MS = 1000;
+
+  // ────────────────────────────────────────────────────────────
+  // State
+  // ────────────────────────────────────────────────────────────
+  let currentRoute = 'dashboard';
+  let currentData = null;
+  let refreshTimer = null;
+  let countdownTimer = null;
+  let nextRefreshAt = null;
+  let isRefreshing = false;
+
+  // ────────────────────────────────────────────────────────────
+  // DOM References (จะถูก cache ตอน init)
+  // ────────────────────────────────────────────────────────────
+  let viewContainer = null;
+  let loadingState = null;
+  let errorState = null;
+  let errorMessage = null;
+  let refreshCountdown = null;
+  let liveIndicator = null;
+  let manualRefreshBtn = null;
+  let navLinks = null;
+  let deployedAtEl = null;
+
+  // ────────────────────────────────────────────────────────────
+  // Init
+  // ────────────────────────────────────────────────────────────
+
+  /**
+   * init — เริ่มต้นแอป
+   *   เรียกตอน DOMContentLoaded
+   */
+  function init() {
+    console.log('[app] Initializing LMDS Dashboard v' + (window.__APP_VERSION__ || '?'));
+
+    // Cache DOM references
+    viewContainer = document.getElementById('viewContainer');
+    loadingState = document.getElementById('loadingState');
+    errorState = document.getElementById('errorState');
+    errorMessage = document.getElementById('errorMessage');
+    refreshCountdown = document.getElementById('refreshCountdown');
+    liveIndicator = document.getElementById('liveIndicator');
+    manualRefreshBtn = document.getElementById('manualRefreshBtn');
+    navLinks = document.querySelectorAll('.nav-link');
+    deployedAtEl = document.getElementById('deployedAt');
+
+    // แสดงเวลา deploy
+    if (deployedAtEl && window.__DEPLOYED_AT__) {
+      const dt = new Date(window.__DEPLOYED_AT__);
+      deployedAtEl.textContent = dt.toLocaleDateString('th-TH', { dateStyle: 'short' });
+    }
+
+    // เริ่มต้น auth
+    if (window.auth) {
+      window.auth.init();
+    }
+
+    // ฟัง events
+    bindEvents_();
+
+    // Render SSR data (ถ้ามี)
+    if (window.__INITIAL_DATA__ && window.__INITIAL_DATA__.stats) {
+      console.log('[app] Rendering SSR data');
+      hideLoading_();
+      currentData = window.__INITIAL_DATA__;
+      renderCurrentRoute_(false); // false = ไม่ต้อง fetch ใหม่
+      startPolling_();
+    } else {
+      // ไม่มี SSR data — fetch เอง
+      console.log('[app] No SSR data, fetching...');
+      refresh_(true);
+    }
+
+    console.log('[app] Init complete');
+  }
+
+  /**
+   * bindEvents_ — ผูก event listeners ทั้งหมด
+   * @private
+   */
+  function bindEvents_() {
+    // Hash change (router)
+    window.addEventListener('hashchange', handleHashChange_);
+
+    // Manual refresh button
+    if (manualRefreshBtn) {
+      manualRefreshBtn.addEventListener('click', () => {
+        console.log('[app] Manual refresh triggered');
+        refresh_(false);
+      });
+    }
+
+    // Session expired
+    document.addEventListener('auth:session-expired', () => {
+      console.warn('[app] Session expired — stopping polling');
+      stopPolling_();
+      showToast_('⏰ Session หมดอายุ', 'session หมดอายุเนื่องจากไม่ได้ใช้งาน 30 นาที กรุณารีโหลดหน้า', 'warning', 10000);
+    });
+
+    // Visibility change (หยุด polling เมื่อ tab ไม่ active)
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        console.log('[app] Tab hidden — pausing polling');
+        stopPolling_();
+      } else {
+        console.log('[app] Tab visible — resuming polling');
+        refresh_(false);
+        startPolling_();
+      }
+    });
+
+    // Initial route from hash
+    handleHashChange_();
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // Router
+  // ────────────────────────────────────────────────────────────
+
+  /**
+   * handleHashChange_ — จัดการการเปลี่ยน hash (route)
+   * @private
+   */
+  function handleHashChange_() {
+    const hash = window.location.hash.slice(1) || 'dashboard';
+    const route = hash.split('/')[0]; // รองรับ sub-routes เช่น #fact/page/2
+    console.log('[app] Route changed to:', route);
+    currentRoute = route;
+
+    // Update active nav link
+    navLinks.forEach((link) => {
+      if (link.dataset.route === route) {
+        link.classList.add('active');
+      } else {
+        link.classList.remove('active');
+      }
+    });
+
+    // Render view (ใช้ currentData ถ้ามี ไม่ต้อง fetch ใหม่)
+    renderCurrentRoute_(false);
+  }
+
+  /**
+   * renderCurrentRoute_ — render view ตาม route ปัจจุบัน
+   * @param {boolean} fetchData — ถ้า true จะ fetch ข้อมูลใหม่ก่อน render
+   * @private
+   */
+  function renderCurrentRoute_(fetchData) {
+    if (!viewContainer) return;
+
+    // ซ่อน loading/error states
+    hideLoading_();
+    hideError_();
+
+    if (fetchData && window.api) {
+      // ดึงข้อมูลใหม่จาก server แล้วค่อย render
+      refresh_(false);
+      return;
+    }
+
+    // ใช้ currentData ที่มีอยู่
+    try {
+      switch (currentRoute) {
+        case 'dashboard':
+          if (window.DashboardView) {
+            window.DashboardView.render(currentData, viewContainer);
+            renderIcons_();
+          }
+          break;
+
+        case 'fact':
+        case 'qreview':
+        case 'source':
+        case 'match':
+        case 'search':
+          renderComingSoon_(currentRoute);
+          break;
+
+        default:
+          renderNotFound_();
+      }
+    } catch (err) {
+      console.error('[app] Render error:', err);
+      showError_('เกิดข้อผิดพลาดในการแสดงผล: ' + err.message);
+    }
+  }
+
+  /**
+   * renderComingSoon_ — แสดงหน้า "เร็วๆ นี้" สำหรับ Phase 2+ views
+   * @private
+   */
+  function renderComingSoon_(route) {
+    const titles = {
+      fact: '📦 FACT_DELIVERY',
+      qreview: '⚠️ Q_REVIEW',
+      source: '📥 Source Sheet',
+      match: '📈 Match Engine Metrics',
+      search: '🔍 Search',
+    };
+
+    viewContainer.innerHTML =
+      '<div class="bg-white border border-gray-200 rounded-lg p-12 text-center">' +
+        '<div class="text-4xl mb-3">🚧</div>' +
+        '<h2 class="text-lg font-semibold text-gray-700 mb-1">' + (titles[route] || route) + '</h2>' +
+        '<p class="text-sm text-gray-500 mb-4">หน้านี้จะพร้อมใช้งานใน Phase ถัดไป</p>' +
+        '<div class="inline-flex items-center gap-2 text-xs text-gray-400">' +
+          '<span class="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></span>' +
+          'Coming soon' +
+        '</div>' +
+        '<div class="mt-6">' +
+          '<a href="#dashboard" class="text-sm text-blue-600 hover:underline">← กลับไป Dashboard</a>' +
+        '</div>' +
+      '</div>';
+  }
+
+  /**
+   * renderNotFound_ — แสดงหน้า 404
+   * @private
+   */
+  function renderNotFound_() {
+    viewContainer.innerHTML =
+      '<div class="bg-white border border-gray-200 rounded-lg p-12 text-center">' +
+        '<div class="text-4xl mb-3">🔍</div>' +
+        '<h2 class="text-lg font-semibold text-gray-700 mb-1">ไม่พบหน้าที่คุณค้นหา</h2>' +
+        '<p class="text-sm text-gray-500 mb-4">ตรวจสอบ URL อีกครั้ง</p>' +
+        '<a href="#dashboard" class="text-sm text-blue-600 hover:underline">← กลับไป Dashboard</a>' +
+      '</div>';
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // Polling
+  // ────────────────────────────────────────────────────────────
+
+  /**
+   * startPolling_ — เริ่ม polling ทุก 60 วินาที
+   * @private
+   */
+  function startPolling_() {
+    stopPolling_(); // clear เดิมก่อน
+    scheduleNextRefresh_();
+    startCountdown_();
+    setLiveIndicator_(true);
+  }
+
+  /**
+   * stopPolling_ — หยุด polling
+   * @private
+   */
+  function stopPolling_() {
+    if (refreshTimer) {
+      clearTimeout(refreshTimer);
+      refreshTimer = null;
+    }
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    }
+    setLiveIndicator_(false);
+  }
+
+  /**
+   * scheduleNextRefresh_ — ตั้งเวลา refresh ครั้งถัดไป
+   * @private
+   */
+  function scheduleNextRefresh_() {
+    refreshTimer = setTimeout(async () => {
+      await refresh_(false);
+      scheduleNextRefresh_();
+    }, POLL_INTERVAL_MS);
+    nextRefreshAt = Date.now() + POLL_INTERVAL_MS;
+  }
+
+  /**
+   * startCountdown_ — อัปเดต countdown text ทุก 1 วินาที
+   * @private
+   */
+  function startCountdown_() {
+    countdownTimer = setInterval(() => {
+      if (!nextRefreshAt || !refreshCountdown) return;
+      const remaining = Math.max(0, Math.ceil((nextRefreshAt - Date.now()) / 1000));
+      if (remaining === 0) {
+        refreshCountdown.textContent = 'refreshing...';
+      } else {
+        refreshCountdown.textContent = 'refresh in ' + remaining + 's';
+      }
+    }, REFRESH_COUNTDOWN_UPDATE_MS);
+  }
+
+  /**
+   * setLiveIndicator_ — toggle สี Live indicator
+   * @private
+   */
+  function setLiveIndicator_(isLive) {
+    if (!liveIndicator) return;
+    if (isLive) {
+      liveIndicator.className = 'inline-flex items-center gap-1.5 text-xs px-2.5 py-1 bg-green-100 text-green-700 rounded-full font-medium';
+      liveIndicator.innerHTML = '<span class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span> Live';
+    } else {
+      liveIndicator.className = 'inline-flex items-center gap-1.5 text-xs px-2.5 py-1 bg-gray-100 text-gray-500 rounded-full font-medium';
+      liveIndicator.innerHTML = '<span class="w-1.5 h-1.5 bg-gray-400 rounded-full"></span> Paused';
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // Refresh
+  // ────────────────────────────────────────────────────────────
+
+  /**
+   * refresh_ — ดึงข้อมูลใหม่จาก server แล้ว render
+   * @param {boolean} isInitial — true ถ้าเป็นการโหลดครั้งแรก
+   * @private
+   */
+  async function refresh_(isInitial) {
+    if (isRefreshing) {
+      console.log('[app] Refresh already in progress — skipping');
+      return;
+    }
+    if (!window.api) {
+      console.error('[app] API not available');
+      return;
+    }
+
+    isRefreshing = true;
+
+    if (isInitial) {
+      showLoading_();
+    }
+
+    try {
+      console.log('[app] Fetching dashboard data...');
+      const data = await window.api.getDashboardData();
+      currentData = data;
+      hideLoading_();
+      hideError_();
+      renderCurrentRoute_(false);
+
+      // Reset nextRefreshAt หลัง refresh สำเร็จ
+      nextRefreshAt = Date.now() + POLL_INTERVAL_MS;
+
+      if (!isInitial) {
+        // Toast เฉพาะตอน polling ไม่ใช่ initial load
+        showToast_('✅ อัปเดตแล้ว', 'ข้อมูลได้รับการอัปเดตเรียบร้อย', 'success', 2000);
+      }
+    } catch (err) {
+      console.error('[app] Refresh failed:', err);
+      hideLoading_();
+
+      if (err.message === 'Unauthorized') {
+        showToast_('🔒 Session หมดอายุ', 'กรุณารีโหลดหน้าเพื่อ login ใหม่', 'error', 0);
+        stopPolling_();
+      } else if (isInitial) {
+        showError_(err.message);
+      } else {
+        showToast_('⚠️ ไม่สามารถอัปเดตได้', err.message, 'error', 5000);
+        // ไม่หยุด polling — ลองใหม่รอบถัดไป
+      }
+    } finally {
+      isRefreshing = false;
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // UI State helpers
+  // ────────────────────────────────────────────────────────────
+
+  function showLoading_() {
+    if (loadingState) loadingState.style.display = '';
+    if (viewContainer) viewContainer.style.display = 'none';
+  }
+
+  function hideLoading_() {
+    if (loadingState) loadingState.style.display = 'none';
+    if (viewContainer) viewContainer.style.display = '';
+  }
+
+  function showError_(msg) {
+    if (errorMessage) errorMessage.textContent = msg || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
+    if (errorState) errorState.style.display = '';
+    if (viewContainer) viewContainer.style.display = 'none';
+  }
+
+  function hideError_() {
+    if (errorState) errorState.style.display = 'none';
+  }
+
+  /**
+   * renderIcons_ — render Lucide icons ใหม่ (หลังจาก inject HTML)
+   * @private
+   */
+  function renderIcons_() {
+    if (window.lucide) {
+      // lucide v0.x API
+      if (typeof window.lucide.createIcons === 'function') {
+        window.lucide.createIcons();
+      }
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // Toast Notifications
+  // ────────────────────────────────────────────────────────────
+
+  /**
+   * showToast_ — แสดง toast notification
+   * @param {string} title
+   * @param {string} message
+   * @param {string} type — 'success' | 'error' | 'warning' | 'info'
+   * @param {number} duration — ms (0 = ไม่ปิดอัตโนมัติ)
+   * @private
+   */
+  function showToast_(title, message, type, duration) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+
+    type = type || 'info';
+    duration = duration !== undefined ? duration : 4000;
+
+    const colors = {
+      success: { bg: 'bg-green-50',   border: 'border-green-200',   text: 'text-green-800',   icon: '✅' },
+      error:   { bg: 'bg-red-50',     border: 'border-red-200',     text: 'text-red-800',     icon: '❌' },
+      warning: { bg: 'bg-yellow-50',  border: 'border-yellow-200',  text: 'text-yellow-800',  icon: '⚠️' },
+      info:    { bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-800',    icon: 'ℹ️' },
+    };
+    const c = colors[type] || colors.info;
+
+    const toast = document.createElement('div');
+    toast.className = 'pointer-events-auto ' + c.bg + ' ' + c.border + ' ' + c.text +
+                      ' border rounded-lg shadow-md p-3 max-w-sm toast-enter';
+    toast.innerHTML =
+      '<div class="flex items-start gap-2">' +
+        '<span class="text-lg">' + c.icon + '</span>' +
+        '<div class="flex-1">' +
+          '<p class="text-sm font-semibold">' + title + '</p>' +
+          (message ? '<p class="text-xs mt-0.5 opacity-90">' + message + '</p>' : '') +
+        '</div>' +
+        (duration > 0 ? '<button class="text-gray-400 hover:text-gray-600" onclick="this.parentElement.parentElement.remove()">×</button>' : '') +
+      '</div>';
+
+    container.appendChild(toast);
+
+    if (duration > 0) {
+      setTimeout(() => {
+        toast.classList.remove('toast-enter');
+        toast.classList.add('toast-exit');
+        setTimeout(() => toast.remove(), 300);
+      }, duration);
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // Bootstrap
+  // ────────────────────────────────────────────────────────────
+
+  // เริ่มแอปเมื่อ DOM พร้อม
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+  // Expose บางฟังก์ชันให้เรียกจาก HTML ได้
+  window.LMDSApp = {
+    refresh: () => refresh_(false),
+    showToast: showToast_,
+  };
+
+})();
+
+console.log('[app] App script loaded');
+</script>
