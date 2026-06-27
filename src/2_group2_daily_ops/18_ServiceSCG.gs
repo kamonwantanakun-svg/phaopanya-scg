@@ -47,7 +47,7 @@
  *   │  │   └── 8. buildShipmentSummary()                                    │
  *   │  ├── fetchWithRetry_() — HTTP retry without PII leak in error         │
  *   │  ├── checkIsEPOD() — E-POD eligibility (ReDoS safe regex)             │
- *   │  ├── getSCGCookie_() — LockService ป้องกัน Race Condition               │
+ *   │  ├── getSCGCookie_() — [REVERTED] อ่านจาก B1 ก่อน → fallback Properties │
  *   │  └── clearAllSCGSheets_UI() — ใช้ clearContent() แทน deleteRows()       │
  *   └───────────────────────────────────────────────────────────────────────┘
  * ===================================================
@@ -61,36 +61,26 @@
 // ============================================================
 
 /**
- * sanitizeCookie_ — [SEC-003] ตรวจสอบและทำความสะอาดค่า Cookie ก่อนใช้งาน
- * ป้องกัน CRLF Injection และ Control Characters ใน HTTP Header
+ * sanitizeCookie_ — [SEC-003 / REVERTED v5.5.022-hotfix]
+ * ทำความสะอาด Cookie แบบ minimal: ตัด control characters + CRLF เท่านั้น
+ * ไม่ตรวจ regex whitelist เพราะ Cookie จริงจาก Browser มักมีอักขระพิเศษ
+ * เช่น ! $ & ' ( ) * + - . / : ; < = > ? @ [ ] ^ _ ` { | } ~
  * @param {string} raw - Cookie ดิบจากผู้ใช้
- * @return {string} Cookie ที่ผ่านการ sanitize
- * @throws {Error} ถ้า Cookie มีตัวอักษรที่ไม่อนุญาต
+ * @return {string} Cookie ที่ผ่านการ sanitize (เอาเฉพาะ CRLF/control chars ออก)
+ * @throws {Error} ถ้า Cookie เป็นค่าว่าง หรือ สั้นเกินไป
  */
 function sanitizeCookie_(raw) {
-  const clean = String(raw || '').trim();
+  let clean = String(raw || '').trim();
 
   if (!clean) {
     throw new Error('Cookie ไม่สามารถเป็นค่าว่าง');
   }
 
-  // ตรวจ CRLF และ Control Characters (0x00-0x1F, 0x7F)
+  // [SEC-003] ป้องกัน CRLF Injection — ลบ CR, LF, และ Control Characters (0x00-0x1F, 0x7F)
+  // ไม่ throw — ใช้ replace แทน เพื่อรองรับ cookie ที่อาจมี whitespace แปลกๆ จากการ copy
   if (/[\r\n\x00-\x1f\x7f]/.test(clean)) {
-    throw new Error(
-      'Cookie มีตัวอักษรที่ไม่อนุญาต (CRLF Injection Risk)\n' +
-      'กรุณาตรวจสอบ Cookie และวางใหม่'
-    );
-  }
-
-  // ตรวจรูปแบบคร่าวๆ: Cookie ควรประกอบด้วย alphanumeric, =, ;, space, /, %, comma, dot, hyphen, underscore
-  // รองรับ Cookie หลายคู่ เช่น "session=abc123; path=/; domain=.scgjwd.com"
-  // [SEC-010 FIX] ลด charset ให้แคบลง — ลบ ( ) [ ] { } ที่ไม่จำเป็น (RFC 6265 compliance)
-  if (!/^[a-zA-Z0-9_\-\.\=; \/,%~+:]+$/.test(clean)) {
-    throw new Error(
-      'Cookie ไม่อยู่ในรูปแบบที่ถูกต้อง\n' +
-      'กรุณาตรวจสอบว่าคัดลอก Cookie ทั้งหมดจาก Browser\n' +
-      'หาก Cookie มีอักขระพิเศษอื่น กรุณาติดต่อ Admin'
-    );
+    clean = clean.replace(/[\r\n\x00-\x1f\x7f]/g, '');
+    logWarn('ServiceSCG', '[sanitizeCookie_] ตรวจพบและลบ Control Characters ออกจาก Cookie');
   }
 
   // ตรวจความยาวต่ำเกินไป (Cookie ที่ถูกต้องมักยาวกว่า 10 ตัวอักษร)
@@ -185,6 +175,8 @@ function fetchDataFromSCGJWD() {
 
 /**
  * readInputConfig_ — [REFACTOR-01] อ่านข้อมูล Input จากชีต Input
+ * [REVERTED v5.5.022-hotfix] อ่าน Cookie จากเซลล์ B1 ตรงๆ เหมือน V5.0
+ *   ผู้ใช้วาง Cookie ใน B1 โดยตรง — ไม่ใช้ PropertiesService migration
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
  * @return {{cookie: string, shipmentString: string}}
  */
@@ -193,9 +185,25 @@ function readInputConfig_(ss) {
   const dataSheet  = ss.getSheetByName(SCG_CONFIG.SHEET_DATA);
   if (!inputSheet || !dataSheet) throw new Error("CRITICAL: ไม่พบชีต Input หรือ Data");
 
-  // [SEC-001] อ่าน Cookie จาก Script Properties แทนเซลล์ B1
-  const cookie = getSCGCookie_();
-  if (!cookie) throw new Error("❌ กรุณาตั้งค่า Cookie ผ่านเมนู LMDS > ระบบ > ตั้งค่า SCG Cookie");
+  // [REVERTED v5.5.022-hotfix] อ่าน Cookie จากเซลล์ B1 ตรงๆ (เหมือน V5.0)
+  //   ถ้า B1 ว่าง → ค่อย fallback ไป Script Properties (ยังรองรับ SEC-001 แบบ optional)
+  const rawCookie = String(inputSheet.getRange(SCG_CONFIG.COOKIE_CELL).getValue() || '').trim();
+  let cookie = '';
+  if (rawCookie) {
+    // มี Cookie ใน B1 — sanitize minimal แล้วใช้ได้เลย
+    cookie = sanitizeCookie_(rawCookie);
+  } else {
+    // Fallback: อ่านจาก Script Properties (สำหรับผู้ใช้ที่ตั้งผ่านเมนู setSCGCookie_UI)
+    const fromProps = PropertiesService.getScriptProperties().getProperty('SCG_COOKIE');
+    if (fromProps) {
+      cookie = fromProps;
+      logInfo('ServiceSCG', 'อ่าน Cookie จาก Script Properties (B1 ว่าง)');
+    }
+  }
+  if (!cookie) {
+    throw new Error("❌ กรุณาวาง Cookie ในช่อง " + SCG_CONFIG.COOKIE_CELL +
+                    " ของชีต Input หรือตั้งค่าผ่านเมนู LMDS > ระบบ > ตั้งค่า SCG Cookie");
+  }
 
   const lastRow = inputSheet.getLastRow();
   if (lastRow < SCG_CONFIG.INPUT_START_ROW) throw new Error("ℹ️ ไม่พบเลข Shipment ในชีต Input");
@@ -218,11 +226,12 @@ function readInputConfig_(ss) {
 // ============================================================
 
 /**
- * setSCGCookie_UI — [SEC-001] ตั้งค่า SCG Cookie ผ่าน UI Prompt
- * เก็บใน PropertiesService.getScriptProperties() แทน Spreadsheet Cell
+ * setSCGCookie_UI — [REVERTED v5.5.022-hotfix] ตั้งค่า SCG Cookie ผ่าน UI Prompt
+ *   เขียนลงเซลล์ B1 ในชีต Input (เหมือน V5.0) แทน PropertiesService
+ *   ผู้ใช้สามารถวาง Cookie ใน B1 โดยตรง หรือใช้เมนูนี้ก็ได้
  */
 function setSCGCookie_UI() {
-  // [SEC-002 FIX] Authorization Guard — เฉพาะ Admin เท่านั้นที่ตั้งค่า Cookie ได้
+  // [SEC-002] Authorization Guard — เฉพาะ Admin เท่านั้นที่ตั้งค่า Cookie ได้
   if (typeof isAuthorizedUser_ === 'function' && !isAuthorizedUser_()) {
     safeUiAlert_('🔒 คุณไม่มีสิทธิ์ตั้งค่า SCG Cookie\nกรุณาติดต่อ Admin');
     return;
@@ -231,9 +240,8 @@ function setSCGCookie_UI() {
     const ui = SpreadsheetApp.getUi();
     const result = ui.prompt(
       '🔐 ตั้งค่า SCG Cookie',
-      'วาง Cookie จาก SCG API ที่นี่:\n\n' +
-      '(Cookie จะถูกจัดเก็บอย่างปลอดภัยใน Script Properties\n' +
-      'เฉพาะ Script Owner เท่านั้นที่เข้าถึงได้)',
+      'วาง Cookie จาก Browser (DevTools > Network > Request Headers > cookie):\n\n' +
+      '(Cookie จะถูกเก็บในเซลล์ ' + SCG_CONFIG.COOKIE_CELL + ' ของชีต Input)',
       ui.ButtonSet.OK_CANCEL
     );
 
@@ -245,29 +253,25 @@ function setSCGCookie_UI() {
       return;
     }
 
-    // [SEC-003] Sanitize ก่อนเก็บ
+    // [SEC-003 minimal] Sanitize — เอาเฉพาะ CRLF/control chars ออก
     const cleanCookie = sanitizeCookie_(rawCookie);
 
-    PropertiesService.getScriptProperties().setProperty('SCG_COOKIE', cleanCookie);
-
-    // ล้างเซลล์ B1 ถ้ามี Cookie เก่าอยู่
-    try {
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      const inputSheet = ss.getSheetByName(SCG_CONFIG.SHEET_INPUT);
-      if (inputSheet) {
-        const oldCookie = String(inputSheet.getRange(SCG_CONFIG.COOKIE_CELL).getValue() || '').trim();
-        if (oldCookie) {
-          inputSheet.getRange(SCG_CONFIG.COOKIE_CELL).clearContent();
-          logInfo('ServiceSCG', '[SEC-001] ล้าง Cookie เก่าจากเซลล์ B1 แล้ว');
-        }
-      }
-    } catch (e) {
-      logWarn('ServiceSCG', '[SEC-001] ไม่สามารถล้างเซลล์ B1: ' + e.message);
+    // [REVERTED v5.5.022-hotfix] เขียนลงเซลล์ B1 แทน PropertiesService
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const inputSheet = ss.getSheetByName(SCG_CONFIG.SHEET_INPUT);
+    if (!inputSheet) {
+      throw new Error('ไม่พบชีต Input');
     }
+    inputSheet.getRange(SCG_CONFIG.COOKIE_CELL).setValue(cleanCookie);
 
-    logInfo('ServiceSCG', '[SEC-001] ตั้งค่า SCG Cookie สำเร็จ (Script Properties)');
+    // ล้าง SCG_COOKIE ใน Script Properties ด้วย (กัน conflict)
+    try {
+      PropertiesService.getScriptProperties().deleteProperty('SCG_COOKIE');
+    } catch (e) { /* ignore */ }
+
+    logInfo('ServiceSCG', 'ตั้งค่า SCG Cookie สำเร็จ (เซลล์ ' + SCG_CONFIG.COOKIE_CELL + ')');
     // [FIX v5.5.021 C7] ไม่ echo ค่า cookie กลับให้ User ป้องกัน PII Leak
-    safeUiAlert_('✅ ตั้งค่า SCG Cookie สำเร็จ!\n\nCookie ถูกจัดเก็บใน Script Properties อย่างปลอดภัยแล้ว');
+    safeUiAlert_('✅ ตั้งค่า SCG Cookie สำเร็จ!\n\nCookie ถูกเก็บในเซลล์ ' + SCG_CONFIG.COOKIE_CELL + ' ของชีต Input แล้ว');
 
   } catch (e) {
     logError('ServiceSCG', 'setSCGCookie_UI ล้มเหลว: ' + e.message, e);
@@ -276,41 +280,34 @@ function setSCGCookie_UI() {
 }
 
 /**
- * getSCGCookie_ — [SEC-001] อ่าน Cookie จาก Script Properties
- * พร้อม Fallback อ่านจากเซลล์ B1 สำหรับช่วง Migration
+ * getSCGCookie_ — [REVERTED v5.5.022-hotfix] อ่าน Cookie
+ *   Priority: เซลล์ B1 (Input sheet) → Script Properties (fallback)
+ *   ไม่ migrate — ไม่ clearContent B1 (กัน Cookie "หาย" จากเซลล์)
+ *   เก็บฟังก์ชันนี้ไว้สำหรับ backward compatibility (ถ้ามี code อื่นยังเรียกใช้)
  * @return {string} Cookie value
  */
 function getSCGCookie_() {
-  // 1. อ่านจาก Script Properties (Primary)
-  const fromProps = PropertiesService.getScriptProperties().getProperty('SCG_COOKIE');
-  if (fromProps) return fromProps;
-
-  // 2. Fallback: อ่านจากเซลล์ B1 (Transition) พร้อม [FIX v5.5.021 C6] Lock ป้องกัน Race Condition
-  const lock = LockService.getScriptLock();
-  if (lock.tryLock(5000)) {
-    try {
-      // Re-check หลัง lock เผื่อมี thread อื่นย้ายไปแล้ว
-      const propAfterLock = PropertiesService.getScriptProperties().getProperty('SCG_COOKIE');
-      if (propAfterLock) return propAfterLock;
-
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      const inputSheet = ss.getSheetByName(SCG_CONFIG.SHEET_INPUT);
-      if (inputSheet) {
-        const fromCell = String(inputSheet.getRange(SCG_CONFIG.COOKIE_CELL).getValue() || '').trim();
-        if (fromCell) {
-          const cleanCookie = sanitizeCookie_(fromCell);
-          // Set property ให้เสร็จก่อน ถึงจะ clear เซลล์ เพื่อป้องกัน Data Loss
-          PropertiesService.getScriptProperties().setProperty('SCG_COOKIE', cleanCookie);
-          inputSheet.getRange(SCG_CONFIG.COOKIE_CELL).clearContent();
-          logInfo('ServiceSCG', '[SEC-001] Migration: ย้าย Cookie จาก B1 → Script Properties สำเร็จ (Locked)');
-          return cleanCookie;
-        }
+  // 1. Priority: อ่านจากเซลล์ B1 (ผู้ใช้วางตรงนี้)
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const inputSheet = ss.getSheetByName(SCG_CONFIG.SHEET_INPUT);
+    if (inputSheet) {
+      const fromCell = String(inputSheet.getRange(SCG_CONFIG.COOKIE_CELL).getValue() || '').trim();
+      if (fromCell) {
+        // Sanitize minimal (CRLF/control chars only) แล้วคืน
+        return sanitizeCookie_(fromCell);
       }
-    } catch (e) {
-      logWarn('ServiceSCG', '[SEC-001] Fallback อ่าน Cookie จาก B1 ล้มเหลว: ' + e.message);
-    } finally {
-      lock.releaseLock();
     }
+  } catch (e) {
+    logWarn('ServiceSCG', 'อ่าน Cookie จาก B1 ล้มเหลว: ' + e.message);
+  }
+
+  // 2. Fallback: Script Properties (สำหรับผู้ที่ตั้งผ่าน setSCGCookie_UI ใน V5.5.017-021)
+  try {
+    const fromProps = PropertiesService.getScriptProperties().getProperty('SCG_COOKIE');
+    if (fromProps) return fromProps;
+  } catch (e) {
+    logWarn('ServiceSCG', 'อ่าน Cookie จาก Script Properties ล้มเหลว: ' + e.message);
   }
 
   return ''; // ไม่พบ Cookie ทั้ง 2 แหล่ง
@@ -460,8 +457,10 @@ function writeDailyJobSheet_(ss, allFlatData) {
 
   const headers = SCHEMA[SHEET.DAILY_JOB];
 
-  // [FIX v5.5.021 H4] เปลี่ยนจาก clear() เป็น clearContent() เพื่อรักษา Conditional Formatting
-  dataSheet.clearContent();
+  // [FIX v5.5.021 H4 / FIX-TYPO v5.5.022-hotfix] ใช้ clearContents() (มี s) สำหรับ Sheet
+  //   Sheet.clearContent() ไม่มี — เป็น Range.clearContent() ที่ไม่มี s
+  //   Sheet ใช้ clearContents() รักษา Conditional Formatting ไว้ (intention เดียวกับ H4)
+  dataSheet.clearContents();
   // Clear เฉพาะ Background ของข้อมูล ไม่ล้างหมด เพื่อเผื่อมี format ตกค้าง
   if (dataSheet.getLastRow() > 1) {
     dataSheet.getRange(2, 1, dataSheet.getLastRow() - 1, dataSheet.getMaxColumns()).setBackground(null);
