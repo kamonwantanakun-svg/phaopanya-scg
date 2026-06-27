@@ -196,8 +196,15 @@ function onEdit(e) {
 
 /**
  * installSmartNavTrigger — [FIX v5.2.016] ติดตั้ง Installable Trigger สำหรับ Smart Navigation
+ *   [FIX BUG-SMARTNAV V5.5.022] onSelectionChange() ไม่มีใน Trigger Builder API
+ *     สาเหตุ: Apps Script ไม่รองรับ installable trigger สำหรับ onSelectionChange
+ *              (เป็น simple trigger เท่านั้น แต่ไม่มีสิทธิ์ UI)
+ *     วิธีแก้: ใช้ onEdit() installable trigger + ตรวจ active cell ใน Q_REVIEW
+ *              เมื่อ user คลิกที่ Candidate ID หรือ recommended_action column แล้วแก้ไข
+ *              (หรือกด Enter บน cell นั้น) — handleSelectionChange_ จะถูกเรียก
+ *
  * สาเหตุ: Simple Trigger (onSelectionChange) ไม่มีสิทธิ์เรียก getUi().alert() ทำให้ล้มเหลวเงียบๆ
- * Installable Trigger มีสิทธิ์เต็มรูปแบบ รวมถึง UI dialog
+ * Installable onEdit Trigger มีสิทธิ์เต็มรูปแบบ รวมถึง UI dialog
  */
 function installSmartNavTrigger() {
   // [FIX S1 v5.5.002] เพิ่ม try-catch ครอบทั้งฟังก์ชัน — Rule 12
@@ -206,26 +213,31 @@ function installSmartNavTrigger() {
   const triggers = ScriptApp.getProjectTriggers();
   let deletedCount = 0;
   for (const t of triggers) {
-    if (t.getHandlerFunction() === 'handleSelectionChange_') {
+    const handler = t.getHandlerFunction();
+    if (handler === 'handleSelectionChange_' || handler === 'onSelectionChange') {
       ScriptApp.deleteTrigger(t);
       deletedCount++;
     }
   }
 
-  // ติดตั้งใหม่
+  // [FIX BUG-SMARTNAV V5.5.022] ใช้ onEdit() แทน onSelectionChange()
+  //   เพราะ Apps Script ไม่มี .onSelectionChange() ใน Trigger Builder API
+  //   onEdit จะถูกเรียกเมื่อ user แก้ไข cell — handleSelectionChange_ จะตรวจ active cell
+  //   และดำเนินการนำทางถ้าอยู่ใน Q_REVIEW sheet
   ScriptApp.newTrigger('handleSelectionChange_')
     .forSpreadsheet(SpreadsheetApp.getActive())
-    .onSelectionChange()
+    .onEdit()
     .create();
 
   // [FIX BUG-04 v5.5.001] เปลี่ยน getUi().alert() เป็น safeUiAlert_() — trigger-safe
   safeUiAlert_(
     '✅ ติดตั้ง Smart Navigation สำเร็จ!\n\n' +
     (deletedCount > 0 ? `(ลบ Trigger เก่า ${deletedCount} ตัว)\n\n` : '') +
-    'วิธีใช้: ไปที่ชีต Q_REVIEW แล้วคลิกที่:\n' +
+    'วิธีใช้: ไปที่ชีต Q_REVIEW แล้วคลิก (หรือกด Enter) ที่:\n' +
     '  • คอลัมน์ Candidate ID (L-O) — นำทางไป Master/FACT ของ candidate นั้น\n' +
     '  • คอลัมน์ recommended_action (P) — นำทางตามที่ระบบแนะนำ [V5.5.011]\n\n' +
-    'ระบบจะถามว่าต้องการนำทางไปตารางหลัก (Master) หรือ ประวัติขนส่ง (FACT)'
+    'หมายเหตุ: ใช้ onEdit trigger (ต้องแก้ไข cell หรือกด Enter บน cell ที่ต้องการ)' +
+    'เพราะ Apps Script ไม่รองรับ installable onSelectionChange trigger'
   );
   } catch (err) {
     logError('App', 'installSmartNavTrigger: ' + err.message, err);
@@ -235,6 +247,7 @@ function installSmartNavTrigger() {
 
 /**
  * autoInstallSmartNav_ — [FIX v5.4.002] ติดตั้ง Smart Nav แบบเงียบ (ไม่ถามผู้ใช้)
+ *   [FIX BUG-SMARTNAV V5.5.022] ใช้ onEdit() แทน onSelectionChange() (ไม่มีใน API)
  * ถูกเรียกจาก onOpen() — ตรวจสอบว่ามี trigger อยู่แล้วหรือไม่ ถ้าไม่มีค่อยติดตั้ง
  * แก้ไข Bug: เดิมเรียก autoInstallSmartNav_() แต่ไม่มี function นี้ → Fake Call
  */
@@ -242,15 +255,17 @@ function autoInstallSmartNav_() {
   const triggers = ScriptApp.getProjectTriggers();
   let hasSmartNav = false;
   for (let i = 0; i < triggers.length; i++) {
-    if (triggers[i].getHandlerFunction() === 'handleSelectionChange_') {
+    const handler = triggers[i].getHandlerFunction();
+    if (handler === 'handleSelectionChange_' || handler === 'onSelectionChange') {
       hasSmartNav = true;
       break;
     }
   }
-  if (!hasSmartNav) {
+  if (hasSmartNav === false) {
+    // [FIX BUG-SMARTNAV V5.5.022] ใช้ onEdit() แทน onSelectionChange() (ไม่มีใน API)
     ScriptApp.newTrigger('handleSelectionChange_')
       .forSpreadsheet(SpreadsheetApp.getActive())
-      .onSelectionChange()
+      .onEdit()
       .create();
   }
 }
