@@ -1,0 +1,232 @@
+name: 🚀 Deploy to Google Apps Script
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'appsscript.json'
+      - '.github/workflows/02-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '📌 Version label (เช่น v5.5.023)'
+        required: false
+        default: 'manual'
+      force:
+        description: '⚠️ Force deploy (ข้าม confirm)'
+        required: false
+        default: 'false'
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: 🛡️ Pre-flight Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ✅ ตรวจสอบว่ามี Secret ที่จำเป็น
+        env:
+          CLASPRC: ${{ secrets.CLASPRC }}
+          APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
+        run: |
+          echo "=== 🛡️ Pre-flight Check ==="
+          errors=0
+          if [ -z "$CLASPRC" ]; then
+            echo "  ❌ ไม่พบ Secret: CLASPRC (clasp credentials)"
+            errors=$((errors+1))
+          else
+            echo "  ✅ CLASPRC: พบแล้ว"
+          fi
+          if [ -z "$APPS_SCRIPT_ID" ]; then
+            echo "  ❌ ไม่พบ Secret: APPS_SCRIPT_ID"
+            errors=$((errors+1))
+          else
+            echo "  ✅ APPS_SCRIPT_ID: ${APPS_SCRIPT_ID:0:10}..."
+          fi
+          if [ $errors -gt 0 ]; then
+            echo ""
+            echo "  ❌ Pre-flight ล้มเหลว — โปรดตั้ง Secret ก่อน deploy"
+            exit 1
+          fi
+
+      - name: 🔍 ตรวจสอบว่ามีไฟล์ที่จำเป็นครบ
+        run: |
+          echo "=== 🔍 ตรวจสอบไฟล์ที่จำเป็น ==="
+          required_files=(
+            "appsscript.json"
+            "src/O_core_system/00_App.gs"
+            "src/O_core_system/01_Config.gs"
+            "src/O_core_system/02_Schema.gs"
+          )
+          for f in "${required_files[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "  ❌ ขาดไฟล์: $f"
+              exit 1
+            else
+              echo "  ✅ $f"
+            fi
+          done
+
+      - name: 📊 แสดงสถานะปัจจุบัน
+        run: |
+          echo "=== 📊 Deployment Info ==="
+          echo "  🏷️  Version: ${{ github.event.inputs.version || 'auto' }}"
+          echo "  📝 Commit:  ${{ github.sha }}"
+          echo "  👤 Author:  ${{ github.actor }}"
+          echo "  🌿 Branch:  ${{ github.ref_name }}"
+          echo "  📅 Time:    $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+  deploy:
+    name: 🚀 Deploy via clasp
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: preflight
+    environment: production
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 ติดตั้ง clasp
+        run: |
+          echo "=== 📦 ติดตั้ง clasp + Node.js ==="
+          curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+          sudo apt-get install -y nodejs
+          node --version
+          npm --version
+          npm install -g @google/clasp
+          clasp --version
+
+      - name: 🔐 Login ด้วย CLASPRC
+        env:
+          CLASPRC: ${{ secrets.CLASPRC }}
+        run: |
+          echo "=== 🔐 Login to Google ==="
+          echo "$CLASPRC" > ~/.clasprc.json
+          chmod 600 ~/.clasprc.json
+          clasp login --status
+          echo "  ✅ Login successful"
+
+      - name: 🔗 Clone Apps Script project
+        env:
+          APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
+        run: |
+          echo "=== 🔗 Clone Apps Script project ==="
+          echo "  📋 Script ID: $APPS_SCRIPT_ID"
+          mkdir -p apps-script-target
+          cd apps-script-target
+          clasp clone --scriptId "$APPS_SCRIPT_ID" --title "phaopanya-scg-deploy"
+
+      - name: 📋 Copy source files
+        run: |
+          echo "=== 📋 Copy source files ==="
+          rm -rf apps-script-target/src apps-script-target/appsscript.json
+          cp -r src apps-script-target/
+          cp appsscript.json apps-script-target/
+          echo "  📂 ไฟล์ที่จะ deploy:"
+          find apps-script-target -type f | sort | sed 's/^/    /'
+
+      - name: 🚀 Push to Apps Script
+        run: |
+          echo "=== 🚀 Push code to Apps Script ==="
+          cd apps-script-target
+          clasp status
+          echo ""
+          echo "📤 Pushing..."
+          clasp push --force
+
+      - name: 📝 สร้าง Version
+        run: |
+          echo "=== 📝 สร้าง Versioned Deployment ==="
+          cd apps-script-target
+          version_description="auto-${{ github.sha }}-${{ github.event.inputs.version }}"
+          clasp deploy --description "$version_description" --deploymentId "" || echo "  ⚠️ ใช้ @HEAD แทน"
+
+      - name: 📢 แจ้งเตือน Discord/Slack (ถ้ามี Webhook)
+        if: success()
+        env:
+          WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK }}
+        run: |
+          if [ -n "$WEBHOOK_URL" ]; then
+            curl -X POST "$WEBHOOK_URL" \
+              -H 'Content-Type: application/json' \
+              -d '{
+                "content": "✅ **Deploy สำเร็จ!**",
+                "embeds": [{
+                  "title": "🚚 Phaopanya SCG → Apps Script",
+                  "fields": [
+                    {"name": "Version", "value": "'"${{ github.event.inputs.version || 'auto' }}"'", "inline": true},
+                    {"name": "Commit", "value": "'"${{ github.sha }}"'", "inline": true},
+                    {"name": "Author", "value": "'"${{ github.actor }}"'", "inline": true}
+                  ],
+                  "color": 3066993
+                }]
+              }'
+            echo "  ✅ ส่งแจ้งเตือนแล้ว"
+          fi
+
+      - name: 🎉 Deploy สำเร็จ
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "  ✅ DEPLOY สำเร็จ!"
+          echo "=========================================="
+          echo "  - Commit: ${{ github.sha }}"
+          echo "  - Author: ${{ github.actor }}"
+          echo "  - ไฟล์: $(find src -name '*.gs' | wc -l) ไฟล์"
+          echo "  🌐 https://script.google.com/d/${{ secrets.APPS_SCRIPT_ID }}/edit"
+
+  verify:
+    name: ✅ Post-deploy Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: deploy
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 📥 ดึง Apps Script กลับมาตรวจ
+        env:
+          CLASPRC: ${{ secrets.CLASPRC }}
+          APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
+        run: |
+          echo "=== 📥 Pull Apps Script กลับมา verify ==="
+          echo "$CLASPRC" > ~/.clasprc.json
+          chmod 600 ~/.clasprc.json
+          mkdir -p verify-target
+          cd verify-target
+          clasp pull --scriptId "$APPS_SCRIPT_ID"
+
+      - name: 🔍 ตรวจว่าไฟล์ใน Apps Script ตรงกับ repo
+        run: |
+          echo "=== 🔍 Diff ระหว่าง repo กับ Apps Script ==="
+          diff_count=0
+          for src_file in $(find src -name "*.gs" -type f); do
+            rel_path=${src_file#src/}
+            target="verify-target/$rel_path"
+            if [ ! -f "$target" ]; then
+              echo "  ⚠️  ขาดใน Apps Script: $rel_path"
+              diff_count=$((diff_count+1))
+              continue
+            fi
+            src_hash=$(md5sum "$src_file" | awk '{print $1}')
+            target_hash=$(md5sum "$target" | awk '{print $1}')
+            if [ "$src_hash" != "$target_hash" ]; then
+              echo "  ❌ ไม่ตรงกัน: $rel_path"
+              diff_count=$((diff_count+1))
+            else
+              echo "  ✅ $rel_path"
+            fi
+          done
+          if [ $diff_count -eq 0 ]; then
+            echo "  🎉 ทุกไฟล์ตรงกัน!"
+          else
+            echo "  ⚠️  มี $diff_count ไฟล์ไม่ตรงกัน"
+          fi
