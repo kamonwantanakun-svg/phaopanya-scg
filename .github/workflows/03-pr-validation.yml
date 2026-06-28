@@ -1,0 +1,221 @@
+name: 🔍 PR Validation & Code Review
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: 🛡️ Validate Pull Request
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🔍 ตรวจขนาด PR
+        run: |
+          echo "=== 📊 PR Size Check ==="
+          changes=$(git diff --shortstat origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "unknown")
+          echo "  📝 Changes: $changes"
+          files_changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null | wc -l)
+          echo "  📁 Files changed: $files_changed"
+          if [ "$files_changed" -gt 15 ]; then
+            echo "  ⚠️  PR ใหญ่มาก — แนะนำให้แตกเป็น PR ย่อย"
+          elif [ "$files_changed" -gt 8 ]; then
+            echo "  ⚠️  PR ค่อนข้างใหญ่"
+          else
+            echo "  ✅ ขนาด PR เหมาะสม"
+          fi
+
+      - name: 🔍 ตรวจเฉพาะไฟล์ที่เปลี่ยน
+        run: |
+          echo "=== 🔍 ตรวจเฉพาะไฟล์ที่เปลี่ยนใน PR นี้ ==="
+          changed_files=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null | grep -E "src/.*\.gs$" || true)
+          if [ -z "$changed_files" ]; then
+            echo "  ℹ️  ไม่มีไฟล์ .gs เปลี่ยนแปลง"
+            exit 0
+          fi
+          echo "📁 ไฟล์ .gs ที่เปลี่ยน:"
+          echo "$changed_files" | sed 's/^/  - /'
+          echo ""
+          issues=0
+          echo "🛡️  Anti-pattern Check:"
+          for f in $changed_files; do
+            [ ! -f "$f" ] && continue
+            hardcoded=$(git diff origin/${{ github.base_ref }}...HEAD -- "$f" | grep -E "^\+.*row\[[0-9]+\]|^\+.*getRange\([^)]*,\s*[0-9]+\s*," | wc -l)
+            if [ "$hardcoded" -gt 0 ]; then
+              echo "  ❌ $f: +$hardcoded Hardcoded Index (Law 1)"
+              issues=$((issues+hardcoded))
+            fi
+            secret=$(git diff origin/${{ github.base_ref }}...HEAD -- "$f" | grep -iE "^\+.*(AIza[A-Za-z0-9_-]{35}|password\s*=|cookie\s*=)" | wc -l)
+            if [ "$secret" -gt 0 ]; then
+              echo "  ❌ $f: +$secret บรรทัดที่อาจมี Secret (Law 16)"
+              issues=$((issues+secret))
+            fi
+            loop_setvalue=$(git diff origin/${{ github.base_ref }}...HEAD -- "$f" | grep -E "^\+.*setValue\(|^\+.*appendRow\(" | wc -l)
+            if [ "$loop_setvalue" -gt 0 ]; then
+              echo "  ⚠️  $f: +$loop_setvalue setValue/appendRow — ตรวจว่าอยู่นอกลูป (Law 3)"
+            fi
+          done
+          if [ "$issues" -eq 0 ]; then
+            echo "  ✅ ไม่พบปัญหาร้ายแรง"
+          else
+            echo "  ⚠️  พบ $issues ปัญหาที่ควรตรวจสอบ"
+          fi
+
+      - name: 📋 ตรวจ CHANGELOG / Version
+        run: |
+          echo "=== 📋 Version Bump Check ==="
+          version_changes=$(git diff origin/${{ github.base_ref }}...HEAD -- 'src/**/*.gs' | grep -E "^\+.*VERSION:" | head -5)
+          if [ -n "$version_changes" ]; then
+            echo "  ✅ มีการเปลี่ยน VERSION:"
+            echo "$version_changes" | sed 's/^/      /'
+          else
+            echo "  ℹ️  ไม่มีการเปลี่ยน VERSION — ถ้าเป็น feature ใหม่ ควร bump version"
+          fi
+
+      - name: 🏷️ ตรวจ PR Title format
+        run: |
+          echo "=== 🏷️ PR Title Check ==="
+          title="${{ github.event.pull_request.title }}"
+          echo "  Title: $title"
+          if echo "$title" | grep -qE "^(feat|fix|docs|style|refactor|perf|test|chore|build|ci)(\(.+\))?:"; then
+            echo "  ✅ PR Title ตรงตาม Conventional Commits"
+          else
+            echo "  ℹ️  แนะนำใช้ Conventional Commits (feat:, fix:, refactor:, docs:, perf:)"
+          fi
+
+  comment:
+    name: 💬 Auto Comment on PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    needs: validate
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📊 Get diff stats
+        id: changes
+        run: |
+          {
+            echo "files<<EOF"
+            git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null
+            echo "EOF"
+            echo "additions=$(git diff --shortstat origin/${{ github.base_ref }}...HEAD 2>/dev/null | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo 0)"
+            echo "deletions=$(git diff --shortstat origin/${{ github.base_ref }}...HEAD 2>/dev/null | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo 0)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 💬 ส่ง PR Comment อัตโนมัติ
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const changedFiles = `${{ steps.changes.outputs.files || '' }}`.split('\n').filter(f => f);
+            const linesAdded = parseInt(`${{ steps.changes.outputs.additions || 0 }}`);
+            const linesDeleted = parseInt(`${{ steps.changes.outputs.deletions || 0 }}`);
+            let body = `## 🤖 Auto Code Review (LMDS V5.5)\n\n`;
+            body += `### 📊 สรุปการเปลี่ยนแปลง\n`;
+            body += `- 📁 ไฟล์ที่เปลี่ยน: ${changedFiles.length} ไฟล์\n`;
+            body += `- ➕ บรรทัดที่เพิ่ม: +${linesAdded}\n`;
+            body += `- ➖ บรรทัดที่ลบ: -${linesDeleted}\n\n`;
+            body += `### ✅ Review Checklist (16 Immutable Laws)\n\n`;
+            body += `- [ ] **Law 1**: ไม่มี Hardcoded Index\n`;
+            body += `- [ ] **Law 2**: Single Writer Pattern (M_ALIAS เขียนโดย 10/21 เท่านั้น)\n`;
+            body += `- [ ] **Law 3**: Batch Operations (ใช้ \`setValues()\` ไม่ใช่ \`setValue()\` ในลูป)\n`;
+            body += `- [ ] **Law 4**: ใช้ Index จาก \`01_Config\`\n`;
+            body += `- [ ] **Law 5**: Entry Point มี \`try-catch\`\n`;
+            body += `- [ ] **Law 6**: Log error ด้วย \`logError('Module', msg, err)\`\n`;
+            body += `- [ ] **Law 13**: ไม่มี Silent Fail\n`;
+            body += `- [ ] **Law 16**: ไม่มี Secret ใน Cell\n\n`;
+            if (changedFiles.length > 0) {
+              body += `### 📁 ไฟล์ที่เปลี่ยน\n`;
+              changedFiles.slice(0, 20).forEach(f => {
+                if (f.endsWith('.gs')) body += `- 📄 \`${f}\`\n`;
+                else if (f.endsWith('.md')) body += `- 📝 \`${f}\`\n`;
+                else if (f.endsWith('.json')) body += `- ⚙️ \`${f}\`\n`;
+                else body += `- 📋 \`${f}\`\n`;
+              });
+              if (changedFiles.length > 20) {
+                body += `... และอีก ${changedFiles.length - 20} ไฟล์\n`;
+              }
+              body += `\n`;
+            }
+            body += `### 🎯 คำแนะนำ\n\n`;
+            if (linesAdded > 500) {
+              body += `⚠️ **PR ใหญ่มาก** — แนะนำให้แตกเป็น PR ย่อย\n\n`;
+            }
+            if (changedFiles.some(f => f.includes('src/O_core_system/01_Config'))) {
+              body += `🚨 **แตะ 01_Config** — ต้องตรวจสอบว่า Index ใหม่ไม่กระทบไฟล์อื่น\n\n`;
+            }
+            if (changedFiles.some(f => f.includes('appsscript.json'))) {
+              body += `🚨 **แตะ appsscript.json** — การเปลี่ยน OAuth scopes ต้องได้รับอนุมัติ\n\n`;
+            }
+            body += `---\n`;
+            body += `🤖 สร้างโดย GitHub Actions`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+            console.log('✅ Posted comment on PR #' + context.issue.number);
+
+  auto-label:
+    name: 🏷️ Auto Label
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    needs: validate
+
+    steps:
+      - name: 🏷️ ใส่ Label ตามไฟล์ที่เปลี่ยน
+        uses: actions/labeler@v5
+        with:
+          configuration-path: .github/labeler.yml
+          fail-on-error: false
+
+      - name: 🏷️ เพิ่ม Label ตาม Title + ขนาด
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const title = pr.title || '';
+            const labels = [];
+            if (/^feat[:(]/i.test(title)) labels.push('feature');
+            else if (/^fix[:(]/i.test(title)) labels.push('bug');
+            else if (/^refactor[:(]/i.test(title)) labels.push('refactor');
+            else if (/^docs[:(]/i.test(title)) labels.push('docs');
+            else if (/^perf[:(]/i.test(title)) labels.push('performance');
+            else if (/^chore[:(]/i.test(title)) labels.push('chore');
+            const changedFiles = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+            const paths = changedFiles.data.map(f => f.filename);
+            if (paths.some(p => p.includes('appsscript.json'))) labels.push('config');
+            if (paths.some(p => p.includes('01_Config.gs'))) labels.push('breaking-change');
+            if (paths.some(p => p.includes('docs/'))) labels.push('docs');
+            const totalChanges = changedFiles.data.reduce((sum, f) => sum + f.additions + f.deletions, 0);
+            if (totalChanges > 1000) labels.push('size/XXL');
+            else if (totalChanges > 500) labels.push('size/XL');
+            else if (totalChanges > 200) labels.push('size/L');
+            else if (totalChanges > 50) labels.push('size/M');
+            else labels.push('size/S');
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                labels: [...new Set(labels)],
+              });
+              console.log('🏷️  Added labels: ' + labels.join(', '));
+            }
