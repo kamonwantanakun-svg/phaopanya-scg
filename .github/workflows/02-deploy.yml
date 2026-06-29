@@ -104,22 +104,100 @@ jobs:
           npm install -g @google/clasp
           clasp --version
 
-      - name: 🔐 Login ด้วย CLASPRC
+      - name: 🔐 Login ด้วย CLASPRC + Diagnostic
         env:
           CLASPRC: ${{ secrets.CLASPRC }}
+          APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
         run: |
-          echo "=== 🔐 Login to Google ==="
+          echo "=== 🔐 Login to Google + Diagnostic ==="
           echo "$CLASPRC" > ~/.clasprc.json
           chmod 600 ~/.clasprc.json
-          # [FIX Deploy] ตรวจสอบว่า clasprc.json ถูกสร้างและมี content
+
+          # [FIX Deploy #4] Diagnostic — ตรวจสอบ CLASPRC และ APPS_SCRIPT_ID format
+          echo ""
+          echo "=== 📊 Diagnostic ==="
+
+          # 1. ตรวจ CLASPRC
           if [[ ! -s ~/.clasprc.json ]]; then
-            echo "  ❌ ~/.clasprc.json ว่างหรือไม่ exist — ตรวจสอบ CLASPRC secret"
+            echo "  ❌ ~/.clasprc.json ว่างหรือไม่ exist — CLASPRC secret ไม่ถูกต้อง"
             exit 1
           fi
-          echo "  ✅ ~/.clasprc.json สร้างสำเร็จ ($(wc -c < ~/.clasprc.json) bytes)"
-          # [FIX Deploy] ใช้ clasp login --check แทน --status (status ไม่ใช่ valid flag)
-          #   ถ้า clasp login --check ไม่ทำงาน ก็ข้ามไป — จะเช็ค auth จริงตอน clone/push
-          echo "  ℹ️  ตรวจสอบ auth status..."
+          CLASPRC_SIZE=$(wc -c < ~/.clasprc.json)
+          echo "  ✅ ~/.clasprc.json size: $CLASPRC_SIZE bytes"
+
+          # ตรวจ CLASPRC format (ควรมี access_token, refresh_token, scope)
+          if ! python3 -c "
+          import json
+          with open('/root/.clasprc.json') as f:
+              d = json.load(f)
+          if 'access_token' not in d and 'token' not in str(d):
+              print('  ⚠️  ไม่พบ access_token ใน clasprc.json')
+              exit(1)
+          if 'refresh_token' not in str(d):
+              print('  ⚠️  ไม่พบ refresh_token — token อาจหมดอายุและไม่สามารถ refresh ได้')
+          print('  ✅ CLASPRC format ถูกต้อง')
+          " 2>&1; then
+            echo "  ℹ️  CLASPRC format check ข้ามไป (อาจไม่ใช่ปัญหา)"
+          fi
+
+          # 2. ตรวจ APPS_SCRIPT_ID format (ควรยาว ~57 ตัวอักษร)
+          echo ""
+          echo "  📋 APPS_SCRIPT_ID length: ${#APPS_SCRIPT_ID}"
+          if [[ ${#APPS_SCRIPT_ID} -lt 40 ]]; then
+            echo "  ❌ APPS_SCRIPT_ID สั้นเกินไป (${#APPS_SCRIPT_ID} ตัวอักษร) — ควรยาว ~57 ตัวอักษร"
+            echo "     วิธีหา Script ID:"
+            echo "     1. เปิด https://script.google.com"
+            echo "     2. เปิดโปรเจกต์ Apps Script ของคุณ"
+            echo "     3. คลิก ⚙️ Project Settings (ซ้ายบน)"
+            echo "     4. ดูที่ 'Script ID' — copy มาทั้งหมด"
+            echo "     5. ไป GitHub > Settings > Secrets > APPS_SCRIPT_ID > Update"
+            exit 1
+          fi
+          echo "  ✅ APPS_SCRIPT_ID length OK"
+
+          # 3. ตรวจ API access โดยตรง (bypass clasp)
+          echo ""
+          echo "  🔍 ตรวจสอบ API access โดยตรง..."
+          ACCESS_TOKEN=$(python3 -c "
+          import json
+          with open('/root/.clasprc.json') as f:
+              d = json.load(f)
+          # clasprc.json อาจเก็บ token ใน field ต่างกันตาม clasp version
+          if 'access_token' in d:
+              print(d['access_token'])
+          elif 'token' in d and isinstance(d['token'], dict):
+              print(d['token'].get('access_token', ''))
+          else:
+              print('')
+          " 2>/dev/null)
+
+          if [[ -z "$ACCESS_TOKEN" ]]; then
+            echo "  ⚠️  ไม่สามารถดึง access_token จาก clasprc.json — ข้าม API test"
+          else
+            echo "  ℹ️  ทดสอบเรียก Apps Script API โดยตรง..."
+            HTTP_CODE=$(curl -s -o /tmp/api_response.json -w "%{http_code}" \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://script.googleapis.com/v1/projects/$APPS_SCRIPT_ID")
+            echo "  📊 HTTP Status: $HTTP_CODE"
+            if [[ "$HTTP_CODE" == "200" ]]; then
+              echo "  ✅ API access สำเร็จ — Script ID ถูกต้อง"
+            elif [[ "$HTTP_CODE" == "403" ]]; then
+              echo "  ❌ 403 Forbidden — ตรวจสอบ:"
+              echo "     1. Apps Script API enabled ใน Google Cloud Project หรือไม่"
+              echo "     2. Google Account มีสิทธิ์ Editor ใน Apps Script project หรือไม่"
+              cat /tmp/api_response.json | head -5
+              exit 1
+            elif [[ "$HTTP_CODE" == "404" ]]; then
+              echo "  ❌ 404 Not Found — Script ID ไม่ถูกต้องหรือ project ไม่ exist"
+              exit 1
+            else
+              echo "  ⚠️  HTTP $HTTP_CODE — ดู response:"
+              cat /tmp/api_response.json | head -10
+            fi
+          fi
+
+          echo ""
+          echo "  ✅ Login + Diagnostic เสร็จสิ้น"
 
       - name: 🔗 Setup Apps Script project (skip clone — push โดยตรง)
         env:
