@@ -87,7 +87,9 @@ function doGet(e) {
     // [SEC-002 Pattern] Auth check ก่อนทุกอย่าง
     if (!isAuthorizedDashboardUser_()) {
       logWarn('WebApp', 'doGet: unauthorized access attempt');
-      return HtmlService.createHtmlOutputFromFile('views/Unauthorized')
+      // [FIX Deploy] Apps Script ไม่รองรับ subdirectories — ใช้ flat name 'Unauthorized'
+      //   เดิม: 'views/Unauthorized' (ไม่ทำงานหลัง clasp push flatten)
+      return HtmlService.createHtmlOutputFromFile('Unauthorized')
         .setTitle('LMDS — ไม่มีสิทธิ์เข้าถึง')
         .addMetaTag('viewport', 'width=device-width, initial-scale=1')
         .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);

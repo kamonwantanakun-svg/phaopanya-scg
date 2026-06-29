@@ -124,14 +124,28 @@ jobs:
           cd apps-script-target
           clasp clone --scriptId "$APPS_SCRIPT_ID" --title "phaopanya-scg-deploy"
 
-      - name: 📋 Copy source files
+      - name: 📋 Copy source files (flatten for Apps Script)
         run: |
-          echo "=== 📋 Copy source files ==="
+          echo "=== 📋 Copy source files (flatten structure) ==="
+          # [FIX Deploy] Apps Script ไม่รองรับ subdirectories — ทุกไฟล์ต้องอยู่ที่ root level
+          #   โครงสร้าง src/ มี subdirectories: O_core_system/, 1_group1_master_db/, etc.
+          #   ต้อง flatten ทุกไฟล์ไปที่ root ของ apps-script-target/
           rm -rf apps-script-target/src apps-script-target/appsscript.json
-          cp -r src apps-script-target/
+
+          # สร้าง target dir
+          mkdir -p apps-script-target
+
+          # Flatten: copy ทุก .gs, .html, .json จาก src/ ไป root level
+          # ใช้ find + cp แทน cp -r เพื่อให้ไฟล์ทั้งหมดอยู่ที่ root
+          find src -type f \( -name "*.gs" -o -name "*.html" -o -name "*.json" \) -exec cp {} apps-script-target/ \;
+
+          # Copy appsscript.json ไป root
           cp appsscript.json apps-script-target/
-          echo "  📂 ไฟล์ที่จะ deploy:"
-          find apps-script-target -type f | sort | sed 's/^/    /'
+
+          echo "  📂 ไฟล์ที่จะ deploy (flat structure):"
+          find apps-script-target -type f -maxdepth 1 | sort | sed 's/^/    /'
+          echo ""
+          echo "  📊 จำนวนไฟล์: $(find apps-script-target -type f -maxdepth 1 | wc -l)"
 
       - name: 🚀 Push to Apps Script
         run: |
