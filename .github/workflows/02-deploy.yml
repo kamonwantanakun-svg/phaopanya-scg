@@ -122,7 +122,12 @@ jobs:
           echo "  📋 Script ID: $APPS_SCRIPT_ID"
           mkdir -p apps-script-target
           cd apps-script-target
-          clasp clone --scriptId "$APPS_SCRIPT_ID" --title "phaopanya-scg-deploy"
+          # [FIX Deploy] clasp clone รับ scriptId เป็น positional argument ไม่ใช่ --scriptId flag
+          #   เดิม: clasp clone --scriptId "$APPS_SCRIPT_ID" --title "..." → error: unknown option
+          #   ใหม่: clasp clone "$APPS_SCRIPT_ID"
+          clasp clone "$APPS_SCRIPT_ID"
+          echo "  ✅ Clone สำเร็จ"
+          ls -la .clasp.json 2>/dev/null && echo "  ✅ .clasp.json พบแล้ว" || echo "  ❌ ไม่พบ .clasp.json"
 
       - name: 📋 Copy source files (flatten for Apps Script)
         run: |
