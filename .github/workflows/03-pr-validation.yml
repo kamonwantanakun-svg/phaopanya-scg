@@ -83,11 +83,12 @@ jobs:
           fi
 
       - name: 🏷️ ตรวจ PR Title format
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           echo "=== 🏷️ PR Title Check ==="
-          title="${{ github.event.pull_request.title }}"
-          echo "  Title: $title"
-          if echo "$title" | grep -qE "^(feat|fix|docs|style|refactor|perf|test|chore|build|ci)(\(.+\))?:"; then
+          echo "  Title: $PR_TITLE"
+          if echo "$PR_TITLE" | grep -qE "^(feat|fix|docs|style|refactor|perf|test|chore|build|ci)(\(.+\))?:"; then
             echo "  ✅ PR Title ตรงตาม Conventional Commits"
           else
             echo "  ℹ️  แนะนำใช้ Conventional Commits (feat:, fix:, refactor:, docs:, perf:)"

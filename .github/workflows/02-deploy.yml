@@ -181,7 +181,12 @@ jobs:
           echo "  - Commit: ${{ github.sha }}"
           echo "  - Author: ${{ github.actor }}"
           echo "  - ไฟล์: $(find src -name '*.gs' | wc -l) ไฟล์"
-          echo "  🌐 https://script.google.com/d/${{ secrets.APPS_SCRIPT_ID }}/edit"
+        env:
+          APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
+      - name: 🌐 แสดง URL
+        run: echo "🌐 https://script.google.com/d/$APPS_SCRIPT_ID/edit"
+        env:
+          APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
 
   verify:
     name: ✅ Post-deploy Verification

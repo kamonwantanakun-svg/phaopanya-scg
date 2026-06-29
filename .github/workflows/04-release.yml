@@ -98,7 +98,8 @@ jobs:
           echo "  ✅ Tag $version pushed"
 
       - name: 📦 สร้าง GitHub Release
-        uses: softprops/action-gh-release@v2
+        # [FIX SonarCloud S7637] Use full commit SHA instead of tag @v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           name: ${{ steps.version.outputs.version }}
           tag_name: ${{ steps.version.outputs.version }}
