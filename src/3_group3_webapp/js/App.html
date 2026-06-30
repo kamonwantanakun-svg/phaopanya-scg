@@ -74,8 +74,15 @@
     }
 
     // เริ่มต้น auth
-    if (globalThis.auth) {
-      globalThis.auth.init();
+    // [FIX BUG-04] ห่อ try/catch — ถ้า auth.init() พัง (เช่น localStorage ใช้ไม่ได้
+    //   ใน sandboxed iframe บางสถานการณ์) ต้องไม่ลาก bindEvents_()/refresh_() ที่อยู่
+    //   ถัดไปไม่ให้ทำงานไปด้วย ไม่งั้นทุกปุ่มจะไม่ตอบสนองทั้งหน้า
+    try {
+      if (globalThis.auth) {
+        globalThis.auth.init();
+      }
+    } catch (err) {
+      console.warn('[app] auth.init() failed — continuing without it:', err);
     }
 
     // ฟัง events
@@ -98,41 +105,74 @@
    * @private
    */
   function bindEvents_() {
-    // [FIX Iframe Sandbox] ใช้ google.script.history แทน hashchange
-    //   สาเหตุ: Apps Script Web App ทำงานใน iframe sandbox
-    //   การใช้ <a href="#xxx"> หรือ window.addEventListener('hashchange')
-    //   ทำให้ browser สับสน และ redirect ไป createOAuthDialog=true
-    //   วิธีที่ถูกต้อง: google.script.history.setChangeHandler (GAS official API)
-    if (typeof google !== 'undefined' && google.script && google.script.history) {
-      google.script.history.setChangeHandler(function(e) {
-        var hash = (e && e.location && e.location.hash) || '';
-        var route = hash.replace(/^#/, '').split('/')[0] || 'dashboard';
-        console.log('[app] History changed to:', route);
-        currentRoute = route;
-        updateActiveNav_(route);
-        renderCurrentRoute_(false);
-      });
-    } else {
-      // Fallback ถ้าไม่อยู่ใน GAS context (เช่น IDE preview)
+    // [FIX BUG-04] แยกแต่ละ binding step ด้วย try/catch ของตัวเอง
+    //   สาเหตุเดิม: ถ้า google.script.history.setChangeHandler() throw (เช่น
+    //   เปิดผ่าน URL /dev แทน /exec หรือ sandbox บางสถานการณ์ที่ history API
+    //   ใช้งานไม่ได้) โค้ดจะหยุดทำงานทันที ทำให้บรรทัดถัดไปที่ผูก
+    //   manualRefreshBtn ไม่เคยถูกเรียก → กดปุ่มอะไรก็ไม่ตอบสนองเลยทั้งหน้า
+    //   แก้โดยห่อแต่ละ step แยกกัน ถ้าอันใดอันหนึ่งพังจะไม่ลากอันอื่นไปด้วย
+    bindHistoryHandler_();
+    bindManualRefreshButton_();
+    bindSessionExpiredHandler_();
+    bindVisibilityHandler_();
+  }
+
+  /**
+   * bindHistoryHandler_ — ผูก route-change listener (google.script.history หรือ hashchange)
+   * @private
+   */
+  function bindHistoryHandler_() {
+    try {
+      if (typeof google !== 'undefined' && google.script && google.script.history) {
+        google.script.history.setChangeHandler(function(e) {
+          var hash = (e && e.location && e.location.hash) || '';
+          var route = hash.replace(/^#/, '').split('/')[0] || 'dashboard';
+          console.log('[app] History changed to:', route);
+          currentRoute = route;
+          updateActiveNav_(route);
+          renderCurrentRoute_(false);
+        });
+      } else {
+        // Fallback ถ้าไม่อยู่ใน GAS context (เช่น IDE preview)
+        globalThis.addEventListener('hashchange', handleHashChange_);
+      }
+    } catch (err) {
+      // [FIX BUG-04] history API ใช้งานไม่ได้ในบาง context (เช่น /dev URL) —
+      //   ไม่ throw ต่อ เพราะ navigateTo_() จะ render เองทันทีอยู่แล้ว (ไม่รอ callback นี้)
+      console.warn('[app] google.script.history.setChangeHandler failed — fallback to direct render:', err);
       globalThis.addEventListener('hashchange', handleHashChange_);
     }
+  }
 
-    // Manual refresh button
-    if (manualRefreshBtn) {
-      manualRefreshBtn.addEventListener('click', () => {
-        console.log('[app] Manual refresh triggered');
-        refresh_(false);
-      });
-    }
+  /**
+   * bindManualRefreshButton_ — ผูกปุ่ม manual refresh
+   * @private
+   */
+  function bindManualRefreshButton_() {
+    if (!manualRefreshBtn) return;
+    manualRefreshBtn.addEventListener('click', () => {
+      console.log('[app] Manual refresh triggered');
+      refresh_(false);
+    });
+  }
 
-    // Session expired
+  /**
+   * bindSessionExpiredHandler_ — ผูก auth:session-expired listener
+   * @private
+   */
+  function bindSessionExpiredHandler_() {
     document.addEventListener('auth:session-expired', () => {
       console.warn('[app] Session expired — stopping polling');
       stopPolling_();
       showToast_('⏰ Session หมดอายุ', 'session หมดอายุเนื่องจากไม่ได้ใช้งาน 30 นาที กรุณารีโหลดหน้า', 'warning', 10000);
     });
+  }
 
-    // Visibility change (หยุด polling เมื่อ tab ไม่ active)
+  /**
+   * bindVisibilityHandler_ — ผูก visibilitychange listener (หยุด/เริ่ม polling)
+   * @private
+   */
+  function bindVisibilityHandler_() {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         console.log('[app] Tab hidden — pausing polling');
@@ -153,19 +193,26 @@
    */
   function navigateTo_(route) {
     console.log('[app] navigateTo_:', route);
-    if (typeof google !== 'undefined' && google.script && google.script.history) {
-      // ใช้ GAS history API — push state ไม่ trigger reload
-      google.script.history.push(null, { page: route }, route);
-    } else {
-      // Fallback: เปลี่ยน hash ตรงๆ
-      globalThis.location.hash = route;
-    }
-    // setChangeHandler จะเรียก renderCurrentRoute_ อัตโนมัติ
-    // แต่ถ้าไม่มี GAS context ให้เรียกเอง
-    if (typeof google === 'undefined' || !google.script || !google.script.history) {
-      currentRoute = route;
-      updateActiveNav_(route);
-      renderCurrentRoute_(false);
+
+    // [FIX BUG-04] เดิม code นี้รอให้ google.script.history.setChangeHandler
+    //   เรียก renderCurrentRoute_ กลับมาให้เอง (async round-trip) — ถ้า callback
+    //   นั้นไม่ทำงาน (เช่น เปิดผ่าน /dev URL แทน /exec) หน้าจะไม่ขยับเลยแม้กดปุ่ม
+    //   แก้โดย render เองทันที (optimistic) ก่อน แล้วค่อยพยายาม sync browser
+    //   history แยกต่างหาก ไม่ผูกการ render ไว้กับผลของ history API อีกต่อไป
+    currentRoute = route;
+    updateActiveNav_(route);
+    renderCurrentRoute_(false);
+
+    try {
+      if (typeof google !== 'undefined' && google.script && google.script.history) {
+        // ใช้ GAS history API — push state ไม่ trigger reload (เพื่อ back button)
+        google.script.history.push(null, { page: route }, route);
+      } else {
+        // Fallback: เปลี่ยน hash ตรงๆ
+        globalThis.location.hash = route;
+      }
+    } catch (err) {
+      console.warn('[app] Failed to sync browser history (UI already updated, safe to ignore):', err);
     }
   }
 
