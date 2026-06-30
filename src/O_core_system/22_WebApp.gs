@@ -213,14 +213,18 @@ function getCurrentDashboardUser_() {
   const email = String(Session.getEffectiveUser().getEmail() || '').trim();
   let displayName = 'User';
 
-  try {
-    const userObj = Session.getEffectiveUser().getUser();
-    if (userObj && typeof userObj.getDisplayName === 'function') {
-      const name = userObj.getDisplayName();
-      if (name) displayName = name;
-    }
-  } catch (e) {
-    logWarn('WebApp', 'Cannot read display name: ' + e.message);
+  // [FIX] Session.getEffectiveUser() คืน User object ที่มีแค่ getEmail()
+  //   ไม่มีเมธอด getUser() หรือ getDisplayName() ตามที่ error log บอก:
+  //   'Session.getActiveUser(...).getUser is not a function'
+  //
+  //   วิธีดึง display name ที่ถูกต้อง:
+  //   1. ใช้ email แยกชื่อออกมา (ก่อน @)
+  //   2. หรือใช้ People API (ต้อง enable advanced service)
+  //   สำหรับ Phase 1 ใช้วิธีที่ 1 พอ
+  if (email && email.indexOf('@') > 0) {
+    displayName = email.split('@')[0];
+    // แปลงจุด/ขีดล่างเป็นวรรค + ขึ้นตัวแรก
+    displayName = displayName.replace(/[._-]/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
   }
 
   logInfo('WebApp', '[Auth DEBUG] getCurrentDashboardUser_: email="' + email + '", name="' + displayName + '"');
@@ -325,8 +329,10 @@ function getDashboardData() {
   const topIssues = computeTopIssues_(reviewSheet, 5);
 
   const elapsedMs = Date.now() - startTime;
+  // [FIX] เพิ่ม reviewTotal ใน log เพื่อ debug ปัญหา review=0
   logInfo('WebApp', 'getDashboardData served — fact=' + stats.factDeliveryTotal +
-    ', review=' + stats.reviewPending + ', source=' + stats.sourceSheetTotal +
+    ', reviewPending=' + stats.reviewPending + '/' + stats.reviewTotal +
+    ', source=' + stats.sourceSheetTotal +
     ', elapsed=' + elapsedMs + 'ms');
 
   return {
