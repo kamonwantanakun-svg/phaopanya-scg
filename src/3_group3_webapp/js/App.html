@@ -81,18 +81,14 @@
     // ฟัง events
     bindEvents_();
 
-    // Render SSR data (ถ้ามี)
-    if (globalThis.__INITIAL_DATA__ && globalThis.__INITIAL_DATA__.stats) {
-      console.log('[app] Rendering SSR data');
-      hideLoading_();
-      currentData = globalThis.__INITIAL_DATA__;
-      renderCurrentRoute_(false); // false = ไม่ต้อง fetch ใหม่
-      startPolling_();
-    } else {
-      // ไม่มี SSR data — fetch เอง
-      console.log('[app] No SSR data, fetching...');
-      refresh_(true);
-    }
+    // [FIX Phase 1] ปิด SSR data path — ใช้ client-side fetch แทน
+    //   สาเหตุ: doGet() ใช้เวลา 4.5+ วินาที (getDashboardData) → บางครั้ง timeout
+    //   ทำให้ __INITIAL_DATA__ เป็น undefined → render null → throw error
+    //
+    //   วิธีใหม่: แสดง loading state ทันที → fetch ข้อมูลเองผ่าน api.getDashboardData()
+    //   ผล: หน้าโหลดเร็ว (~1 วิ) + แสดง loading ขณะรอ + ไม่มีปัญหา null data
+    console.log('[app] No SSR data, fetching...');
+    refresh_(true);
 
     console.log('[app] Init complete');
   }
@@ -132,8 +128,12 @@
       }
     });
 
-    // Initial route from hash
-    handleHashChange_();
+    // [FIX Phase 1] ไม่เรียก handleHashChange_() ตอน init แล้ว
+    //   สาเหตุ: มันจะ trigger renderCurrentRoute_(false) ทันที — แต่ currentData ยังเป็น null
+    //   ทำให้ DashboardView.render(null, container) แม้จะมี null guard ก็ตาม
+    //   วิธีใหม่: ให้ refresh_(true) เป็นคนเรียก renderCurrentRoute_ หลังจาก fetch สำเร็จ
+    //   handleHashChange_ จะถูกเรียกอัตโนมัติเมื่อ user คลิก nav link (ผ่าน hashchange event)
+    // handleHashChange_();  // ← ลบบรรทัดนี้ออก
   }
 
   // ────────────────────────────────────────────────────────────

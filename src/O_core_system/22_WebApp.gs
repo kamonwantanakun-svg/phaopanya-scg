@@ -98,11 +98,17 @@ function doGet(e) {
     // สร้าง template จาก Index.html
     const template = HtmlService.createTemplateFromFile('Index');
 
-    // ส่งข้อมูลเริ่มต้นไปที่ template (SSR — Server-Side Rendering)
+    // [FIX Phase 1] ไม่ SSR getDashboardData() แล้ว — ใช้ client-side fetch แทน
+    //   สาเหตุ: getDashboardData() ใช้เวลา 4.5 วินาที (อ่าน 445 + 479 rows)
+    //   ถ้าใส่ใน template.initialData → doGet ใช้เวลา 5+ วินาที
+    //   บางครั้ง Apps Script ตัดการเชื่อมต่อ → __INITIAL_DATA__ เป็น undefined → หน้าขาว
+    //
+    //   วิธีใหม่: ส่งเฉพาะ metadata (เร็ว) แล้วให้ frontend โหลดข้อมูลเองผ่าน api.getDashboardData()
+    //   ผล: หน้าโหลดเร็วขึ้น (~1 วินาที) + ไม่มีปัญหา timeout
     template.appVersion = APP_VERSION;
     template.appName = APP_NAME;
     template.currentUser = getCurrentDashboardUser_();
-    template.initialData = getDashboardData();
+    template.initialData = null;  // บังคับให้ frontend โหลดเอง
     template.deployedAt = new Date().toISOString();
 
     return template.evaluate()
