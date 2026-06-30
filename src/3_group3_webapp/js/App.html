@@ -105,43 +105,14 @@
    * @private
    */
   function bindEvents_() {
-    // [FIX BUG-04] แยกแต่ละ binding step ด้วย try/catch ของตัวเอง
-    //   สาเหตุเดิม: ถ้า google.script.history.setChangeHandler() throw (เช่น
-    //   เปิดผ่าน URL /dev แทน /exec หรือ sandbox บางสถานการณ์ที่ history API
-    //   ใช้งานไม่ได้) โค้ดจะหยุดทำงานทันที ทำให้บรรทัดถัดไปที่ผูก
-    //   manualRefreshBtn ไม่เคยถูกเรียก → กดปุ่มอะไรก็ไม่ตอบสนองเลยทั้งหน้า
-    //   แก้โดยห่อแต่ละ step แยกกัน ถ้าอันใดอันหนึ่งพังจะไม่ลากอันอื่นไปด้วย
-    bindHistoryHandler_();
+    // [FIX White Screen v2 + BUG-04] แยกแต่ละ binding step เป็นฟังก์ชันย่อย
+    //   แต่ละฟังก์ชันมี try/catch ของตัวเอง — ถ้าอันใดอันหนึ่งพังจะไม่ลากอันอื่นไปด้วย
+    //   และไม่ใช้ google.script.history อีกต่อไปเพราะ trigger OAuth dialog redirect
     bindManualRefreshButton_();
     bindSessionExpiredHandler_();
     bindVisibilityHandler_();
-  }
-
-  /**
-   * bindHistoryHandler_ — ผูก route-change listener (google.script.history หรือ hashchange)
-   * @private
-   */
-  function bindHistoryHandler_() {
-    try {
-      if (typeof google !== 'undefined' && google.script && google.script.history) {
-        google.script.history.setChangeHandler(function(e) {
-          var hash = (e && e.location && e.location.hash) || '';
-          var route = hash.replace(/^#/, '').split('/')[0] || 'dashboard';
-          console.log('[app] History changed to:', route);
-          currentRoute = route;
-          updateActiveNav_(route);
-          renderCurrentRoute_(false);
-        });
-      } else {
-        // Fallback ถ้าไม่อยู่ใน GAS context (เช่น IDE preview)
-        globalThis.addEventListener('hashchange', handleHashChange_);
-      }
-    } catch (err) {
-      // [FIX BUG-04] history API ใช้งานไม่ได้ในบาง context (เช่น /dev URL) —
-      //   ไม่ throw ต่อ เพราะ navigateTo_() จะ render เองทันทีอยู่แล้ว (ไม่รอ callback นี้)
-      console.warn('[app] google.script.history.setChangeHandler failed — fallback to direct render:', err);
-      globalThis.addEventListener('hashchange', handleHashChange_);
-    }
+    bindGlobalErrorHandler_();
+    console.log('[app] All event handlers bound — using in-memory routing (no URL hash changes)');
   }
 
   /**
@@ -186,33 +157,39 @@
   }
 
   /**
-   * navigateTo_ — เปลี่ยนหน้าผ่าน google.script.history (ป้องกัน iframe sandbox issue)
+   * bindGlobalErrorHandler_ — จับ uncaught exceptions + unhandled promise rejections
+   *   ป้องกันไม่ให้ error ทำให้หน้าขาวโดยไม่มี error message
+   * @private
+   */
+  function bindGlobalErrorHandler_() {
+    globalThis.addEventListener('error', (event) => {
+      console.error('[app] Uncaught error:', event.message, event.error);
+      showToast_('⚠️ เกิดข้อผิดพลาด', event.message || 'Unknown error', 'error', 8000);
+    });
+    globalThis.addEventListener('unhandledrejection', (event) => {
+      console.error('[app] Unhandled promise rejection:', event.reason);
+      const msg = (event.reason && event.reason.message) ? event.reason.message : String(event.reason);
+      showToast_('⚠️ เกิดข้อผิดพลาด', msg, 'error', 8000);
+    });
+  }
+
+  /**
+   * navigateTo_ — เปลี่ยนหน้า (in-memory routing ไม่เปลี่ยน URL)
    *   เรียกจาก onclick ของ nav buttons ใน Index.html
+   *   [FIX White Screen v2] ไม่ใช้ google.script.history.push() อีกต่อไป
+   *   เพราะ trigger OAuth dialog redirect ในบาง session
    * @param {string} route — 'dashboard' | 'fact' | 'qreview' | 'source' | 'match' | 'search'
    * @public
    */
   function navigateTo_(route) {
     console.log('[app] navigateTo_:', route);
-
-    // [FIX BUG-04] เดิม code นี้รอให้ google.script.history.setChangeHandler
-    //   เรียก renderCurrentRoute_ กลับมาให้เอง (async round-trip) — ถ้า callback
-    //   นั้นไม่ทำงาน (เช่น เปิดผ่าน /dev URL แทน /exec) หน้าจะไม่ขยับเลยแม้กดปุ่ม
-    //   แก้โดย render เองทันที (optimistic) ก่อน แล้วค่อยพยายาม sync browser
-    //   history แยกต่างหาก ไม่ผูกการ render ไว้กับผลของ history API อีกต่อไป
-    currentRoute = route;
-    updateActiveNav_(route);
-    renderCurrentRoute_(false);
-
     try {
-      if (typeof google !== 'undefined' && google.script && google.script.history) {
-        // ใช้ GAS history API — push state ไม่ trigger reload (เพื่อ back button)
-        google.script.history.push(null, { page: route }, route);
-      } else {
-        // Fallback: เปลี่ยน hash ตรงๆ
-        globalThis.location.hash = route;
-      }
+      currentRoute = route || 'dashboard';
+      updateActiveNav_(currentRoute);
+      renderCurrentRoute_(false);
     } catch (err) {
-      console.warn('[app] Failed to sync browser history (UI already updated, safe to ignore):', err);
+      console.error('[app] navigateTo_ failed:', err);
+      showError_('ไม่สามารถเปลี่ยนหน้าได้: ' + (err.message || err));
     }
   }
 
@@ -241,28 +218,8 @@
   // Router
   // ────────────────────────────────────────────────────────────
 
-  /**
-   * handleHashChange_ — จัดการการเปลี่ยน hash (route)
-   * @private
-   */
-  function handleHashChange_() {
-    const hash = globalThis.location.hash.slice(1) || 'dashboard';
-    const route = hash.split('/')[0]; // รองรับ sub-routes เช่น #fact/page/2
-    console.log('[app] Route changed to:', route);
-    currentRoute = route;
-
-    // Update active nav link
-    navLinks.forEach((link) => {
-      if (link.dataset.route === route) {
-        link.classList.add('active');
-      } else {
-        link.classList.remove('active');
-      }
-    });
-
-    // Render view (ใช้ currentData ถ้ามี ไม่ต้อง fetch ใหม่)
-    renderCurrentRoute_(false);
-  }
+  // [FIX White Screen v2] handleHashChange_ ถูกลบแล้ว — เราไม่ใช้ hash routing อีกต่อไป
+  //   ดู bindEvents_() และ navigateTo_() สำหรับ in-memory routing
 
   /**
    * renderCurrentRoute_ — render view ตาม route ปัจจุบัน
@@ -360,7 +317,7 @@
           'Coming soon' +
         '</div>' +
         '<div class="mt-6">' +
-          '<button onclick="globalThis.navigateTo_(\'dashboard\')" class="text-sm text-blue-600 hover:underline cursor-pointer">← กลับไป Dashboard</button>' +
+          '<button type="button" onclick="globalThis.navigateTo_(\'dashboard\')" class="text-sm text-blue-600 hover:underline cursor-pointer">← กลับไป Dashboard</button>' +
         '</div>' +
       '</div>';
   }
@@ -375,7 +332,7 @@
         '<div class="text-4xl mb-3">🔍</div>' +
         '<h2 class="text-lg font-semibold text-gray-700 mb-1">ไม่พบหน้าที่คุณค้นหา</h2>' +
         '<p class="text-sm text-gray-500 mb-4">ตรวจสอบ URL อีกครั้ง</p>' +
-        '<button onclick="globalThis.navigateTo_(\'dashboard\')" class="text-sm text-blue-600 hover:underline cursor-pointer">← กลับไป Dashboard</button>' +
+        '<button type="button" onclick="globalThis.navigateTo_(\'dashboard\')" class="text-sm text-blue-600 hover:underline cursor-pointer">← กลับไป Dashboard</button>' +
       '</div>';
   }
 
@@ -489,10 +446,10 @@
       // Reset nextRefreshAt หลัง refresh สำเร็จ
       nextRefreshAt = Date.now() + POLL_INTERVAL_MS;
 
-      // [FIX SonarCloud S7735] เปลี่ยนจาก negated condition (!isInitial) เป็น positive (isInitial)
-      //   เพื่อให้ code อ่านง่ายขึ้น — แสดง toast เฉพาะตอน polling (ไม่ใช่ initial load)
+      // [FIX White Screen v2] เริ่ม polling หลัง initial fetch สำเร็จ
+      //   สาเหตุ: ก่อนหน้านี้ startPolling_() ไม่ถูกเรียกเลย → หน้าไม่ refresh อัตโนมัติ
       if (isInitial) {
-        // ไม่แสดง toast ตอน initial load — ปล่อยให้ SSR แสดงผลเงียบๆ
+        startPolling_();
       } else {
         showToast_('✅ อัปเดตแล้ว', 'ข้อมูลได้รับการอัปเดตเรียบร้อย', 'success', 2000);
       }
@@ -624,7 +581,7 @@
    */
   function buildToastCloseButton_(duration) {
     if (duration <= 0) return '';
-    return '<button class="text-gray-400 hover:text-gray-600" onclick="this.parentElement.parentElement.remove()">×</button>';
+    return '<button type="button" class="text-gray-400 hover:text-gray-600" onclick="this.parentElement.parentElement.remove()">×</button>';
   }
 
   /**

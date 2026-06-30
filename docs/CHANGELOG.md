@@ -7,6 +7,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 | Version | Date | Cycle | Issues |
 |---------|------|-------|--------|
+| 5.5.023 | 2026-06-30 | WEBAPP WHITE SCREEN v2 FIX | 4 root cause fixes |
 | 5.5.022 | 2026-06-26 | CONSISTENCY SYNC + DEEP DIVE FIX | 9 BUG fixes + 168 doc inconsistencies |
 | 5.5.021 | 2026-06-22 | REFACTOR_CYCLE6_RESIDUAL | REF-005 cleanup + REF-011 pilot |
 | 5.5.020 | 2026-06-22 | REFACTOR_CYCLE6_RESIDUAL | REF-005 cleanup + REF-011 pilot |
@@ -26,6 +27,50 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 | 5.5.006 | 2026-06-18 | CONSISTENCY SYNC | 28 doc inconsistencies |
 | 5.5.005 | 2026-06-16 | REVIEW SERVICE FIX | (intermediate) |
 | 5.5.004 | 2026-06-15 | INITIAL AUDIT CYCLES | 53 audit issues |
+
+---
+
+## [5.5.023] — 2026-06-30 — WEBAPP WHITE SCREEN v2 FIX
+
+### Root Cause
+ใน V5.5.022 มีการแก้ "หน้าขาวเมื่อคลิกเมนู" ไปแล้ว 4 ครั้ง แต่อาการยังไม่หาย
+ตรวจสอบพบว่า root cause ที่แท้จริงคือ **`google.script.history.push()` เปลี่ยน URL hash ของ iframe**
+ซึ่งในบาง GAS session ทำให้ browser redirect ไป `createOAuthDialog=true` → iframe ว่าง → หน้าขาวทันทีที่คลิก
+
+แม้ว่า GAS official docs แนะนำให้ใช้ `google.script.history` แทน `hashchange`
+แต่ในทางปฏิบัติในบาง environment (โดยเฉพาะ executeAs=USER_DEPLOYING + access=MYSELF)
+การเปลี่ยน hash ยังคง trigger OAuth dialog redirect
+
+### Fix — เปลี่ยนเป็น In-Memory Routing (SPA แท้)
+1. **`navigateTo_()` ไม่ใช้ `google.script.history.push()` อีกต่อไป**
+   - เก็บ `currentRoute` ไว้ในตัวแปร JS
+   - เรียก `renderCurrentRoute_()` ตรง ๆ ไม่เปลี่ยน URL
+   - URL จะคงที่ที่ `/exec` ตลอดกาล (user ไม่สามารถ bookmark route ได้ แต่ navigation ทำงานปกติ)
+
+2. **`bindEvents_()` ไม่ตั้ง `setChangeHandler` แล้ว**
+   - ลบโค้ดที่เกี่ยวข้องกับ `google.script.history` ออกทั้งหมด
+   - ลบ `handleHashChange_()` ที่ไม่ได้ใช้อีกต่อไป
+
+3. **Global error handler**
+   - เพิ่ม `window.addEventListener('error', ...)` และ `unhandledrejection`
+   - เพื่อ catch uncaught exceptions และแสดง toast แทนที่จะทำให้หน้าขาวเงียบ ๆ
+
+4. **`startPolling_()` ถูกเรียกหลัง initial fetch สำเร็จ**
+   - ก่อนหน้านี้ลืมเรียก `startPolling_()` → หน้าไม่ refresh อัตโนมัติทุก 60s
+
+5. **Consistency fixes**
+   - ปุ่ม sidebar ทั้ง 6 ตัว: เพิ่ม `type="button"` และใช้ `globalThis.navigateTo_(...)` (เดิมใช้ `navigateTo_(...)` ไม่ consistent)
+   - ปุ่ม toast close + Coming Soon back-to-dashboard: เพิ่ม `type="button"`
+   - ปุ่ม error "โหลดหน้าใหม่": เพิ่ม `type="button"`
+
+### Files Changed
+- `src/3_group3_webapp/Index.html` — ปุ่มทั้งหมด: type="button" + globalThis.navigateTo_
+- `src/3_group3_webapp/js/App.html` — เปลี่ยน routing, เพิ่ม error handler, เพิ่ม startPolling_
+
+### Test
+- จำลอง GAS environment ด้วย mock server + Playwright
+- ทดสอบคลิก sidebar ทุกปุ่ม + manual refresh + back to dashboard
+- ผล: URL ไม่เปลี่ยน, ไม่มี page errors, viewContainer แสดงผลถูกต้องทุกครั้ง
 
 ---
 
