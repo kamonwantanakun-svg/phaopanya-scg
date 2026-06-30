@@ -98,8 +98,24 @@
    * @private
    */
   function bindEvents_() {
-    // Hash change (router)
-    globalThis.addEventListener('hashchange', handleHashChange_);
+    // [FIX Iframe Sandbox] ใช้ google.script.history แทน hashchange
+    //   สาเหตุ: Apps Script Web App ทำงานใน iframe sandbox
+    //   การใช้ <a href="#xxx"> หรือ window.addEventListener('hashchange')
+    //   ทำให้ browser สับสน และ redirect ไป createOAuthDialog=true
+    //   วิธีที่ถูกต้อง: google.script.history.setChangeHandler (GAS official API)
+    if (typeof google !== 'undefined' && google.script && google.script.history) {
+      google.script.history.setChangeHandler(function(e) {
+        var hash = (e && e.location && e.location.hash) || '';
+        var route = hash.replace(/^#/, '').split('/')[0] || 'dashboard';
+        console.log('[app] History changed to:', route);
+        currentRoute = route;
+        updateActiveNav_(route);
+        renderCurrentRoute_(false);
+      });
+    } else {
+      // Fallback ถ้าไม่อยู่ใน GAS context (เช่น IDE preview)
+      globalThis.addEventListener('hashchange', handleHashChange_);
+    }
 
     // Manual refresh button
     if (manualRefreshBtn) {
@@ -127,13 +143,51 @@
         startPolling_();
       }
     });
+  }
 
-    // [FIX Phase 1] ไม่เรียก handleHashChange_() ตอน init แล้ว
-    //   สาเหตุ: มันจะ trigger renderCurrentRoute_(false) ทันที — แต่ currentData ยังเป็น null
-    //   ทำให้ DashboardView.render(null, container) แม้จะมี null guard ก็ตาม
-    //   วิธีใหม่: ให้ refresh_(true) เป็นคนเรียก renderCurrentRoute_ หลังจาก fetch สำเร็จ
-    //   handleHashChange_ จะถูกเรียกอัตโนมัติเมื่อ user คลิก nav link (ผ่าน hashchange event)
-    // handleHashChange_();  // ← ลบบรรทัดนี้ออก
+  /**
+   * navigateTo_ — เปลี่ยนหน้าผ่าน google.script.history (ป้องกัน iframe sandbox issue)
+   *   เรียกจาก onclick ของ nav buttons ใน Index.html
+   * @param {string} route — 'dashboard' | 'fact' | 'qreview' | 'source' | 'match' | 'search'
+   * @public
+   */
+  function navigateTo_(route) {
+    console.log('[app] navigateTo_:', route);
+    if (typeof google !== 'undefined' && google.script && google.script.history) {
+      // ใช้ GAS history API — push state ไม่ trigger reload
+      google.script.history.push(null, { page: route }, route);
+    } else {
+      // Fallback: เปลี่ยน hash ตรงๆ
+      globalThis.location.hash = route;
+    }
+    // setChangeHandler จะเรียก renderCurrentRoute_ อัตโนมัติ
+    // แต่ถ้าไม่มี GAS context ให้เรียกเอง
+    if (!google || !google.script || !google.script.history) {
+      currentRoute = route;
+      updateActiveNav_(route);
+      renderCurrentRoute_(false);
+    }
+  }
+
+  // เปิดให้เรียกจาก onclick ใน HTML
+  globalThis.navigateTo_ = navigateTo_;
+
+  /**
+   * updateActiveNav_ — อัปเดต active class ของ nav links
+   * @private
+   */
+  function updateActiveNav_(route) {
+    navLinks.forEach((link) => {
+      if (link.dataset.route === route) {
+        link.classList.add('active');
+        link.classList.remove('text-gray-500');
+        link.classList.add('text-gray-700');
+      } else {
+        link.classList.remove('active');
+        link.classList.add('text-gray-500');
+        link.classList.remove('text-gray-700');
+      }
+    });
   }
 
   // ────────────────────────────────────────────────────────────
