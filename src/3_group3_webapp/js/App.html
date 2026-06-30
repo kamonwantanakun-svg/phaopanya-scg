@@ -162,7 +162,7 @@
     }
     // setChangeHandler จะเรียก renderCurrentRoute_ อัตโนมัติ
     // แต่ถ้าไม่มี GAS context ให้เรียกเอง
-    if (!google || !google.script || !google.script.history) {
+    if (typeof google === 'undefined' || !google.script || !google.script.history) {
       currentRoute = route;
       updateActiveNav_(route);
       renderCurrentRoute_(false);
@@ -313,7 +313,7 @@
           'Coming soon' +
         '</div>' +
         '<div class="mt-6">' +
-          '<a href="#dashboard" class="text-sm text-blue-600 hover:underline">← กลับไป Dashboard</a>' +
+          '<button onclick="globalThis.navigateTo_(\'dashboard\')" class="text-sm text-blue-600 hover:underline cursor-pointer">← กลับไป Dashboard</button>' +
         '</div>' +
       '</div>';
   }
@@ -328,7 +328,7 @@
         '<div class="text-4xl mb-3">🔍</div>' +
         '<h2 class="text-lg font-semibold text-gray-700 mb-1">ไม่พบหน้าที่คุณค้นหา</h2>' +
         '<p class="text-sm text-gray-500 mb-4">ตรวจสอบ URL อีกครั้ง</p>' +
-        '<a href="#dashboard" class="text-sm text-blue-600 hover:underline">← กลับไป Dashboard</a>' +
+        '<button onclick="globalThis.navigateTo_(\'dashboard\')" class="text-sm text-blue-600 hover:underline cursor-pointer">← กลับไป Dashboard</button>' +
       '</div>';
   }
 
@@ -483,12 +483,19 @@
 
   function showError_(msg) {
     if (errorMessage) errorMessage.textContent = msg || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
-    if (errorState) errorState.style.display = '';
+    if (errorState) {
+      errorState.classList.remove('hidden');
+      errorState.style.display = '';
+    }
     if (viewContainer) viewContainer.style.display = 'none';
+    if (loadingState) loadingState.style.display = 'none';
   }
 
   function hideError_() {
-    if (errorState) errorState.style.display = 'none';
+    if (errorState) {
+      errorState.classList.add('hidden');
+      errorState.style.display = 'none';
+    }
   }
 
   /**
