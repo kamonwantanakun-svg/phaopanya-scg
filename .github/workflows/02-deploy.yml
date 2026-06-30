@@ -266,14 +266,67 @@ jobs:
           echo ""
           echo "  📊 จำนวนไฟล์: $(find apps-script-target -type f -maxdepth 1 | wc -l)"
 
-      - name: 🚀 Push to Apps Script
+      - name: 🚀 Push to Apps Script (retry + verbose)
         run: |
           echo "=== 🚀 Push code to Apps Script ==="
           cd apps-script-target
-          clasp status
-          echo ""
-          echo "📤 Pushing..."
-          clasp push --force
+
+          # [FIX Deploy #5] เพิ่ม retry 5 ครั้ง + verbose mode
+          #   สาเหตุ: 'Premature close' เป็น transient Google API error ที่พบบ่อย
+          #   โดยเฉพาะเมื่อ push ไฟล์เยอะ (35 files) ในครั้งเดียว
+          #   บางครั้ง retry 2-3 ครั้งก็ผ่าน
+
+          MAX_PUSH_RETRIES=5
+          PUSH_SUCCESS=false
+
+          for attempt in $(seq 1 $MAX_PUSH_RETRIES); do
+            echo ""
+            echo "  🔄 Push attempt $attempt/$MAX_PUSH_RETRIES..."
+
+            # ลอง clasp push --force (verbose mode)
+            if clasp push --force 2>&1; then
+              echo "  ✅ Push สำเร็จ (attempt $attempt)"
+              PUSH_SUCCESS=true
+              break
+            else
+              echo "  ⚠️ Push ล้มเหลว (attempt $attempt)"
+
+              if [[ $attempt -lt $MAX_PUSH_RETRIES ]]; then
+                # Backoff: 5s, 10s, 15s, 20s
+                BACKOFF=$((attempt * 5))
+                echo "  ⏳ รอ $BACKOFF วินาทีก่อน retry..."
+                sleep $BACKOFF
+              fi
+            fi
+          done
+
+          if [[ "$PUSH_SUCCESS" != "true" ]]; then
+            echo ""
+            echo "  ❌ Push ล้มเหลวครบ $MAX_PUSH_RETRIES ครั้ง"
+            echo ""
+            echo "  === 🔍 การวินิจฉัย ==="
+            echo "  ปัญหา 'Premature close' มักเกิดจาก:"
+            echo ""
+            echo "  1. Apps Script API ไม่ enabled ใน Google Cloud Project"
+            echo "     → ไป https://console.cloud.google.com > APIs & Services > Library"
+            echo "     → ค้นหา 'Apps Script API' > Enable"
+            echo "     → ค้นหา 'Google Drive API' > Enable (ถ้ายังไม่เปิด)"
+            echo ""
+            echo "  2. CLASPRC token หมดอายุ"
+            echo "     → ในเครื่องรัน: clasp login --relogin"
+            echo "     → cat ~/.clasprc.json > copy ไปอัปเดต GitHub Secret CLASPRC"
+            echo ""
+            echo "  3. Apps Script project เป็น Container-bound (ผูกกับ Sheet/Doc)"
+            echo "     → แนะนำสร้าง Standalone project ใหม่ที่ script.google.com"
+            echo ""
+            echo "  4. Network issue ถาวรระหว่าง GitHub Actions ↔ Google API"
+            echo "     → ลอง deploy ด้วยมือจากเครื่องผู้ใช้ก่อน:"
+            echo "       cd phaopanya-scg"
+            echo "       find src -type f \\( -name '*.gs' -o -name '*.html' \\) -exec cp {} . \\;"
+            echo "       clasp clone <SCRIPT_ID>"
+            echo "       clasp push"
+            exit 1
+          fi
 
       - name: 📝 สร้าง Version
         run: |
