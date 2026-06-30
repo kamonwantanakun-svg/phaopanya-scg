@@ -34,17 +34,14 @@
           integrity="sha384-ieG+IKD0d/ZPXyCBTMVAbqsQdns8QGJR/e26WMw7M4fkaI/rHcS/YIoi+ah9WGge"
           crossorigin="anonymous"></script>
 
-  <!-- Inter font (preconnect + stylesheet, with SRI) -->
-  <!-- [FIX SonarCloud Web:S5725] Added integrity + crossorigin for SRI enforcement -->
-  <!--   NOTE: SRI hash นี้ใช้ได้เฉพาะเมื่อ User-Agent ขอ browser รองรับ woff2 (modern browsers ทั้งหมด) -->
-  <!--   ถ้า Google เปลี่ยน CSS ต้องคำนวณ hash ใหม่: -->
-  <!--   curl -s -A "Mozilla/5.0" "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" | openssl dgst -sha384 -binary | openssl base64 -A -->
+  <!-- Inter font (preconnect + stylesheet) -->
+  <!-- [FIX WebApp] ลบ SRI hash ออก — Google Fonts CSS ส่ง content ต่างกันตาม User-Agent
+       (woff2 vs woff) ทำให้ SRI hash ไม่ stable → บางครั้งโดน block -->
+  <!--   ถ้าต้องการ SRI จริง ต้อง self-host font ใน Apps Script (เกินขอบเขต Phase 1) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-        rel="stylesheet"
-        integrity="sha384-Yvt2jmTtQFEtXIVH1VgGfieY/D91UJNVwWdiVUirr4Gwov6BPGKdjcxOWDiaZ5wF"
-        crossorigin="anonymous">
+        rel="stylesheet">
 
   <!-- Custom styles -->
   <?!= include_('Styles'); ?>

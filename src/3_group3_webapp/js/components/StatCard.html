@@ -88,10 +88,10 @@ globalThis.StatCard = (function () {
       '</div>';
 
     // Render lucide icons ที่เพิ่ง insert
+    // [FIX] Lucide API: createIcon(name) → createIcons() (batch render ทุก [data-lucide])
+    //   createIcon แบบเดิมถูกลบใน Lucide 0.460+ แล้ว — ใช้ createIcons() แทน
     if (globalThis.lucide) {
-      container.querySelectorAll('[data-lucide]').forEach((el) => {
-        globalThis.lucide.createIcon({ name: el.dataset.lucide });
-      });
+      globalThis.lucide.createIcons();
     }
   }
 

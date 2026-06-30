@@ -87,12 +87,14 @@ globalThis.DashboardView = (function () {
   function render(data, container) {
     if (container === null) return;
 
-    const stats = data.stats || {};
-    const topIssues = data.topIssues || [];
-    const sheetsExist = data.sheetsExist || {};
+    // [FIX Phase 1] รองรับ data เป็น null ตอน initial render (ก่อน SSR data มาถึง)
+    const safeData = data || {};
+    const stats = safeData.stats || {};
+    const topIssues = safeData.topIssues || [];
+    const sheetsExist = safeData.sheetsExist || {};
 
     // ─── Build static HTML (sections 1-5) ───
-    let html = buildHeaderHtml_(data);
+    let html = buildHeaderHtml_(safeData);
     html += buildStatCardContainersHtml_();
     html += buildChartsContainersHtml_();
     html += buildMissingSheetsWarningHtml_(sheetsExist);
