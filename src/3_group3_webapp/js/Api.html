@@ -95,6 +95,14 @@ globalThis.api = (function () {
      * getMatchEngineMetrics — Phase 3 (stub)
      */
     getMatchEngineMetrics: () => promisify_('getMatchEngineMetrics'),
+
+    /**
+     * searchLocations — Phase 2: ค้นหาพิกัดจากชื่อ/ที่อยู่/เบอร์โทร/รหัสไปรษณีย์
+     * @param {string} query - คำค้นหา
+     * @param {number} [limit=20] - จำนวนผลลัพธ์สูงสุด
+     * @return {Promise<{results: Array, total: number, query: string, elapsedMs: number}>}
+     */
+    searchLocations: (query, limit) => promisify_('searchLocations', query, limit),
   };
 })();
 

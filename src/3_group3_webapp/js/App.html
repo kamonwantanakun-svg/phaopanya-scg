@@ -195,8 +195,15 @@
         case 'qreview':
         case 'source':
         case 'match':
-        case 'search':
           renderComingSoon_(currentRoute);
+          break;
+
+        case 'search':
+          // [Phase 2] Search view — ค้นหาพิกัดจากชื่อ/ที่อยู่/เบอร์โทร
+          if (globalThis.SearchView) {
+            globalThis.SearchView.render(currentData, viewContainer);
+            renderIcons_();
+          }
           break;
 
         default:

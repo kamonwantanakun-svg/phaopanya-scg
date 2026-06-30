@@ -543,3 +543,276 @@ function getMatchEngineMetrics() {
     message: 'Phase 3 — coming soon',
   };
 }
+
+// ============================================================
+// SECTION 6: Search Locations — Phase 2 (Search by name/address/phone)
+// ============================================================
+
+/**
+ * searchLocations — ค้นหาพิกัดจากชื่อ/ที่อยู่/เบอร์โทร
+ *   ค้นหาใน M_PERSON (canonical_name, phone)
+ *   ค้นหาใน M_PLACE (canonical_name, sub_district, district, province, postcode)
+ *   ค้นหาใน M_ALIAS (variant_name) → map กลับไป person/place
+ *   รวมผลลัพธ์ + ดึงพิกัดจาก M_DESTINATION
+ *
+ * @param {string} query - คำค้นหา (ชื่อ/ที่อยู่/เบอร์โทร/รหัสไปรษณีย์)
+ * @param {number} limit - จำนวนผลลัพธ์สูงสุด (default 20)
+ * @return {Object} { results, total, query, elapsedMs }
+ */
+function searchLocations(query, limit) {
+  if (!isAuthorizedDashboardUser_()) throw new Error('Unauthorized');
+
+  const startTime = Date.now();
+  const maxResults = limit || 20;
+  const rawQuery = String(query || '').trim();
+
+  if (rawQuery.length < 2) {
+    return { results: [], total: 0, query: rawQuery, elapsedMs: 0, message: 'คำค้นหาสั้นเกินไป (อย่างน้อย 2 ตัวอักษร)' };
+  }
+
+  const normQuery = rawQuery.toLowerCase().replace(/\s+/g, '');
+  const isPhoneQuery = /^\d{6,}$/.test(normQuery.replace(/[-\s]/g, ''));
+  const isPostcodeQuery = /^\d{5}$/.test(normQuery);
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // โหลดข้อมูลจาก 4 sheets แบบ batch
+    const personSheet = ss.getSheetByName(SHEET.M_PERSON);
+    const placeSheet = ss.getSheetByName(SHEET.M_PLACE);
+    const aliasSheet = ss.getSheetByName(SHEET.M_ALIAS);
+    const destSheet = ss.getSheetByName(SHEET.M_DESTINATION);
+
+    const persons = personSheet && personSheet.getLastRow() > 1
+      ? personSheet.getRange(2, 1, personSheet.getLastRow() - 1, SCHEMA[SHEET.M_PERSON].length).getValues()
+      : [];
+    const places = placeSheet && placeSheet.getLastRow() > 1
+      ? placeSheet.getRange(2, 1, placeSheet.getLastRow() - 1, SCHEMA[SHEET.M_PLACE].length).getValues()
+      : [];
+    const aliases = aliasSheet && aliasSheet.getLastRow() > 1
+      ? aliasSheet.getRange(2, 1, aliasSheet.getLastRow() - 1, SCHEMA[SHEET.M_ALIAS].length).getValues()
+      : [];
+    const dests = destSheet && destSheet.getLastRow() > 1
+      ? destSheet.getRange(2, 1, destSheet.getLastRow() - 1, SCHEMA[SHEET.M_DESTINATION].length).getValues()
+      : [];
+
+    // สร้าง index maps
+    const personMap = buildPersonMap_(persons);
+    const placeMap = buildPlaceMap_(places);
+    const destByPerson = buildDestIndexByPerson_(dests);
+    const destByPlace = buildDestIndexByPlace_(dests);
+
+    // ค้นหา
+    const matchedPersonIds = new Set();
+    const matchedPlaceIds = new Set();
+
+    // 1. ค้นจาก M_PERSON
+    persons.forEach(function(row) {
+      const name = String(row[PERSON_IDX.CANONICAL] || '').toLowerCase();
+      const phone = String(row[PERSON_IDX.PHONE] || '').toLowerCase().replace(/[-\s]/g, '');
+      const status = String(row[PERSON_IDX.STATUS] || '');
+      if (status === APP_CONST.STATUS_ARCHIVED || status === APP_CONST.STATUS_MERGED) return;
+
+      if (name.includes(normQuery) || (isPhoneQuery && phone.includes(normQuery.replace(/[-\s]/g, '')))) {
+        matchedPersonIds.add(String(row[PERSON_IDX.PERSON_ID]));
+      }
+    });
+
+    // 2. ค้นจาก M_PLACE
+    places.forEach(function(row) {
+      const name = String(row[PLACE_IDX.CANONICAL] || '').toLowerCase();
+      const subDistrict = String(row[PLACE_IDX.SUB_DISTRICT] || '').toLowerCase();
+      const district = String(row[PLACE_IDX.DISTRICT] || '').toLowerCase();
+      const province = String(row[PLACE_IDX.PROVINCE] || '').toLowerCase();
+      const postcode = String(row[PLACE_IDX.POSTCODE] || '');
+      const status = String(row[PLACE_IDX.STATUS] || '');
+      if (status === APP_CONST.STATUS_ARCHIVED || status === APP_CONST.STATUS_MERGED) return;
+
+      const haystack = name + ' ' + subDistrict + ' ' + district + ' ' + province;
+      if (haystack.includes(normQuery) || (isPostcodeQuery && postcode === normQuery)) {
+        matchedPlaceIds.add(String(row[PLACE_IDX.PLACE_ID]));
+      }
+    });
+
+    // 3. ค้นจาก M_ALIAS → map กลับไป person/place
+    aliases.forEach(function(row) {
+      const variant = String(row[ALIAS_IDX.VARIANT] || '').toLowerCase();
+      const masterUuid = String(row[ALIAS_IDX.MASTER_UUID] || '');
+      const entityType = String(row[ALIAS_IDX.ENTITY_TYPE] || '');
+      const active = String(row[ALIAS_IDX.ACTIVE_FLAG] || '');
+      if (active !== 'true' && active !== 'TRUE') return;
+
+      if (variant.includes(normQuery)) {
+        if (entityType === 'PERSON') {
+          const personId = findPersonIdByUuid_(persons, masterUuid);
+          if (personId) matchedPersonIds.add(personId);
+        } else if (entityType === 'PLACE') {
+          const placeId = findPlaceIdByUuid_(places, masterUuid);
+          if (placeId) matchedPlaceIds.add(placeId);
+        }
+      }
+    });
+
+    // 4. สร้างผลลัพธ์
+    const results = [];
+    matchedPersonIds.forEach(function(personId) {
+      const person = personMap[personId];
+      if (!person) return;
+      const dest = destByPerson[personId];
+      if (dest && dest.lat && dest.lng) {
+        results.push({
+          name: person.canonicalName,
+          phone: person.phone,
+          address: '',
+          lat: dest.lat,
+          lng: dest.lng,
+          destId: dest.destId,
+          source: 'PERSON',
+          usageCount: dest.usageCount || person.usageCount || 0,
+        });
+      }
+    });
+
+    matchedPlaceIds.forEach(function(placeId) {
+      const place = placeMap[placeId];
+      if (!place) return;
+      const dest = destByPlace[placeId];
+      if (dest && dest.lat && dest.lng) {
+        results.push({
+          name: place.canonicalName,
+          phone: '',
+          address: buildAddressStr_(place),
+          lat: dest.lat,
+          lng: dest.lng,
+          destId: dest.destId,
+          source: 'PLACE',
+          usageCount: dest.usageCount || place.usageCount || 0,
+        });
+      }
+    });
+
+    // เรียงตาม usageCount  descending + จำกัดจำนวน
+    results.sort(function(a, b) { return (b.usageCount || 0) - (a.usageCount || 0); });
+    const trimmed = results.slice(0, maxResults);
+
+    const elapsedMs = Date.now() - startTime;
+    logInfo('WebApp', 'searchLocations("' + rawQuery + '") → ' + trimmed.length + ' results in ' + elapsedMs + 'ms');
+
+    return {
+      results: trimmed,
+      total: results.length,
+      query: rawQuery,
+      elapsedMs: elapsedMs,
+    };
+  } catch (err) {
+    logError('WebApp', 'searchLocations ล้มเหลว: ' + err.message, err);
+    throw err;
+  }
+}
+
+// === Search Helpers ===
+
+function buildPersonMap_(persons) {
+  const map = {};
+  persons.forEach(function(row) {
+    const id = String(row[PERSON_IDX.PERSON_ID] || '');
+    if (id) {
+      map[id] = {
+        personId: id,
+        canonicalName: String(row[PERSON_IDX.CANONICAL] || ''),
+        phone: String(row[PERSON_IDX.PHONE] || ''),
+        usageCount: Number(row[PERSON_IDX.USAGE_COUNT] || 0),
+      };
+    }
+  });
+  return map;
+}
+
+function buildPlaceMap_(places) {
+  const map = {};
+  places.forEach(function(row) {
+    const id = String(row[PLACE_IDX.PLACE_ID] || '');
+    if (id) {
+      map[id] = {
+        placeId: id,
+        canonicalName: String(row[PLACE_IDX.CANONICAL] || ''),
+        subDistrict: String(row[PLACE_IDX.SUB_DISTRICT] || ''),
+        district: String(row[PLACE_IDX.DISTRICT] || ''),
+        province: String(row[PLACE_IDX.PROVINCE] || ''),
+        postcode: String(row[PLACE_IDX.POSTCODE] || ''),
+        usageCount: Number(row[PLACE_IDX.USAGE_COUNT] || 0),
+      };
+    }
+  });
+  return map;
+}
+
+function buildDestIndexByPerson_(dests) {
+  const map = {};
+  dests.forEach(function(row) {
+    const personId = String(row[DEST_IDX.PERSON_ID] || '');
+    const status = String(row[DEST_IDX.STATUS] || '');
+    if (personId && status !== APP_CONST.STATUS_ARCHIVED && status !== APP_CONST.STATUS_MERGED) {
+      const lat = Number(row[DEST_IDX.LAT] || 0);
+      const lng = Number(row[DEST_IDX.LNG] || 0);
+      if (lat && lng && personId) {
+        map[personId] = {
+          destId: String(row[DEST_IDX.DEST_ID] || ''),
+          lat: lat,
+          lng: lng,
+          usageCount: Number(row[DEST_IDX.USAGE_COUNT] || 0),
+        };
+      }
+    }
+  });
+  return map;
+}
+
+function buildDestIndexByPlace_(dests) {
+  const map = {};
+  dests.forEach(function(row) {
+    const placeId = String(row[DEST_IDX.PLACE_ID] || '');
+    const status = String(row[DEST_IDX.STATUS] || '');
+    if (placeId && status !== APP_CONST.STATUS_ARCHIVED && status !== APP_CONST.STATUS_MERGED) {
+      const lat = Number(row[DEST_IDX.LAT] || 0);
+      const lng = Number(row[DEST_IDX.LNG] || 0);
+      if (lat && lng) {
+        map[placeId] = {
+          destId: String(row[DEST_IDX.DEST_ID] || ''),
+          lat: lat,
+          lng: lng,
+          usageCount: Number(row[DEST_IDX.USAGE_COUNT] || 0),
+        };
+      }
+    }
+  });
+  return map;
+}
+
+function findPersonIdByUuid_(persons, uuid) {
+  for (var i = 0; i < persons.length; i++) {
+    if (String(persons[i][PERSON_IDX.MASTER_UUID] || '') === uuid) {
+      return String(persons[i][PERSON_IDX.PERSON_ID] || '');
+    }
+  }
+  return '';
+}
+
+function findPlaceIdByUuid_(places, uuid) {
+  for (var i = 0; i < places.length; i++) {
+    if (String(places[i][PLACE_IDX.MASTER_UUID] || '') === uuid) {
+      return String(places[i][PLACE_IDX.PLACE_ID] || '');
+    }
+  }
+  return '';
+}
+
+function buildAddressStr_(place) {
+  var parts = [];
+  if (place.canonicalName) parts.push(place.canonicalName);
+  if (place.subDistrict) parts.push(place.subDistrict);
+  if (place.district) parts.push(place.district);
+  if (place.province) parts.push(place.province);
+  if (place.postcode) parts.push(place.postcode);
+  return parts.join(' ');
+}
