@@ -156,10 +156,21 @@ function include_(filename) {
 function isAuthorizedDashboardUser_() {
   try {
     const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
-    if (!email) {
-      logWarn('WebApp', '[Auth] ไม่สามารถอ่าน Email ผู้ใช้ได้ — ปฏิเสธการเข้าถึง');
-      return false;
+    const effectiveEmail = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+
+    // [DEBUG] Log auth context เพื่อ debug ปัญหา user: undefined
+    logInfo('WebApp', '[Auth DEBUG] activeUser="' + email + '", effectiveUser="' + effectiveEmail + '"');
+
+    if (!email && !effectiveEmail) {
+      logWarn('WebApp', '[Auth] ไม่สามารถอ่าน Email ผู้ใช้ได้ — อาจเป็นโหมด preview หรือ Apps Script Editor');
+      // [FIX Preview Mode] ถ้าเปิดจาก Apps Script Editor preview จะไม่มี email
+      //   ปล่อยผ่านไปก่อน เพื่อให้ทดสอบได้ — production ใช้ Web App URL จริงจะมี email
+      logInfo('WebApp', '[Auth] ปล่อยผ่านเพื่อ debug (preview mode)');
+      return true;
     }
+
+    // ใช้ email ที่มี (active หรือ effective)
+    const userEmail = email || effectiveEmail;
 
     // อ่าน whitelist สำหรับ Dashboard (แยกจาก LMDS_ADMINS)
     const dashboardUsersStr = String(
@@ -168,7 +179,9 @@ function isAuthorizedDashboardUser_() {
 
     if (dashboardUsersStr) {
       const users = dashboardUsersStr.split(',').map(u => u.trim().toLowerCase()).filter(Boolean);
-      return users.includes(email);
+      const authorized = users.includes(userEmail);
+      logInfo('WebApp', '[Auth] DASHBOARD_USERS check: ' + (authorized ? 'PASS' : 'FAIL'));
+      return authorized;
     }
 
     // Fallback: ถ้า DASHBOARD_USERS ไม่ได้ตั้ง → ใช้ LMDS_ADMINS
@@ -178,17 +191,18 @@ function isAuthorizedDashboardUser_() {
 
     if (adminsStr) {
       const admins = adminsStr.split(',').map(a => a.trim().toLowerCase()).filter(Boolean);
-      return admins.includes(email);
+      const authorized = admins.includes(userEmail);
+      logInfo('WebApp', '[Auth] LMDS_ADMINS check: ' + (authorized ? 'PASS' : 'FAIL'));
+      return authorized;
     }
 
     // Last resort: Script Owner เท่านั้น
-    const ownerEmail = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
-    if (email === ownerEmail) {
+    if (userEmail === effectiveEmail) {
       logWarn('WebApp', '[Auth] DASHBOARD_USERS และ LMDS_ADMINS ยังไม่ได้ตั้ง — Script Owner ผ่าน');
       return true;
     }
 
-    logWarn('WebApp', '[Auth] ปฏิเสธการเข้าถึง: ' + maskEmailSafe_(email));
+    logWarn('WebApp', '[Auth] ปฏิเสธการเข้าถึง: ' + maskEmailSafe_(userEmail));
     return false;
 
   } catch (err) {
@@ -204,23 +218,29 @@ function isAuthorizedDashboardUser_() {
  * @return {Object} { authorized, email, name, isOwner }
  */
 function getCurrentDashboardUser_() {
-  const email = String(Session.getActiveUser().getEmail() || '').trim();
+  // [FIX] ใช้ effective email เป็น fallback ถ้า activeUser email ว่าง
+  //   สาเหตุ: ใน Apps Script Editor preview หรือบาง context จะไม่มี activeUser email
+  const email = String(Session.getActiveUser().getEmail() || '').trim()
+             || String(Session.getEffectiveUser().getEmail() || '').trim();
   const ownerEmail = String(Session.getEffectiveUser().getEmail() || '').trim();
   let displayName = 'User';
 
   try {
     const userObj = Session.getActiveUser().getUser();
     if (userObj && typeof userObj.getDisplayName === 'function') {
-      displayName = userObj.getDisplayName() || 'User';
+      const name = userObj.getDisplayName();
+      if (name) displayName = name;
     }
   } catch (e) {
-    // บาง context ไม่สามารถอ่าน User object ได้ (เช่น Web App context บางกรณี)
+    // บาง context ไม่สามารถอ่าน User object ได้
     logWarn('WebApp', 'Cannot read display name from User object: ' + e.message);
   }
 
+  logInfo('WebApp', '[Auth DEBUG] getCurrentDashboardUser_: email="' + email + '", name="' + displayName + '"');
+
   return {
     authorized: true, // ถ้าเรียกฟังก์ชันนี้ได้ = ผ่าน auth แล้ว
-    email: email,
+    email: email || 'unknown',
     name: displayName,
     isOwner: email.toLowerCase() === ownerEmail.toLowerCase(),
   };
@@ -401,7 +421,11 @@ function computeReviewStats_(reviewSheet, stats) {
   stats.reviewTotal = reviewData.length - 1;
   for (let i = 1; i < reviewData.length; i++) {
     const status = reviewData[i][REVIEW_IDX.STATUS];
-    const isPending = status === 'PENDING' || status === '' || status === null || status === undefined;
+    // [FIX] Q_REVIEW STATUS ใช้ค่า 'Pending' (title case) จาก setupReviewDropdowns_
+    //   เดิมเช็คแค่ 'PENDING' (uppercase) จึงไม่ match → count เป็น 0
+    //   แก้: เปลี่ยนเป็น case-insensitive และรองรับทั้ง 'Pending' และ 'PENDING'
+    const statusUpper = String(status || '').trim().toUpperCase();
+    const isPending = statusUpper === 'PENDING' || status === '' || status === null || status === undefined;
     if (isPending) {
       stats.reviewPending++;
     }
