@@ -77,6 +77,11 @@
 globalThis.DashboardView = (function () {
   'use strict';
 
+  // ────────────────────────────────────────────────────────────
+  // State — เก็บ chart instance เพื่อทำลายก่อน re-render (ป้องกัน memory leak)
+  // ────────────────────────────────────────────────────────────
+  let trendChartInstance = null;
+
   /**
    * render — วาด Dashboard ทั้งหมด
    *   ใช้ sub-functions เพื่อรักษา Cognitive Complexity ต่ำ (≤ 15)
@@ -87,15 +92,20 @@ globalThis.DashboardView = (function () {
   function render(data, container) {
     if (container === null) return;
 
+    // ทำลาย chart เดิมก่อน re-render (ป้องกัน memory leak + canvas reuse error)
+    destroyTrendChart_();
+
     // [FIX Phase 1] รองรับ data เป็น null ตอน initial render (ก่อน SSR data มาถึง)
     const safeData = data || {};
     const stats = safeData.stats || {};
     const topIssues = safeData.topIssues || [];
+    const deliveryTrend = safeData.deliveryTrend || null;
     const sheetsExist = safeData.sheetsExist || {};
 
     // ─── Build static HTML (sections 1-5) ───
     let html = buildHeaderHtml_(safeData);
     html += buildStatCardContainersHtml_();
+    html += buildTrendChartContainerHtml_(deliveryTrend);
     html += buildChartsContainersHtml_();
     html += buildMissingSheetsWarningHtml_(sheetsExist);
 
@@ -104,8 +114,148 @@ globalThis.DashboardView = (function () {
     // ─── Render dynamic content into containers ───
     renderPrimaryStatCards_(stats, container);
     renderSecondaryStatCards_(stats, container);
+    renderTrendChart_(deliveryTrend);
     renderBreakdownAndIssues_(stats, topIssues, container);
   }
+
+  /**
+   * destroyTrendChart_ — ทำลาย Chart.js instance ปัจจุบัน (ถ้ามี)
+   *   ต้องเรียกก่อน re-render เพื่อกัน canvas reuse error + memory leak
+   * @private
+   */
+  function destroyTrendChart_() {
+    if (trendChartInstance !== null) {
+      try {
+        trendChartInstance.destroy();
+      } catch (e) {
+        // ignore — chart อาจถูกทำลายไปแล้ว
+      }
+      trendChartInstance = null;
+    }
+  }
+
+  /**
+   * buildTrendChartContainerHtml_ — Section 3.5: container สำหรับ 7-day trend chart
+   *   แสดงเฉพาะเมื่อมี deliveryTrend data (มาจาก getDashboardData)
+   * @param {Object|null} deliveryTrend — { labels, data, total, dailyAvg }
+   * @return {string} HTML
+   * @private
+   */
+  function buildTrendChartContainerHtml_(deliveryTrend) {
+    if (deliveryTrend === null || deliveryTrend === undefined) return '';
+
+    let html = '<div class="bg-white border border-gray-200 rounded-lg p-4 mb-6">';
+    html += '  <div class="flex items-center justify-between mb-3">';
+    html += '    <div>';
+    html += '      <h3 class="text-sm font-semibold text-gray-800">📊 การจัดส่ง 7 วันล่าสุด</h3>';
+    html += '      <p class="text-xs text-gray-500 mt-0.5">แนวโน้มจำนวนรายการจัดส่งรายวัน</p>';
+    html += '    </div>';
+    if (deliveryTrend.total !== undefined) {
+      html += '    <div class="text-right">';
+      html += '      <p class="text-xs text-gray-500">รวม 7 วัน</p>';
+      html += '      <p class="text-lg font-semibold text-gray-900">' + deliveryTrend.total + ' <span class="text-xs font-normal text-gray-500">รายการ</span></p>';
+      if (deliveryTrend.dailyAvg !== undefined && deliveryTrend.dailyAvg > 0) {
+        html += '      <p class="text-xs text-gray-400">เฉลี่ย ' + deliveryTrend.dailyAvg + '/วัน</p>';
+      }
+      html += '    </div>';
+    }
+    html += '  </div>';
+    html += '  <div class="relative" style="height: 240px;">';
+    html += '    <canvas id="deliveryTrendChart"></canvas>';
+    html += '  </div>';
+    html += '</div>';
+    return html;
+  }
+
+  /**
+   * renderTrendChart_ — วาด line chart ด้วย Chart.js แสดง delivery volume 7 วัน
+   *   ถ้าไม่มี Chart.js หรือไม่มี data → ข้ามไปเลย (no-op)
+   * @param {Object|null} deliveryTrend — { labels, data, total, dailyAvg }
+   * @private
+   */
+  function renderTrendChart_(deliveryTrend) {
+    if (deliveryTrend === null || deliveryTrend === undefined) return;
+    if (typeof globalThis.Chart !== 'function') {
+      console.warn('[DashboardView] Chart.js not loaded — skip trend chart');
+      return;
+    }
+    if (!deliveryTrend.labels || !deliveryTrend.data) return;
+    if (deliveryTrend.labels.length === 0) return;
+
+    const canvas = document.getElementById('deliveryTrendChart');
+    if (canvas === null) return;
+
+    // ทำลาย chart เดิมก่อน (ถ้ามี)
+    destroyTrendChart_();
+
+    // หา index ของวันนี้ (ตัวสุดท้าย) เพื่อ highlight
+    const lastIndex = deliveryTrend.labels.length - 1;
+    const pointBackgroundColors = deliveryTrend.labels.map(function(_, idx) {
+      return idx === lastIndex ? '#1d4ed8' : '#3b82f6';  // blue-700 vs blue-500
+    });
+    const pointRadius = deliveryTrend.labels.map(function(_, idx) {
+      return idx === lastIndex ? 6 : 4;
+    });
+
+    trendChartInstance = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: deliveryTrend.labels,
+        datasets: [{
+          label: 'จำนวนรายการจัดส่ง',
+          data: deliveryTrend.data,
+          borderColor: '#3b82f6',  // blue-500
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',  // blue-500 @ 10% alpha
+          borderWidth: 2,
+          fill: true,
+          tension: 0.3,  // smooth curve
+          pointBackgroundColor: pointBackgroundColors,
+          pointBorderColor: '#ffffff',
+          pointBorderWidth: 2,
+          pointRadius: pointRadius,
+          pointHoverRadius: 7,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: 'rgba(17, 24, 39, 0.9)',
+            padding: 10,
+            titleFont: { size: 12, family: 'Inter' },
+            bodyFont: { size: 12, family: 'Inter' },
+            callbacks: {
+              title: function(items) {
+                return 'วันที่ ' + items[0].label;
+              },
+              label: function(item) {
+                return item.parsed.y + ' รายการจัดส่ง';
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { font: { size: 11, family: 'Inter' }, color: '#6b7280' },
+          },
+          y: {
+            beginAtZero: true,
+            grid: { color: '#f3f4f6' },
+            ticks: {
+              font: { size: 11, family: 'Inter' },
+              color: '#9ca3af',
+              precision: 0,  // ไม่มีจุดทศนิยม (จำนวนรายการเป็นจำนวนเต็ม)
+            },
+          },
+        },
+      },
+    });
+  }
+
+
 
   /**
    * buildHeaderHtml_ — Section 1: Page header พร้อม last updated

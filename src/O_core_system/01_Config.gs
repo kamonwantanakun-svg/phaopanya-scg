@@ -63,7 +63,7 @@
  * ===================================================
  */
 
-const APP_VERSION = '5.5.028';
+const APP_VERSION = '5.5.029';
 const SCHEMA_VERSION = '5.5.022';
 const APP_NAME    = 'LMDS V5.5';
 

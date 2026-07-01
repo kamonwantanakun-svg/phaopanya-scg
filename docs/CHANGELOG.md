@@ -7,6 +7,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 | Version | Date | Cycle | Issues |
 |---------|------|-------|--------|
+| 5.5.029 | 2026-07-01 | PHASE 3.4: 7-DAY DELIVERY TREND CHART | Trend chart on Dashboard |
 | 5.5.028 | 2026-07-01 | PHASE 3: MATCH ENGINE METRICS | Dashboard สถิติ Match Engine |
 | 5.5.027 | 2026-07-01 | PHASE 2.4: SOURCE SHEET VIEW | Source Sheet page implementation |
 | 5.5.026 | 2026-07-01 | PHASE 2.3: FACT_DELIVERY VIEW | FACT_DELIVERY page implementation |
@@ -32,6 +33,68 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 | 5.5.006 | 2026-06-18 | CONSISTENCY SYNC | 28 doc inconsistencies |
 | 5.5.005 | 2026-06-16 | REVIEW SERVICE FIX | (intermediate) |
 | 5.5.004 | 2026-06-15 | INITIAL AUDIT CYCLES | 53 audit issues |
+
+---
+
+## [5.5.029] — 2026-07-01 — PHASE 3.4: 7-DAY DELIVERY TREND CHART
+
+### New Feature: 7-Day Delivery Trend Chart on Dashboard
+เพิ่ม Line Chart แสดงแนวโน้มการจัดส่งย้อนหลัง 7 วันบนหน้า Dashboard
+**เป็น feature สุดท้ายของแผน WebApp** — ทุกข้อในแผน Phase 1-4 เสร็จครบแล้ว
+
+**Server-side (22_WebApp.gs)**:
+- `computeDeliveryTrend7Days_(factSheet)` — function ใหม่
+  - สร้าง map ของ 7 วันย้อนหลัง (วันนี้ - 6 วันก่อน)
+  - อ่านเฉพาะคอลัมน์ DELIVERY_DATE จาก FACT_DELIVERY (1 column — ลด payload)
+  - นับจำนวนรายการในแต่ละวัน + คำนวณ total + dailyAvg
+  - รองรับ Date object + string date (parse + validate)
+  - Return: `{ labels: ['dd/mm', ...], data: [count, ...], total, dailyAvg }`
+- `getDashboardData()` — เพิ่ม field `deliveryTrend` ใน response
+
+**Frontend (views/Dashboard.html)**:
+- `trendChartInstance` state — เก็บ Chart.js instance เพื่อ destroy ก่อน re-render
+  (ป้องกัน memory leak + canvas reuse error เวลา refresh)
+- `destroyTrendChart_()` — helper ทำลาย chart instance อย่างปลอดภัย (try-catch)
+- `buildTrendChartContainerHtml_(deliveryTrend)` — section ใหม่:
+  - Header: "📊 การจัดส่ง 7 วันล่าสุด" + subtitle
+  - ฝั่งขวา: total + dailyAvg badges
+  - Canvas 240px height
+- `renderTrendChart_(deliveryTrend)` — วาด line chart ด้วย Chart.js:
+  - Type: `line` (smooth curve, tension 0.3)
+  - Fill area under line (alpha 10%)
+  - Highlight วันล่าสุดด้วย point ใหญ่ + สีเข้ม (blue-700 vs blue-500)
+  - Tooltip ภาษาไทย: "วันที่ dd/mm" + "X รายการจัดส่ง"
+  - ไม่มี legend (ลด clutter)
+  - Y-axis: จำนวนเต็ม (precision: 0)
+  - Responsive + maintainAspectRatio: false
+- `render()` — เรียก destroyTrendChart_() ก่อน + renderTrendChart_() หลัง innerHTML
+
+**Layout position**: chart อยู่ระหว่าง Stat Cards และ Match Status/Top Issues
+(เห็นแนวโน้มก่อนเข้าสู่รายละเอียด breakdown)
+
+### Test (mock server + Playwright)
+7 scenarios:
+1. Load Dashboard → trend section header แสดง ✓
+2. ตรวจ summary stats (total=143, dailyAvg=20.4) ✓
+3. Canvas ขนาด 974x240 px ✓
+4. Chart.js instance ถูกสร้าง (1 instance) ✓
+5. ไม่มี chart.js errors ✓
+6. Navigate to FACT_DELIVERY → canvas ถูกลบจาก DOM ✓
+7. Navigate back → chart re-render ถูก (canvas กลับมา + ขนาดถูก) ✓
+ไม่มี page errors ตลอดการทดสอบ
+
+### สรุปแผน WebApp ทั้งหมด
+หลังจาก Phase 3.4 เสร็จ — **ทุกข้อในแผน Phase 1-4 ทำครบแล้ว**:
+
+| Phase | ข้อที่วางแผน | สถานะ |
+|-------|-------------|-------|
+| Phase 1 (MVP) | Dashboard + Auth + Polling | ✅ 100% |
+| Phase 2 (Tables) | FACT/QReview/Source/Search + Detail Panel | ✅ 100% (+ bonus) |
+| Phase 3 (Charts) | MatchEngine + Trend Chart + Status Chart | ✅ 100% |
+| Phase 4 (Polish) | Auth + Session + Loading + Responsive + Deploy | ✅ 100% |
+| Phase 4 (skip) | Dark Mode | ❌ ยกเลิก (Pragmatic Roadmap) |
+
+ไม่มี "Coming Soon" หน้าไหนเหลือ + ไม่มีข้อในแผนที่ยังไม่ทำ (นอกจาก setup tasks ที่ผู้ใช้ทำเอง)
 
 ---
 

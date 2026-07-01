@@ -328,16 +328,22 @@ function getDashboardData() {
   // ─── Top Issues (จาก Q_REVIEW issue_type) ───
   const topIssues = computeTopIssues_(reviewSheet, 5);
 
+  // ─── Delivery Trend 7 วัน (Phase 3.4) ───
+  // คำนวณ trend การจัดส่งย้อนหลัง 7 วัน เพื่อแสดงเป็น line chart บน Dashboard
+  const deliveryTrend = computeDeliveryTrend7Days_(factSheet);
+
   const elapsedMs = Date.now() - startTime;
   // [FIX] เพิ่ม reviewTotal ใน log เพื่อ debug ปัญหา review=0
   logInfo('WebApp', 'getDashboardData served — fact=' + stats.factDeliveryTotal +
     ', reviewPending=' + stats.reviewPending + '/' + stats.reviewTotal +
     ', source=' + stats.sourceSheetTotal +
+    ', trend7d=' + deliveryTrend.total +
     ', elapsed=' + elapsedMs + 'ms');
 
   return {
     stats: stats,
     topIssues: topIssues,
+    deliveryTrend: deliveryTrend,
     sheetsExist: sheetsExist,
     lastUpdated: new Date().toISOString(),
     appVersion: APP_VERSION,
@@ -399,6 +405,89 @@ function isAutoMatchStatus_(status) {
   return status === APP_CONST.MATCH_FULL ||
          status === APP_CONST.MATCH_GEO ||
          status === APP_CONST.MATCH_FUZZY;
+}
+
+/**
+ * computeDeliveryTrend7Days — คำนวณจำนวนการจัดส่งย้อนหลัง 7 วัน
+ *   สำหรับแสดงเป็น line chart บน Dashboard (Phase 3.4)
+ *
+ *   Return:
+ *   - labels: array ของ date string 7 ตัว (รูปแบบ 'dd/mm' ภาษาไทย)
+ *             เรียงจากเก่า → ใหม่ (ซ้าย → ขวาใน chart)
+ *   - data: array ของจำนวนรายการในแต่ละวัน (เรียงตาม labels)
+ *   - total: รวมทั้ง 7 วัน
+ *   - dailyAvg: ค่าเฉลี่ยรายวัน (1 ตำแหน่งทศนิยม)
+ *
+ * @param {Sheet} factSheet - FACT_DELIVERY sheet
+ * @return {Object} { labels, data, total, dailyAvg }
+ * @private
+ */
+function computeDeliveryTrend7Days_(factSheet) {
+  // Default return — ถ้า sheet ไม่มีหรือว่าง
+  const emptyResult = { labels: [], data: [], total: 0, dailyAvg: 0 };
+  if (factSheet === null) return emptyResult;
+
+  const lastRow = factSheet.getLastRow();
+  if (lastRow <= 1) return emptyResult;
+
+  // สร้าง map ของ 7 วันย้อนหลัง — key = 'YYYY-MM-DD'
+  // เรียงจาก 6 วันก่อน → วันนี้ (รวม 7 วัน)
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);  // normalize เป็นเที่ยงคืน
+
+  const labels = [];
+  const dateKeys = [];
+  const dayCounts = {};
+
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = formatDateForCompare_(d);
+    dateKeys.push(key);
+    dayCounts[key] = 0;
+    // Label รูปแบบ 'dd/mm' ภาษาไทย (เช่น '01/07')
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    labels.push(dd + '/' + mm);
+  }
+
+  // อ่านเฉพาะคอลัมน์ DELIVERY_DATE จาก FACT_DELIVERY เพื่อลด payload
+  // FACT_IDX.DELIVERY_DATE = 4 → 1-based = 5
+  const dateCol = FACT_IDX.DELIVERY_DATE + 1;
+  const dateData = factSheet.getRange(2, dateCol, lastRow - 1, 1).getValues();
+
+  let total = 0;
+  for (let i = 0; i < dateData.length; i++) {
+    const cellValue = dateData[i][0];
+    if (cellValue instanceof Date) {
+      const key = formatDateForCompare_(cellValue);
+      if (dayCounts.hasOwnProperty(key)) {
+        dayCounts[key]++;
+        total++;
+      }
+    } else if (typeof cellValue === 'string' && cellValue.length > 0) {
+      // ถ้าเก็บเป็น string พยายาม parse
+      const parsed = new Date(cellValue);
+      if (!isNaN(parsed.getTime())) {
+        const key = formatDateForCompare_(parsed);
+        if (dayCounts.hasOwnProperty(key)) {
+          dayCounts[key]++;
+          total++;
+        }
+      }
+    }
+  }
+
+  // สร้าง data array ตามลำดับ labels
+  const data = dateKeys.map(function(key) { return dayCounts[key]; });
+  const dailyAvg = Math.round((total / 7) * 10) / 10;
+
+  return {
+    labels: labels,
+    data: data,
+    total: total,
+    dailyAvg: dailyAvg,
+  };
 }
 
 /**
