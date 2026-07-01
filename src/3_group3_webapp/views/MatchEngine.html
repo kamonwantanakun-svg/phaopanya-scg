@@ -87,7 +87,8 @@ globalThis.MatchEngineView = (function () {
   }
 
   function buildSummaryCardsHtml_(summary) {
-    const autoMatchColor = summary.autoMatchRate >= 80 ? 'green' : summary.autoMatchRate >= 50 ? 'yellow' : 'red';
+    // [SonarCloud S3358] แยก nested ternary เป็น helper function เพื่ออ่านง่าย
+    const autoMatchColor = chooseAutoMatchColor_(summary.autoMatchRate);
     const COLOR_CLASSES = {
       blue:   { bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-700',    iconBg: 'bg-blue-100',    iconText: 'text-blue-600' },
       green:  { bg: 'bg-green-50',   border: 'border-green-200',   text: 'text-green-700',   iconBg: 'bg-green-100',   iconText: 'text-green-600' },
@@ -417,6 +418,20 @@ globalThis.MatchEngineView = (function () {
     if (globalThis.LMDSApp && typeof globalThis.LMDSApp.showToast === 'function') {
       globalThis.LMDSApp.showToast(title, message, type, duration);
     }
+  }
+
+  /**
+   * chooseAutoMatchColor_ — เลือกสี Auto Match Rate card ตามเปอร์เซ็นต์
+   *   [SonarCloud S3358] แยกจาก nested ternary ใน buildSummaryCardsHtml_
+   * @param {number} rate - auto match rate (%)
+   * @return {string} 'green' | 'yellow' | 'red'
+   * @private
+   */
+  function chooseAutoMatchColor_(rate) {
+    const safeRate = rate || 0;
+    if (safeRate >= 80) return 'green';
+    if (safeRate >= 50) return 'yellow';
+    return 'red';
   }
 
   return {

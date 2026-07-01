@@ -128,7 +128,10 @@ globalThis.DashboardView = (function () {
       try {
         trendChartInstance.destroy();
       } catch (e) {
-        // ignore — chart อาจถูกทำลายไปแล้ว
+        // [SonarCloud S2486] ต้อง log แม้จะเป็น best-effort destroy
+        //   เพราะถ้า chart ถูกทำลายไปแล้วจริง ๆ ก็ไม่มีผลกระทบ
+        //   แต่ถ้า error จากสาเหตุอื่น ควรเห็นใน console เพื่อ debug
+        console.warn('[DashboardView] destroyTrendChart_ failed (safe to ignore):', e.message);
       }
       trendChartInstance = null;
     }

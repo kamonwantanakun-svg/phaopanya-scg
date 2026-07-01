@@ -461,7 +461,8 @@ function computeDeliveryTrend7Days_(factSheet) {
     const cellValue = dateData[i][0];
     if (cellValue instanceof Date) {
       const key = formatDateForCompare_(cellValue);
-      if (dayCounts.hasOwnProperty(key)) {
+      // [SonarCloud S3531] ใช้ in operator แทน hasOwnProperty — กระชับกว่า
+      if (key in dayCounts) {
         dayCounts[key]++;
         total++;
       }
@@ -470,7 +471,7 @@ function computeDeliveryTrend7Days_(factSheet) {
       const parsed = new Date(cellValue);
       if (!isNaN(parsed.getTime())) {
         const key = formatDateForCompare_(parsed);
-        if (dayCounts.hasOwnProperty(key)) {
+        if (key in dayCounts) {
           dayCounts[key]++;
           total++;
         }
@@ -1694,7 +1695,7 @@ function findPlaceIdByUuid_(places, uuid) {
 }
 
 function buildAddressStr_(place) {
-  var parts = [];
+  const parts = [];
   if (place.canonicalName) parts.push(place.canonicalName);
   if (place.subDistrict) parts.push(place.subDistrict);
   if (place.district) parts.push(place.district);
