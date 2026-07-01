@@ -259,72 +259,8 @@
     // ใช้ currentData ที่มีอยู่
     console.log('[app] Rendering route:', currentRoute, 'with data:', currentData ? 'yes' : 'no');
     try {
-      switch (currentRoute) {
-        case 'dashboard':
-          if (globalThis.DashboardView) {
-            globalThis.DashboardView.render(currentData, viewContainer);
-            renderIcons_();
-          } else {
-            console.error('[app] DashboardView not loaded!');
-            showError_('DashboardView not loaded');
-          }
-          break;
-
-        case 'qreview':
-          // [Phase 2] Q_REVIEW view — รายการรอตรวจ + Approve/Reject
-          if (globalThis.QReviewView) {
-            globalThis.QReviewView.render(currentData, viewContainer);
-            renderIcons_();
-          } else {
-            console.error('[app] QReviewView not loaded!');
-            showError_('QReviewView not loaded');
-          }
-          break;
-
-        case 'fact':
-          // [Phase 2.3] FACT_DELIVERY view — ตารางรายการจัดส่งทั้งหมด
-          if (globalThis.FactDeliveryView) {
-            globalThis.FactDeliveryView.render(currentData, viewContainer);
-            renderIcons_();
-          } else {
-            console.error('[app] FactDeliveryView not loaded!');
-            showError_('FactDeliveryView not loaded');
-          }
-          break;
-
-        case 'source':
-          // [Phase 2.4] Source Sheet view — ข้อมูลดิบจาก SCG API + SYNC_STATUS
-          if (globalThis.SourceSheetView) {
-            globalThis.SourceSheetView.render(currentData, viewContainer);
-            renderIcons_();
-          } else {
-            console.error('[app] SourceSheetView not loaded!');
-            showError_('SourceSheetView not loaded');
-          }
-          break;
-
-        case 'match':
-          // [Phase 3] Match Engine Metrics view — dashboard สถิติ Match Engine
-          if (globalThis.MatchEngineView) {
-            globalThis.MatchEngineView.render(currentData, viewContainer);
-            renderIcons_();
-          } else {
-            console.error('[app] MatchEngineView not loaded!');
-            showError_('MatchEngineView not loaded');
-          }
-          break;
-
-        case 'search':
-          // [Phase 2] Search view — ค้นหาพิกัดจากชื่อ/ที่อยู่/เบอร์โทร
-          if (globalThis.SearchView) {
-            globalThis.SearchView.render(currentData, viewContainer);
-            renderIcons_();
-          }
-          break;
-
-        default:
-          renderNotFound_();
-      }
+      // [SonarCloud S3776] แยก switch ออกเป็น helper function เพื่อลด Cognitive Complexity
+      renderRouteView_(currentRoute);
     } catch (err) {
       console.error('[app] Render error:', err);
       showError_('เกิดข้อผิดพลาดในการแสดงผล: ' + err.message);
@@ -332,31 +268,55 @@
   }
 
   /**
-   * renderComingSoon_ — แสดงหน้า "เร็วๆ นี้" สำหรับ Phase 2+ views
+   * renderRouteView_ — เรียก view module ที่ถูกต้องตาม route
+   *   [SonarCloud S3776] แยก switch ออกจาก renderCurrentRoute_ เพื่อลด Cognitive Complexity
+   * @param {string} route
    * @private
    */
-  function renderComingSoon_(route) {
-    const titles = {
-      fact: '📦 FACT_DELIVERY',
-      qreview: '⚠️ Q_REVIEW',
-      source: '📥 Source Sheet',
-      match: '📈 Match Engine Metrics',
-      search: '🔍 Search',
-    };
+  function renderRouteView_(route) {
+    switch (route) {
+      case 'dashboard':
+        renderView_('DashboardView', 'Dashboard');
+        break;
+      case 'qreview':
+        renderView_('QReviewView', 'Q_REVIEW');
+        break;
+      case 'fact':
+        renderView_('FactDeliveryView', 'FACT_DELIVERY');
+        break;
+      case 'source':
+        renderView_('SourceSheetView', 'Source Sheet');
+        break;
+      case 'match':
+        renderView_('MatchEngineView', 'Match Engine');
+        break;
+      case 'search':
+        // Search view ไม่มี error fallback (silent)
+        if (globalThis.SearchView) {
+          globalThis.SearchView.render(currentData, viewContainer);
+          renderIcons_();
+        }
+        break;
+      default:
+        renderNotFound_();
+    }
+  }
 
-    viewContainer.innerHTML =
-      '<div class="bg-white border border-gray-200 rounded-lg p-12 text-center">' +
-        '<div class="text-4xl mb-3">🚧</div>' +
-        '<h2 class="text-lg font-semibold text-gray-700 mb-1">' + (titles[route] || route) + '</h2>' +
-        '<p class="text-sm text-gray-500 mb-4">หน้านี้จะพร้อมใช้งานใน Phase ถัดไป</p>' +
-        '<div class="inline-flex items-center gap-2 text-xs text-gray-400">' +
-          '<span class="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></span>' +
-          'Coming soon' +
-        '</div>' +
-        '<div class="mt-6">' +
-          '<button type="button" onclick="globalThis.navigateTo_(\'dashboard\')" class="text-sm text-blue-600 hover:underline cursor-pointer">← กลับไป Dashboard</button>' +
-        '</div>' +
-      '</div>';
+  /**
+   * renderView_ — helper สำหรับ render view module ทั่วไป
+   *   ตรวจว่า module loaded ไหม ถ้าไม่โชว์ error
+   * @param {string} moduleName - ชื่อ globalThis property (เช่น 'DashboardView')
+   * @param {string} displayName - ชื่อที่จะแสดงใน error message
+   * @private
+   */
+  function renderView_(moduleName, displayName) {
+    if (globalThis[moduleName]) {
+      globalThis[moduleName].render(currentData, viewContainer);
+      renderIcons_();
+    } else {
+      console.error('[app] ' + moduleName + ' not loaded!');
+      showError_(moduleName + ' not loaded');
+    }
   }
 
   /**

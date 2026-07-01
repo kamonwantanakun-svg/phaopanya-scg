@@ -194,7 +194,24 @@ globalThis.SourceSheetView = (function () {
     let html = '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">';
 
     // ─── Column 1: ข้อมูลการจัดส่ง ───
-    html += '<div class="bg-white border border-gray-200 rounded-lg p-4">';
+    html += buildDeliverySectionHtml_(row);
+
+    // ─── Column 2: พิกัด + SYNC status + QC ───
+    html += buildSyncStatusSectionHtml_(row);
+
+    html += '</div>'; // close grid
+    return html;
+  }
+
+  /**
+   * buildDeliverySectionHtml_ — Section 1: ข้อมูลการจัดส่ง (ดิบ)
+   *   [SonarCloud S3776] แยกออกจาก buildDetailContentHtml_ เพื่อลด Cognitive Complexity
+   * @param {Object} row
+   * @return {string} HTML
+   * @private
+   */
+  function buildDeliverySectionHtml_(row) {
+    let html = '<div class="bg-white border border-gray-200 rounded-lg p-4">';
     html += '<h4 class="text-sm font-semibold text-gray-800 mb-3">🚚 ข้อมูลการจัดส่ง (ดิบ)</h4>';
     const deliveryRows = [
       ['Source ID', row.sourceId],
@@ -218,9 +235,18 @@ globalThis.SourceSheetView = (function () {
     ];
     html += buildDefListHtml_(deliveryRows);
     html += '</div>';
+    return html;
+  }
 
-    // ─── Column 2: พิกัด + SYNC status + QC ───
-    html += '<div class="bg-white border border-gray-200 rounded-lg p-4">';
+  /**
+   * buildSyncStatusSectionHtml_ — Section 2: พิกัด + SYNC status + QC
+   *   [SonarCloud S3776 + S3358] แยกออกจาก buildDetailContentHtml_ และแยก nested ternary
+   * @param {Object} row
+   * @return {string} HTML
+   * @private
+   */
+  function buildSyncStatusSectionHtml_(row) {
+    let html = '<div class="bg-white border border-gray-200 rounded-lg p-4">';
     html += '<h4 class="text-sm font-semibold text-gray-800 mb-3">📡 พิกัด + SYNC Status + QC</h4>';
 
     const syncBucket = row.syncStatusBucket || 'EMPTY';
@@ -234,39 +260,55 @@ globalThis.SourceSheetView = (function () {
     html += buildDefListHtml_(statusRows);
 
     // พิกัด + ปุ่ม Google Maps
-    if (row.lat && row.lng) {
-      const mapsUrl = 'https://www.google.com/maps?q=' + row.lat + ',' + row.lng + '&z=17';
-      html += '<div class="mt-3">' +
-        '<p class="text-xs text-gray-500 mb-1">พิกัด (LAT/LONG จาก SCG API):</p>' +
-        '<div class="flex items-center gap-2">' +
-          '<span class="font-mono text-xs text-gray-700">' + row.lat.toFixed(6) + ', ' + row.lng.toFixed(6) + '</span>' +
-          '<a href="' + mapsUrl + '" target="_blank" rel="noopener" ' +
-            'class="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">🗺️ ดูใน Maps</a>' +
-        '</div>' +
-      '</div>';
-    } else {
-      html += '<p class="mt-3 text-xs text-gray-400 italic">ไม่มีพิกัด (LAT/LONG ว่าง)</p>';
-    }
+    html += buildMapsLinkHtml_(row);
 
     // Hint ถ้ายังไม่ SUCCESS
     if (syncBucket !== 'SUCCESS') {
-      const hint = syncBucket === 'PENDING'
-        ? '💡 รายการนี้ยังไม่ถูกประมวลผล — รอ Daily Job ทำงาน'
-        : syncBucket === 'ERROR'
-        ? '⚠️ รายการนี้ประมวลผลผิดพลาด — ตรวจสอบ log ใน SYS_LOG'
-        : syncBucket === 'EMPTY'
-        ? '∅ SYNC_STATUS ว่าง — รอ Daily Job ตั้งค่า'
-        : '';
+      const hint = buildSyncHintHtml_(syncBucket);
       if (hint) {
         html += '<div class="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800">' + escapeHtml_(hint) + '</div>';
       }
     }
 
     html += '</div>';
-
-    html += '</div>'; // close grid
     return html;
   }
+
+  /**
+   * buildMapsLinkHtml_ — พิกัด + ปุ่มดูใน Google Maps
+   * @param {Object} row
+   * @return {string} HTML
+   * @private
+   */
+  function buildMapsLinkHtml_(row) {
+    if (!(row.lat && row.lng)) {
+      return '<p class="mt-3 text-xs text-gray-400 italic">ไม่มีพิกัด (LAT/LONG ว่าง)</p>';
+    }
+    const mapsUrl = 'https://www.google.com/maps?q=' + row.lat + ',' + row.lng + '&z=17';
+    return '<div class="mt-3">' +
+      '<p class="text-xs text-gray-500 mb-1">พิกัด (LAT/LONG จาก SCG API):</p>' +
+      '<div class="flex items-center gap-2">' +
+        '<span class="font-mono text-xs text-gray-700">' + row.lat.toFixed(6) + ', ' + row.lng.toFixed(6) + '</span>' +
+        '<a href="' + mapsUrl + '" target="_blank" rel="noopener" ' +
+          'class="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">🗺️ ดูใน Maps</a>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /**
+   * buildSyncHintHtml_ — สร้าง hint message ตาม sync bucket
+   *   [SonarCloud S3358] แยก nested ternary เป็น if/else chain
+   * @param {string} syncBucket - 'PENDING' | 'ERROR' | 'EMPTY' | other
+   * @return {string} hint message หรือ '' ถ้าไม่มี
+   * @private
+   */
+  function buildSyncHintHtml_(syncBucket) {
+    if (syncBucket === 'PENDING') return '💡 รายการนี้ยังไม่ถูกประมวลผล — รอ Daily Job ทำงาน';
+    if (syncBucket === 'ERROR') return '⚠️ รายการนี้ประมวลผลผิดพลาด — ตรวจสอบ log ใน SYS_LOG';
+    if (syncBucket === 'EMPTY') return '∅ SYNC_STATUS ว่าง — รอ Daily Job ตั้งค่า';
+    return '';
+  }
+
 
   function buildDefListHtml_(rows) {
     let html = '<dl class="text-xs space-y-1.5">';
@@ -311,20 +353,29 @@ globalThis.SourceSheetView = (function () {
   function bindFilterTabs_(container) {
     const tabs = container.querySelectorAll('.filter-tab');
     tabs.forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        const newStatus = btn.dataset.status;
-        if (newStatus === currentSyncFilter || isLoading) return;
-        currentSyncFilter = newStatus;
-        currentOffset = 0;
-        tabs.forEach(function(t) {
-          t.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
-          t.classList.add('bg-white', 'text-gray-700', 'border-gray-300', 'hover:bg-gray-50');
-        });
-        btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
-        btn.classList.remove('bg-white', 'text-gray-700', 'border-gray-300', 'hover:bg-gray-50');
-        loadPage_(0);
-      });
+      btn.addEventListener('click', handleFilterTabClick_.bind(null, btn, tabs));
     });
+  }
+
+  /**
+   * handleFilterTabClick_ — จัดการ click บน filter tab
+   *   [SonarCloud S2004] แยก handler ออกจาก forEach เพื่อลด nesting level
+   * @param {HTMLElement} btn - ปุ่มที่ถูก click
+   * @param {NodeList} tabs - ทุก tab (สำหรับ toggle active class)
+   * @private
+   */
+  function handleFilterTabClick_(btn, tabs) {
+    const newStatus = btn.dataset.status;
+    if (newStatus === currentSyncFilter || isLoading) return;
+    currentSyncFilter = newStatus;
+    currentOffset = 0;
+    tabs.forEach(function(t) {
+      t.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
+      t.classList.add('bg-white', 'text-gray-700', 'border-gray-300', 'hover:bg-gray-50');
+    });
+    btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+    btn.classList.remove('bg-white', 'text-gray-700', 'border-gray-300', 'hover:bg-gray-50');
+    loadPage_(0);
   }
 
   function bindRowClicksAndPagination_(container) {
@@ -337,7 +388,7 @@ globalThis.SourceSheetView = (function () {
     container.querySelectorAll('.source-page-btn').forEach(function(btn) {
       if (btn.disabled) return;
       btn.addEventListener('click', function() {
-        const offset = parseInt(btn.dataset.offset, 10) || 0;
+        const offset = Number.parseInt(btn.dataset.offset, 10) || 0;
         if (offset < 0) return;
         loadPage_(offset);
       });
@@ -437,9 +488,11 @@ globalThis.SourceSheetView = (function () {
     if (!isoString) return '—';
     try {
       const d = new Date(isoString);
-      if (isNaN(d.getTime())) return String(isoString);
+      if (Number.isNaN(d.getTime())) return String(isoString);
       return d.toLocaleDateString('th-TH', { dateStyle: 'short' });
     } catch (e) {
+      // [SonarCloud S2486] log warning เพื่อ debug ถ้ามี exception จริง
+      console.warn('[SourceSheetView] formatDateShort_ failed:', e.message);
       return String(isoString);
     }
   }
@@ -448,9 +501,11 @@ globalThis.SourceSheetView = (function () {
     if (!isoString) return '—';
     try {
       const d = new Date(isoString);
-      if (isNaN(d.getTime())) return String(isoString);
+      if (Number.isNaN(d.getTime())) return String(isoString);
       return d.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
     } catch (e) {
+      // [SonarCloud S2486] log warning เพื่อ debug ถ้ามี exception จริง
+      console.warn('[SourceSheetView] formatDateFull_ failed:', e.message);
       return String(isoString);
     }
   }

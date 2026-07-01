@@ -297,7 +297,8 @@ globalThis.MatchEngineView = (function () {
     });
     // เพิ่ม status อื่น ๆ ที่ไม่อยู่ใน STATUS_ORDER
     Object.keys(data.statusCounts).forEach(function(status) {
-      if (STATUS_ORDER.indexOf(status) === -1) {
+      // [SonarCloud S7765] ใช้ .includes() แทน .indexOf() === -1
+      if (!STATUS_ORDER.includes(status)) {
         labels.push(status);
         values.push(data.statusCounts[status]);
         colors.push('#9ca3af');  // gray
@@ -427,10 +428,10 @@ globalThis.MatchEngineView = (function () {
    * @return {string} 'green' | 'yellow' | 'red'
    * @private
    */
-  function chooseAutoMatchColor_(rate) {
-    const safeRate = rate || 0;
-    if (safeRate >= 80) return 'green';
-    if (safeRate >= 50) return 'yellow';
+  function chooseAutoMatchColor_(rate = 0) {
+    // [SonarCloud S7760] ใช้ default parameter แทน reassignment
+    if (rate >= 80) return 'green';
+    if (rate >= 50) return 'yellow';
     return 'red';
   }
 
