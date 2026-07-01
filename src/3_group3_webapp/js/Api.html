@@ -77,10 +77,11 @@ globalThis.api = (function () {
     getDashboardData: () => promisify_('getDashboardData'),
 
     /**
-     * getFactDeliveryPage — Phase 2 (stub)
-     * @param {number} offset
-     * @param {number} limit
-     * @param {Object} filter
+     * getFactDeliveryPage — Phase 2.3: ดึงรายการ FACT_DELIVERY แบบ pagination + filter
+     * @param {number} offset - 0-based
+     * @param {number} limit - rows per page (default 50)
+     * @param {Object} filter - { status: 'FULL_MATCH' | 'all' | ... }
+     * @return {Promise<{rows: Array, total: number, offset: number, limit: number, statusCounts: Object, elapsedMs: number}>}
      */
     getFactDeliveryPage: (offset, limit, filter) =>
       promisify_('getFactDeliveryPage', offset, limit, filter),

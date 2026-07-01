@@ -527,14 +527,110 @@ function ping() {
  */
 function getFactDeliveryPage(offset, limit, filter) {
   if (!isAuthorizedDashboardUser_()) throw new Error('Unauthorized');
-  // TODO: Phase 2 implementation
+
+  const startTime = Date.now();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
+
+  if (!sheet) {
+    return {
+      rows: [],
+      total: 0,
+      offset: 0,
+      limit: limit || 50,
+      filter: filter || {},
+      statusCounts: {},
+      elapsedMs: 0,
+      error: 'ไม่พบ sheet FACT_DELIVERY',
+    };
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    return {
+      rows: [],
+      total: 0,
+      offset: 0,
+      limit: limit || 50,
+      filter: filter || {},
+      statusCounts: {},
+      elapsedMs: 0,
+    };
+  }
+
+  // อ่านข้อมูลทั้งหมด batch
+  const data = sheet.getRange(2, 1, lastRow - 1, SCHEMA[SHEET.FACT_DELIVERY].length).getValues();
+
+  // นับ match status ทั้งหมด (สำหรับ filter tabs)
+  const statusCounts = {};
+  data.forEach(function(row) {
+    const s = String(row[FACT_IDX.MATCH_STATUS] || 'UNKNOWN').trim();
+    statusCounts[s] = (statusCounts[s] || 0) + 1;
+  });
+
+  // Filter — รองรับ filter.status (string) หรือ filter.statuses (array)
+  const filterObj = filter || {};
+  let filtered = data;
+  if (filterObj.status && filterObj.status !== 'all' && filterObj.status !== '') {
+    filtered = data.filter(function(row) {
+      return String(row[FACT_IDX.MATCH_STATUS] || '').trim() === filterObj.status;
+    });
+  } else if (Array.isArray(filterObj.statuses) && filterObj.statuses.length > 0) {
+    filtered = data.filter(function(row) {
+      return filterObj.statuses.indexOf(String(row[FACT_IDX.MATCH_STATUS] || '').trim()) !== -1;
+    });
+  }
+
+  // Pagination
+  const safeOffset = Math.max(0, parseInt(offset, 10) || 0);
+  const safeLimit = Math.max(1, Math.min(200, parseInt(limit, 10) || 50));
+  const pageRows = filtered.slice(safeOffset, safeOffset + safeLimit);
+
+  // แปลง rows เป็น objects
+  const rows = pageRows.map(function(row) {
+    return {
+      txId: String(row[FACT_IDX.TX_ID] || ''),
+      deliveryDate: row[FACT_IDX.DELIVERY_DATE] instanceof Date
+        ? row[FACT_IDX.DELIVERY_DATE].toISOString() : String(row[FACT_IDX.DELIVERY_DATE] || ''),
+      deliveryTime: String(row[FACT_IDX.DELIVERY_TIME] || ''),
+      invoiceNo: String(row[FACT_IDX.INVOICE_NO] || ''),
+      shipmentNo: String(row[FACT_IDX.SHIPMENT_NO] || ''),
+      driverName: String(row[FACT_IDX.DRIVER_NAME] || ''),
+      truckLicense: String(row[FACT_IDX.TRUCK_LICENSE] || ''),
+      soldToName: String(row[FACT_IDX.SOLD_TO_NAME] || ''),
+      shipToName: String(row[FACT_IDX.SHIP_TO_NAME] || ''),
+      shipToAddress: String(row[FACT_IDX.SHIP_TO_ADDR] || ''),
+      geoResolvedAddr: String(row[FACT_IDX.GEO_RESOLVED_ADDR] || ''),
+      personId: String(row[FACT_IDX.PERSON_ID] || ''),
+      placeId: String(row[FACT_IDX.PLACE_ID] || ''),
+      destId: String(row[FACT_IDX.DEST_ID] || ''),
+      warehouse: String(row[FACT_IDX.WAREHOUSE] || ''),
+      rawLat: Number(row[FACT_IDX.RAW_LAT] || 0),
+      rawLng: Number(row[FACT_IDX.RAW_LNG] || 0),
+      matchStatus: String(row[FACT_IDX.MATCH_STATUS] || ''),
+      matchConfidence: Number(row[FACT_IDX.MATCH_CONF] || 0),
+      matchReason: String(row[FACT_IDX.MATCH_REASON] || ''),
+      matchAction: String(row[FACT_IDX.MATCH_ACTION] || ''),
+      resolvedLat: Number(row[FACT_IDX.RESOLVED_LAT] || 0),
+      resolvedLng: Number(row[FACT_IDX.RESOLVED_LNG] || 0),
+      driverVerifiedName: String(row[FACT_IDX.DRIVER_VERIFIED_NAME] || ''),
+      driverVerifiedAddr: String(row[FACT_IDX.DRIVER_VERIFIED_ADDR] || ''),
+    };
+  });
+
+  const elapsedMs = Date.now() - startTime;
+  logInfo('WebApp', 'getFactDeliveryPage: status=' + (filterObj.status || 'all') +
+    ' offset=' + safeOffset + ' limit=' + safeLimit +
+    ' → ' + rows.length + '/' + filtered.length + ' rows in ' + elapsedMs + 'ms');
+
   return {
-    rows: [],
-    total: 0,
-    offset: offset || 0,
-    limit: limit || 50,
-    filter: filter || {},
-    message: 'Phase 2 — coming soon',
+    rows: rows,
+    total: filtered.length,
+    offset: safeOffset,
+    limit: safeLimit,
+    filter: filterObj,
+    statusCounts: statusCounts,
+    elapsedMs: elapsedMs,
   };
 }
 

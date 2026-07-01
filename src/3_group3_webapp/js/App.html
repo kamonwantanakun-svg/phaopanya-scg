@@ -282,6 +282,16 @@
           break;
 
         case 'fact':
+          // [Phase 2.3] FACT_DELIVERY view — ตารางรายการจัดส่งทั้งหมด
+          if (globalThis.FactDeliveryView) {
+            globalThis.FactDeliveryView.render(currentData, viewContainer);
+            renderIcons_();
+          } else {
+            console.error('[app] FactDeliveryView not loaded!');
+            showError_('FactDeliveryView not loaded');
+          }
+          break;
+
         case 'source':
         case 'match':
           renderComingSoon_(currentRoute);

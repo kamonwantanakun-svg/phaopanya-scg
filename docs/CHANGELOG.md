@@ -7,6 +7,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 | Version | Date | Cycle | Issues |
 |---------|------|-------|--------|
+| 5.5.026 | 2026-07-01 | PHASE 2.3: FACT_DELIVERY VIEW | FACT_DELIVERY page implementation |
 | 5.5.025 | 2026-06-30 | PHASE 2.2: Q_REVIEW DETAIL PANEL | Click row → expand comparison |
 | 5.5.024 | 2026-06-30 | PHASE 2.1: Q_REVIEW VIEW | Q_REVIEW page implementation |
 | 5.5.023 | 2026-06-30 | WEBAPP WHITE SCREEN v2 FIX | 4 root cause fixes |
@@ -29,6 +30,62 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 | 5.5.006 | 2026-06-18 | CONSISTENCY SYNC | 28 doc inconsistencies |
 | 5.5.005 | 2026-06-16 | REVIEW SERVICE FIX | (intermediate) |
 | 5.5.004 | 2026-06-15 | INITIAL AUDIT CYCLES | 53 audit issues |
+
+---
+
+## [5.5.026] — 2026-07-01 — PHASE 2.3: FACT_DELIVERY VIEW
+
+### New Feature: FACT_DELIVERY page (Phase 2.3)
+หน้า FACT_DELIVERY ใช้งานได้จริงแล้ว ไม่ใช่ Coming Soon
+
+**Server-side (22_WebApp.gs)**:
+- `getFactDeliveryPage(offset, limit, filter)` — implement จริง (เดิมเป็น stub)
+  - Server pagination (50 rows/page, max 200)
+  - Filter ตาม match status: `filter.status` (string) หรือ `filter.statuses` (array)
+  - ส่งกลับ `statusCounts` สำหรับ filter tab badges
+  - อ่าน batch ด้วย `getRange().getValues()` ครั้งเดียว
+  - แปลง rows เป็น objects 25 fields (ทุก field ใน FACT_DELIVERY ยกเว้น internal)
+
+**Frontend (views/FactDelivery.html)** — view component ใหม่:
+- Filter tabs 7 ตัว: All / FULL_MATCH / GEO_ANCHOR / FUZZY_MATCH / CREATE_NEW / NEEDS_REVIEW / ERROR
+  - แต่ละ tab มี count badge
+  - สี badge ตาม match status (เขียว/ฟ้า/ฟ้าอ่อน/เหลือง/ส้ม/แดง)
+- ตารางรายการ: วันที่ส่ง + เวลา / Invoice / คนขับ + ทะเบียน / ปลายทาง / ที่อยู่ / พิกัด / Match Status / Score
+- **คลิก row → expand detail panel** (inline ไม่ต้อง fetch เพิ่ม เพราะมีข้อมูลครบแล้ว):
+  - ข้อมูลการจัดส่ง: TX ID, วันที่/เวลา, Invoice, Shipment, คนขับ+ทะเบียน,
+    บริษัทผู้ขาย, ชื่อปลายทาง, ชื่อที่คนขับยืนยัน, ที่อยู่ปลายทาง, ที่อยู่ที่คนขับยืนยัน,
+    ที่อยู่จาก Geo, คลังสินค้า (12 fields)
+  - ข้อมูลการ Match: Match Status (badge), Match Score, Match Reason, Match Action,
+    Person ID, Place ID, Destination ID (7 fields)
+  - พิกัดดิบ + ปุ่ม "🗺️ ดูใน Maps" (สีเขียว)
+  - พิกัดที่ resolve แล้ว + ปุ่ม "🗺️ ดูใน Maps" (สีฟ้า)
+- Server pagination (50 rows/page) — ปุ่ม ก่อนหน้า/ถัดไป
+- Row click: ปิด row อื่นก่อน (เปิดทีละอัน) เหมือน Q_REVIEW
+
+**API (js/Api.html)**:
+- อัปเดต doc + type ของ `api.getFactDeliveryPage()` (เดิมเป็น stub)
+
+**Routing (js/App.html)**:
+- route 'fact' เรียก `FactDeliveryView.render()` แทน `renderComingSoon_()`
+
+**Sidebar (Index.html)**:
+- include `FactDelivery.html` ใน scripts
+- ลบ "soon" badge จาก FACT_DELIVERY nav button
+
+### Test (mock server + Playwright)
+10 scenarios:
+1. Navigate → filter tabs 7 ตัว + table 6 rows ✓
+2. ตรวจ 'soon' หายจาก nav ✓
+3. ตรวจ row content (TX001, INV-001) ✓
+4. Filter FULL_MATCH → 1 row ✓
+5. Filter ERROR → 1 row ✓
+6. Filter All → 6 rows ✓
+7. คลิก row → expand detail (delivery + match sections) ✓
+8. ตรวจ Google Maps links (2 อัน — พิกัดดิบ + resolved) ✓
+9. คลิก row อื่น → row เดิม collapse ✓
+10. คลิก row เดิม → collapse ✓
+11. กลับ Dashboard ไม่มีหน้าขาว ✓
+ไม่มี page errors ตลอดการทดสอบ
 
 ---
 
