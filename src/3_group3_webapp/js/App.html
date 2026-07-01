@@ -304,7 +304,14 @@
           break;
 
         case 'match':
-          renderComingSoon_(currentRoute);
+          // [Phase 3] Match Engine Metrics view — dashboard สถิติ Match Engine
+          if (globalThis.MatchEngineView) {
+            globalThis.MatchEngineView.render(currentData, viewContainer);
+            renderIcons_();
+          } else {
+            console.error('[app] MatchEngineView not loaded!');
+            showError_('MatchEngineView not loaded');
+          }
           break;
 
         case 'search':

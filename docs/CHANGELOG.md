@@ -7,6 +7,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 | Version | Date | Cycle | Issues |
 |---------|------|-------|--------|
+| 5.5.028 | 2026-07-01 | PHASE 3: MATCH ENGINE METRICS | Dashboard สถิติ Match Engine |
 | 5.5.027 | 2026-07-01 | PHASE 2.4: SOURCE SHEET VIEW | Source Sheet page implementation |
 | 5.5.026 | 2026-07-01 | PHASE 2.3: FACT_DELIVERY VIEW | FACT_DELIVERY page implementation |
 | 5.5.025 | 2026-06-30 | PHASE 2.2: Q_REVIEW DETAIL PANEL | Click row → expand comparison |
@@ -31,6 +32,85 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 | 5.5.006 | 2026-06-18 | CONSISTENCY SYNC | 28 doc inconsistencies |
 | 5.5.005 | 2026-06-16 | REVIEW SERVICE FIX | (intermediate) |
 | 5.5.004 | 2026-06-15 | INITIAL AUDIT CYCLES | 53 audit issues |
+
+---
+
+## [5.5.028] — 2026-07-01 — PHASE 3: MATCH ENGINE METRICS
+
+### New Feature: Match Engine Metrics page (Phase 3)
+หน้า Match Engine Metrics ใช้งานได้จริงแล้ว — Dashboard สถิติภาพรวมคุณภาพการ match
+**เป็น Phase สุดท้ายของแผน WebApp** — ทุกหน้าใน sidebar ใช้งานได้ครบแล้ว
+
+**Server-side (22_WebApp.gs)**:
+- `getMatchEngineMetrics()` — implement จริง (เดิมเป็น stub)
+  - อ่านเฉพาะ 4 คอลัมน์จาก FACT_DELIVERY: MATCH_STATUS, MATCH_CONF, MATCH_REASON, MATCH_ACTION
+    (ใช้ `getRange(row, col, numRows, 4)` เพื่อลด payload)
+  - คำนวณ metrics 5 กลุ่ม:
+    1. **Summary** — total, autoMatchedCount, autoMatchRate (%), avgScore, maxScore, minScore, withScoreCount
+    2. **statusCounts** — นับแต่ละ match status (FULL_MATCH, GEO_ANCHOR, FUZZY_MATCH, CREATE_NEW, NEEDS_REVIEW, ERROR)
+    3. **scoreDistribution** — array 10 bins (0-9, 10-19, ..., 90-100)
+    4. **matchReasons** — top 15 reasons เรียงตาม count desc
+    5. **matchActions** — นับ action (auto/create/review) เรียงตาม count desc
+  - ใช้ `isAutoMatchStatus_()` ที่มีอยู่แล้ว (FULL + GEO + FUZZY)
+
+**Frontend (views/MatchEngine.html)** — view component ใหม่:
+- **6 Summary cards** (responsive grid 6 → 3 → 2 คอลัมน์):
+  - ทั้งหมด (สีฟ้า)
+  - Auto Match Rate % (ไล่สีเขียว/เหลือง/แดง ตามอัตรา)
+  - Avg Score (สีเทา)
+  - Max Score (สีเขียว)
+  - Min Score (สีแดง)
+  - มี Score (สีเทา — จำนวนที่มี score / total)
+- **Score Distribution bar chart** (Chart.js):
+  - แกน X: score range (0-9, 10-19, ..., 90-100)
+  - แกน Y: จำนวนรายการ
+  - สีแท่งไล่จากแดง (คะแนนต่ำ) ไปเขียว (คะแนนสูง)
+  - Tooltip แสดงจำนวน + % ของ total
+- **Match Status doughnut chart** (Chart.js):
+  - สัดส่วนแต่ละ status
+  - สีตรงกับที่ใช้ใน FACT_DELIVERY view (consistent)
+  - Legend ด้านขวา + tooltip แสดง count + %
+- **Top Match Reasons table** (top 15):
+  - แสดง reason + count + progress bar
+  - 3 อันดับแรกใช้สีฟ้า ที่เหลือสีเทา
+- **Match Actions table**:
+  - แสดง action + count + progress bar (สีเขียว)
+- **Cleanup function** — `destroy()` ทำลาย chart instances ตอนออกจาก view
+  ป้องกัน memory leak
+
+**API (js/Api.html)**:
+- อัปเดต doc + type ของ `api.getMatchEngineMetrics()` (เดิมเป็น stub)
+
+**Routing (js/App.html)**:
+- route 'match' เรียก `MatchEngineView.render()` แทน `renderComingSoon_()`
+
+**Sidebar (Index.html)**:
+- include `MatchEngine.html` ใน scripts
+- ลบ "soon" badge จาก Match Engine nav button
+
+### Test (mock server + Playwright)
+9 scenarios:
+1. Navigate → 'soon' หายจาก nav ✓
+2. Summary cards แสดงค่าถูก (1247, 87.6%, 78.3, 100, 12, 1180) ✓
+3. Score Distribution bar chart ขนาด 462x280 ✓
+4. Match Status doughnut chart ขนาด 462x280 ✓
+5. Top Match Reasons table แสดง 'name+phone+geo' (580) ✓
+6. Match Actions table แสดง auto/create/review ✓
+7. ไม่มี chart.js errors ✓
+8. กลับ Dashboard ไม่มีหน้าขาว ✓
+9. กลับมา Match Engine อีกครั้ง — charts re-render ถูก ✓
+ไม่มี page errors ตลอดการทดสอบ
+
+### สรุปแผน WebApp
+หลังจาก Phase 3 เสร็จ — **ทุกหน้าใน sidebar ใช้งานได้ครบแล้ว**:
+- ✅ Dashboard (Phase 1)
+- ✅ FACT_DELIVERY (Phase 2.3)
+- ✅ Q_REVIEW + detail panel (Phase 2.1 + 2.2)
+- ✅ Source Sheet (Phase 2.4)
+- ✅ Match Engine Metrics (Phase 3)
+- ✅ Search (Phase 1)
+
+ไม่มี "Coming Soon" หน้าไหนเหลืออีก
 
 ---
 

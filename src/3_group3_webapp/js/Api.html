@@ -116,7 +116,8 @@ globalThis.api = (function () {
       promisify_('getReviewDetail', reviewId),
 
     /**
-     * getMatchEngineMetrics — Phase 3 (stub)
+     * getMatchEngineMetrics — Phase 3: สถิติ Match Engine สำหรับหน้า dashboard
+     * @return {Promise<{summary, statusCounts, scoreDistribution, scoreBins, matchReasons, matchActions, elapsedMs}>}
      */
     getMatchEngineMetrics: () => promisify_('getMatchEngineMetrics'),
 

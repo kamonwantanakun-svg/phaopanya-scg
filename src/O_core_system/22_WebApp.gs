@@ -1089,15 +1089,129 @@ function haversineDistanceMeters_(lat1, lng1, lat2, lng2) {
 }
 
 /**
- * getMatchEngineMetrics — Phase 3 (TODO)
+ * getMatchEngineMetrics — Phase 3: สถิติ Match Engine สำหรับหน้า dashboard
+ *   วิเคราะห์ข้อมูลจาก FACT_DELIVERY sheet เพื่อให้ภาพรวมคุณภาพการ match
+ *
+ * Metrics ที่ส่งกลับ:
+ *   - summary: { total, autoMatchedCount, autoMatchRate, avgScore, maxScore, minScore, withScoreCount }
+ *   - statusCounts: { FULL_MATCH, GEO_ANCHOR, FUZZY_MATCH, CREATE_NEW, NEEDS_REVIEW, ERROR, ... }
+ *   - scoreDistribution: array ขนาด 10 — count ของ score ในแต่ละ bin (0-9, 10-19, ..., 90-100)
+ *   - scoreBins: labels ของ bins (สำหรับ chart)
+ *   - matchReasons: array เรียงตาม count desc — [{ reason, count }]
+ *   - matchActions: array เรียงตาม count desc — [{ action, count }]
+ *
+ * @return {Object} { summary, statusCounts, scoreDistribution, scoreBins, matchReasons, matchActions, elapsedMs }
  */
 function getMatchEngineMetrics() {
   if (!isAuthorizedDashboardUser_()) throw new Error('Unauthorized');
-  // TODO: Phase 3 implementation
+
+  const startTime = Date.now();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
+
+  if (!sheet || sheet.getLastRow() <= 1) {
+    return {
+      summary: { total: 0, autoMatchedCount: 0, autoMatchRate: 0, avgScore: 0, maxScore: 0, minScore: 0, withScoreCount: 0 },
+      statusCounts: {},
+      scoreDistribution: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      scoreBins: ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-100'],
+      matchReasons: [],
+      matchActions: [],
+      elapsedMs: 0,
+    };
+  }
+
+  // อ่านเฉพาะคอลัมน์ที่จำเป็น เพื่อลด payload — match_status, match_confidence, match_reason, match_action
+  // ใช้ getRange(row, col, numRows, numCols) เพื่อดึงเฉพาะ 4 คอลัมน์
+  const startCol = FACT_IDX.MATCH_STATUS + 1;  // 1-based
+  const numCols = 4;  // MATCH_STATUS, MATCH_CONF, MATCH_REASON, MATCH_ACTION
+  const data = sheet.getRange(2, startCol, sheet.getLastRow() - 1, numCols).getValues();
+
+  // ─── Summary + Status counts ───
+  let total = data.length;
+  let autoMatchedCount = 0;
+  let withScoreCount = 0;
+  let sumScore = 0;
+  let maxScore = 0;
+  let minScore = 101;  // start higher than max possible
+  const statusCounts = {};
+
+  // ─── Score distribution (10 bins: 0-9, 10-19, ..., 90-100) ───
+  const scoreDistribution = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+  // ─── Reason + Action counts ───
+  const reasonCounts = {};
+  const actionCounts = {};
+
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    const status = String(row[0] || '').trim();
+    const score = Number(row[1] || 0);
+    const reason = String(row[2] || '').trim();
+    const action = String(row[3] || '').trim();
+
+    // Status counts
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+
+    // Auto-match (FULL + GEO + FUZZY)
+    if (isAutoMatchStatus_(status)) {
+      autoMatchedCount++;
+    }
+
+    // Score stats
+    if (score > 0) {
+      withScoreCount++;
+      sumScore += score;
+      if (score > maxScore) maxScore = score;
+      if (score < minScore) minScore = score;
+
+      // Bin index: 0-9 → 0, 10-19 → 1, ..., 90-100 → 9
+      let binIdx = Math.floor(score / 10);
+      if (binIdx > 9) binIdx = 9;  // 100 → bin 9
+      if (binIdx < 0) binIdx = 0;
+      scoreDistribution[binIdx]++;
+    }
+
+    // Reason counts (skip empty)
+    if (reason) {
+      reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+    }
+
+    // Action counts (skip empty)
+    if (action) {
+      actionCounts[action] = (actionCounts[action] || 0) + 1;
+    }
+  }
+
+  // ─── Sort reasons + actions ───
+  const matchReasons = Object.keys(reasonCounts)
+    .map(function(r) { return { reason: r, count: reasonCounts[r] }; })
+    .sort(function(a, b) { return b.count - a.count; })
+    .slice(0, 15);  // top 15
+
+  const matchActions = Object.keys(actionCounts)
+    .map(function(a) { return { action: a, count: actionCounts[a] }; })
+    .sort(function(a, b) { return b.count - a.count; });
+
+  const elapsedMs = Date.now() - startTime;
+  logInfo('WebApp', 'getMatchEngineMetrics: ' + total + ' rows analyzed in ' + elapsedMs + 'ms');
+
   return {
-    scoreDistribution: [],
-    matchReasons: [],
-    message: 'Phase 3 — coming soon',
+    summary: {
+      total: total,
+      autoMatchedCount: autoMatchedCount,
+      autoMatchRate: total > 0 ? Math.round((autoMatchedCount / total) * 1000) / 10 : 0,
+      avgScore: withScoreCount > 0 ? Math.round((sumScore / withScoreCount) * 10) / 10 : 0,
+      maxScore: maxScore,
+      minScore: minScore === 101 ? 0 : minScore,
+      withScoreCount: withScoreCount,
+    },
+    statusCounts: statusCounts,
+    scoreDistribution: scoreDistribution,
+    scoreBins: ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-100'],
+    matchReasons: matchReasons,
+    matchActions: matchActions,
+    elapsedMs: elapsedMs,
   };
 }
 
