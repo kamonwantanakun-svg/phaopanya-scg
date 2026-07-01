@@ -191,7 +191,9 @@ function findBestGeoByPersonPlace(rawPerson, rawAddress) {
  *      (place โหลดจาก loadAllPlaces_ ซึ่งมี cache อยู่แล้ว — ไม่ต้องอ่าน sheet ซ้ำ)
  *   2. Normalize ทั้ง ShipToAddress และ destAddress ด้วย normalizeForCompare (ลบ case/spacing/punctuation)
  *   3. แยก tokens เป็น bigram sets แล้วคำนวณ Dice coefficient (overlap ของ bigram sets)
- *   4. คืน dest ที่มี Dice >= 0.4 (40%) และสูงสุด — ถ้าไม่มีอันไหนผ่าน คืน null (caller fallback usageCount)
+ *   4. คืน dest ที่มี Dice >= 0.70 (70%) และสูงสุด — ถ้าไม่มีอันไหนผ่าน คืน null (caller fallback usageCount)
+ *      [Fix Phase-C #1] เพิ่ม threshold จาก 0.4 → 0.70 เพราะ Thai address มี common tokens
+ *      (เลขที่, ถนน, จังหวัด) ทำให้ Dice สูงโดยไม่ได้แปลว่าที่เดียวกัน — "บางนา" vs "บางบอน" = 0.444
  *
  * @param {Array} dests - array ของ destination object (จาก getDestsByPersonId)
  * @param {string} rawAddress - ShipToAddress ดิบ
@@ -250,7 +252,12 @@ function selectBestDestByAddress_(dests, rawAddress) {
   // คะแนนแต่ละ dest
   let bestDest = null;
   let bestScore = 0;
-  const TIE_BREAK_THRESHOLD = 0.4; // 40% Dice — พอจะบอกได้ว่าเป็นที่เดียวกัน
+  // [Fix Phase-C #1] Thai address มี common tokens (เลขที่, ถนน, จังหวัด) ทำให้ Dice สูงโดยไม่ได้แปลว่าที่เดียวกัน
+  //   ตัวอย่าง: "บางนา" vs "บางบอน" = 0.444 (false match ที่ threshold เดิม 0.4)
+  //   ยก threshold เป็น 0.70 เพื่อให้ address ต้องคล้ายกันจริง ๆ จึงจะถือว่าเป็นที่เดียวกัน
+  //   ค่า 0.4-0.70 จะถูก log เป็น warning (near miss) เพื่อ monitoring
+  const TIE_BREAK_THRESHOLD = 0.70; // 70% Dice — strict match
+  const NEAR_MISS_THRESHOLD = 0.40; // 40% Dice — ค่าเดิม ใช้สำหรับ near-miss monitoring เท่านั้น
 
   for (let i = 0; i < dests.length; i++) {
     const dest = dests[i];
@@ -295,8 +302,15 @@ function selectBestDestByAddress_(dests, rawAddress) {
     return bestDest;
   }
 
-  // ไม่มีอันไหนผ่าน threshold — return null ให้ caller fallback usageCount
-  if (bestDest) {
+  // [Fix Phase-C #1] Near-miss monitoring: Dice ระหว่าง 0.40-0.70 เป็น zone ที่เคย match ได้ (threshold เดิม)
+  //   แต่ตอนนี้ถือว่าไม่ match — log warning เพื่อให้เฝ้าระวัง pattern ที่อาจต้องปรับ threshold หรือเพิ่ม alias
+  if (bestDest && bestScore >= NEAR_MISS_THRESHOLD) {
+    logWarn('SearchService',
+      'selectBestDestByAddress_: NEAR MISS — best Dice=' + bestScore.toFixed(2) +
+      ' (between ' + NEAR_MISS_THRESHOLD + ' and ' + TIE_BREAK_THRESHOLD +
+      ') destId=' + bestDest.destId +
+      ' → fallback usageCount (threshold 0.70 not met)');
+  } else if (bestDest) {
     logDebug('SearchService',
       'selectBestDestByAddress_: best Dice=' + bestScore.toFixed(2) +
       ' ต่ำกว่า threshold ' + TIE_BREAK_THRESHOLD + ' → fallback usageCount');

@@ -66,6 +66,12 @@
 // เดิม: const GEO_GRID_SIZE = AI_CONFIG.GEO_GRID_SIZE; (alias ซ้ำซ้อน, เสี่ยงขัดแย้ง)
 // ตอนนี้ทุก reference ใช้ AI_CONFIG.GEO_GRID_SIZE แทน
 
+// [FIX Phase-B #11] Deferred cache invalidation
+//   เดิม createGeoPoint() เรียก invalidateGeoCache_() ทุกครั้ง → ใน batch ใหญ่ (50 CREATE_NEW) = ~400 API calls
+//   ตอนนี้สะสม dirty flag แล้ว flush ครั้งเดียวที่ flushBatches_ / finalize
+//   loadAllGeos_() จะ reload ทันทีถ้าเห็น dirty → ไม่ return stale cache
+let _GEO_CACHE_DIRTY = false;
+
 // ============================================================
 // SECTION 2: resolveGeo
 // ============================================================
@@ -303,7 +309,10 @@ function createGeoPoint(lat, lng, source, resolvedAddr, province, district, plac
   const lastRow = sheet.getLastRow();
   sheet.getRange(lastRow + 1, 1, 1, newRow.length).setValues([newRow]);
   
-  invalidateGeoCache_();
+  // [FIX Phase-B #11] Defer invalidateGeoCache_() — set dirty flag instead of calling immediately
+  //   Caller (10_MatchEngine.flushBatches_ / finalize) จะเรียก flushGeoCacheIfDirty_() ครั้งเดียว
+  //   ลด API calls จาก N (เท่ากับจำนวน CREATE_NEW) เหลือ 1 ต่อ batch
+  _GEO_CACHE_DIRTY = true;
   logDebug('GeoService', `createGeoPoint: ${newId} — ${finalProv} ${finalDist} (${extractionMethod})`);
   return newId;
   } catch (err) {
@@ -363,6 +372,15 @@ function updateGeoStats(geoId) {
 // ============================================================
 
 function loadAllGeos_() {
+  // [FIX Phase-B #11] If dirty flag set, invalidate caches NOW so we reload fresh data
+  //   เดิม: createGeoPoint แต่ละครั้ง invalidate cache → loadAllGeos_ ทำงานถัดไปจะ reload จาก sheet ทุกครั้ง
+  //   ตอนนี้: ในระหว่าง batch ที่ยังไม่ได้ flush — dirty flag จะ trigger reload เฉพาะเมื่อ consumer เรียก
+  //   ทำให้ cache ที่อ่านเป็นข้อมูลใหม่เสมอ แต่ไม่ต้อง invalidate ทุก createGeoPoint call
+  if (_GEO_CACHE_DIRTY) {
+    invalidateGeoCache_();
+    _GEO_CACHE_DIRTY = false;
+  }
+
   if (_GLOBAL_GEO_POINTS_CACHE) return _GLOBAL_GEO_POINTS_CACHE;
 
   const cacheKey = 'M_GEO_ALL';
@@ -423,6 +441,22 @@ function invalidateGeoCache_() {
   invalidateChunkedCache_('M_GEO_ALL', function() { _GLOBAL_GEO_POINTS_CACHE = null; });
   // [FIX v5.5.007 P1 #5] ล้าง geo lat/lng cache ใน TransactionService ด้วย
   if (typeof invalidateGeoLatLngCache_ === 'function') invalidateGeoLatLngCache_();
+}
+
+/**
+ * flushGeoCacheIfDirty_ — [FIX Phase-B #11] Deferred cache flush for batch operations
+ *   เรียก invalidateGeoCache_() เฉพาะเมื่อ _GEO_CACHE_DIRTY === true แล้ว reset flag
+ *   Caller (10_MatchEngine.flushBatches_ / finalize) เรียกครั้งเดียวต่อ batch
+ *   ลด API calls จาก N (N = จำนวน createGeoPoint ใน batch) เหลือ 1 ต่อ batch
+ *
+ *   Note: ถ้า loadAllGeos_() ถูกเรียกระหว่าง batch (เช่น resolveGeo ของ row ถัดไป)
+ *   มันจะ auto-flush dirty flag เอง → flushGeoCacheIfDirty_ จะเป็น no-op ที่ปลอดภัย
+ */
+function flushGeoCacheIfDirty_() {
+  if (!_GEO_CACHE_DIRTY) return;
+  invalidateGeoCache_();
+  _GEO_CACHE_DIRTY = false;
+  logDebug('GeoService', 'flushGeoCacheIfDirty_: flushed deferred geo cache invalidation');
 }
 
 /**

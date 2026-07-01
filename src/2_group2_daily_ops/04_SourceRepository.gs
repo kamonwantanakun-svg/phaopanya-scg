@@ -210,6 +210,9 @@ function getUnprocessedRows() {
 /**
  * getProcessedInvoiceSet_ — อ่าน Invoice ที่มีใน FACT_DELIVERY แล้ว
  * [FIX CRIT-008] ใช้ chunked cache pattern เพื่อรองรับข้อมูลเกิน 100KB
+ * [FIX Phase-B #2] อ่าน 2 columns (INVOICE_NO + MATCH_STATUS) และ skip rows ที่ MATCH_STATUS === 'ERROR'
+ *   เดิมอ่านเฉพาะ INVOICE_NO → FACT row ที่ status=ERROR จะถูกนับเป็น done → SOURCE ถูก mark SUCCESS ผิด
+ *   ตอนนี้ FACT rows ที่ ERROR จะไม่เข้า doneSet → SOURCE จะถูกประมวลผลใหม่
  */
 function getProcessedInvoiceSet_() {
   const cache    = CacheService.getScriptCache();
@@ -223,13 +226,24 @@ function getProcessedInvoiceSet_() {
 
   if (!factSheet || factSheet.getLastRow() < 2) return doneSet;
 
-  const invoiceCol  = FACT_IDX.INVOICE_NO + 1;
-  const lastRow     = factSheet.getLastRow() - 1;
-  const invoiceData = factSheet.getRange(2, invoiceCol, lastRow, 1)
-                               .getValues();
+  // [FIX Phase-B #2] อ่าน INVOICE_NO + MATCH_STATUS พร้อมกัน (adjacent columns: idx 6 & 22)
+  // ใช้ getRange(startRow, startCol, numRows, numCols) โดย numCols = (MATCH_STATUS - INVOICE_NO) + 1
+  const invoiceCol    = FACT_IDX.INVOICE_NO + 1;     // 7 (col G)
+  const matchStatusCol = FACT_IDX.MATCH_STATUS + 1;  // 23 (col W)
+  const numColsToRead = (FACT_IDX.MATCH_STATUS - FACT_IDX.INVOICE_NO) + 1;
+  const lastRow       = factSheet.getLastRow() - 1;
+  const dataRange     = factSheet.getRange(2, invoiceCol, lastRow, numColsToRead)
+                                  .getValues();
+  const invoiceIdx    = 0; // relative index within row slice
+  const matchStatusIdx = FACT_IDX.MATCH_STATUS - FACT_IDX.INVOICE_NO;
 
-  invoiceData.forEach(r => {
-    if (r[0]) doneSet.add(normalizeInvoiceNo(r[0]));
+  dataRange.forEach(r => {
+    const invoiceNo = r[invoiceIdx];
+    const matchStatus = String(r[matchStatusIdx] || '').trim().toUpperCase();
+    // [FIX Phase-B #2] Skip rows ที่ MATCH_STATUS === 'ERROR' — ไม่ให้เข้า doneSet เพื่อให้ SOURCE re-process
+    if (!invoiceNo) return;
+    if (matchStatus === 'ERROR') return;
+    doneSet.add(normalizeInvoiceNo(invoiceNo));
   });
 
   // [FIX CRIT-008] บันทึกด้วย chunked pattern

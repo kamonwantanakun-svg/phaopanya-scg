@@ -295,6 +295,9 @@ function finalizeMatchEngine_(ctx, startTime, lock) {
  * [NEW v5.2.001] flushBatches_ — Internal helper for transaction writing
  * [PERF-001] เพิ่ม batch stats update parameters เพื่อลด API calls จาก O(N) เหลือ O(1) per entity type
  * [REF-002] Delegates fact+review persistence to persistResult_()
+ * [FIX Phase-B #11] เพิ่มการเรียก flushGeoCacheIfDirty_() เพื่อ flush deferred geo cache invalidation
+ *   ที่สะสมไว้จาก createGeoPoint ในระหว่าง batch — ลด API calls จาก N (N = createGeoPoint count)
+ *   เหลือ 1 ต่อ batch
  */
 function flushBatches_(factBatch, reviewBatch, successRows, failedRows,
   personIdsToStats, placeIdsToStats, geoIdsToStats, destStatsQueue) {
@@ -323,6 +326,14 @@ function flushBatches_(factBatch, reviewBatch, successRows, failedRows,
 
   if (failedRows.length > 0) {
     updateSyncStatus_(failedRows, 'ERROR');
+  }
+
+  // [FIX Phase-B #11] Flush deferred geo cache invalidation
+  //   createGeoPoint ในระหว่าง batch จะ set _GEO_CACHE_DIRTY = true แทนการ invalidate ทันที
+  //   ตอนนี้ batch เสร็จแล้ว → flush ครั้งเดียวเพื่อให้ batch ถัดไปเห็นข้อมูลใหม่
+  //   ใช้ typeof guard เพื่อป้องกัน error ถ้า 08_GeoService.gs ยังไม่ได้ load
+  if (typeof flushGeoCacheIfDirty_ === 'function') {
+    flushGeoCacheIfDirty_();
   }
 }
 
@@ -663,6 +674,114 @@ function commitAliasChanges_(results, context) {
   matchCommitGlobalAlias_(context.mAliasSheet, results.globalAliasRows);
   matchCommitPersonAlias_(context.ss, results.personAliasRows, context);
   matchCommitPlaceAlias_(context.ss, results.placeAliasRows, context);
+
+  // [FIX Phase-B #16] Cleanup stale canonical aliases
+  //   หลังเขียน canonical alias ใหม่ → deactivate canonical alias เก่าที่ variant_name ≠ canonical ปัจจุบัน
+  //   ป้องกัน stale canonical alias หลงเหลือใน M_ALIAS หลัง user แก้ canonical_name ใน M_PERSON/M_PLACE
+  cleanupStaleCanonicalAliases_(results.globalAliasRows, context);
+}
+
+/**
+ * cleanupStaleCanonicalAliases_ — [FIX Phase-B #16] Deactivate stale canonical aliases
+ *   ปัญหา: autoEnrichAliasesFromFactBatch_ สร้าง canonical alias ทุก batch — ถ้า user แก้ canonical_name manual
+ *          → alias เก่ายัง active อยู่ → ค้นเจอ alias เก่าที่ variant_name ≠ canonical ปัจจุบัน → match ผิด
+ *   วิธีแก้: หลังเขียน canonical alias ใหม่ → ค้นหา alias เก่าที่ canonical ≠ ปัจจุบัน → set active_flag=false
+ *   Target criteria (only these are deactivated):
+ *     - Same masterUuid + entityType
+ *     - confidence == 100 (canonical)
+ *     - active_flag == true
+ *     - source starts with 'AUTO_ENRICH' (preserve DRIVER_VERIFIED / MANUAL / MIGRATION aliases)
+ *     - normalized variant_name ≠ current canonical_norm
+ *   Performance: 1 read of M_ALIAS + 1 batched getRangeList().setValue(false) per batch
+ * @param {Array<Array>} newGlobalAliasRows - rows being written this batch (from results.globalAliasRows)
+ * @param {Object} context - context with mAliasSheet
+ */
+function cleanupStaleCanonicalAliases_(newGlobalAliasRows, context) {
+  try {
+    if (!newGlobalAliasRows || newGlobalAliasRows.length === 0) return;
+    if (typeof loadGlobalAliasAll_ !== 'function') return;  // guard — AliasService must be loaded
+
+    // 1. Collect canonical aliases being written this batch
+    //    globalRow format: [aliasId, masterUuid, variantName, entityType, confidence, source, createdAt, activeFlag]
+    var canonicalMap = {};  // key: "entityType::masterUuid" → canonicalNorm (current canonical)
+    newGlobalAliasRows.forEach(function(row) {
+      var confidence = Number(row[4] || 0);
+      if (confidence !== 100) return;  // only canonical aliases
+      var masterUuid   = String(row[1] || '').trim();
+      var entityType   = String(row[3] || '').trim();
+      var variantName  = String(row[2] || '').trim();
+      var canonicalNorm = normalizeForCompare(variantName);
+      if (!masterUuid || !entityType || !canonicalNorm) return;
+      var key = entityType + '::' + masterUuid;
+      // Keep the last one if multiple (shouldn't happen but safe)
+      canonicalMap[key] = canonicalNorm;
+    });
+
+    var keysToCheck = Object.keys(canonicalMap);
+    if (keysToCheck.length === 0) return;
+
+    // 2. Load all M_ALIAS rows (including inactive) to find stale canonical aliases
+    var allAliases = loadGlobalAliasAll_();
+    if (allAliases.length === 0) return;
+
+    // 3. Find rows to deactivate
+    var rowsToDeactivate = [];
+    allAliases.forEach(function(alias) {
+      if (!alias.activeFlag) return;            // already inactive — skip
+      if (Number(alias.confidence) !== 100) return;  // only canonical aliases
+      var source = String(alias.source || '');
+      // Only deactivate AUTO_ENRICH aliases — preserve DRIVER_VERIFIED / MANUAL / MIGRATION
+      if (source.indexOf('AUTO_ENRICH') !== 0) return;
+
+      var key = alias.entityType + '::' + alias.masterUuid;
+      var currentCanonicalNorm = canonicalMap[key];
+      if (!currentCanonicalNorm) return;        // not in this batch — skip
+
+      var existingNorm = normalizeForCompare(alias.variantName);
+      if (existingNorm === currentCanonicalNorm) return;  // matches current canonical — keep
+
+      // Stale canonical — mark for deactivation
+      rowsToDeactivate.push(alias._rowNum);
+    });
+
+    if (rowsToDeactivate.length === 0) return;
+
+    // 4. Batch deactivate: set active_flag = false สำหรับ stale rows
+    var mAliasSheet = context.mAliasSheet;
+    if (!mAliasSheet) return;
+
+    var activeFlagCol = ALIAS_IDX.ACTIVE_FLAG + 1;  // 1-indexed column number
+    var a1Notations = rowsToDeactivate.map(function(rn) {
+      // Convert column number to letter (inline — avoid cross-module dependency)
+      var col = activeFlagCol;
+      var letter = '';
+      var temp;
+      while (col > 0) {
+        temp = (col - 1) % 26;
+        letter = String.fromCharCode(temp + 65) + letter;
+        col = (col - temp - 1) / 26;
+      }
+      return letter + rn;
+    });
+
+    mAliasSheet.getRangeList(a1Notations).setValue(false);
+
+    // 5. Invalidate cache so next read sees deactivated rows
+    if (typeof invalidateChunkedCache_ === 'function') {
+      invalidateChunkedCache_(CACHE_KEY.GLOBAL_ALIAS_ALL);
+      invalidateChunkedCache_(CACHE_KEY.GLOBAL_ALIAS_REVERSE);
+    } else {
+      CacheService.getScriptCache().removeAll([CACHE_KEY.GLOBAL_ALIAS_ALL, CACHE_KEY.GLOBAL_ALIAS_REVERSE]);
+    }
+
+    logInfo('MatchEngine',
+      'cleanupStaleCanonicalAliases_: deactivated ' + rowsToDeactivate.length +
+      ' stale canonical aliases across ' + keysToCheck.length + ' entities'
+    );
+  } catch (err) {
+    // Non-fatal — don't break the pipeline just because cleanup failed
+    logError('cleanupStaleCanonicalAliases_', err.message, err);
+  }
 }
 
 /**
@@ -814,11 +933,25 @@ function makeMatchDecision(srcObj, personResult, placeResult, geoResult) {
   }
 
   // Rule 3: ตรวจสอบเรื่องจังหวัดข้ามโซน (ถ้าพิกัดอยู่ใน Master แล้ว)
-  if (isGeoInMaster && geoProvince && srcObj.province && geoProvince !== srcObj.province) {
-    return {
-      action: 'REVIEW', reason: 'GEO_PROVINCE_CONFLICT',
-      confidence: 50, priority: 2,
-    };
+  // [FIX Phase-B #14] ใช้ normalizeProvinceForCompare_() แทน string compare ตรง
+  //   เดิม: "กรุงเทพมหานคร" !== "กทม" → REVIEW ผิด (alias ถือว่าตรงกัน)
+  //   ตอนนี้: normalize ทั้งสองค่าผ่าน TH_PROVINCES aliases แล้วค่อยเทียบ
+  //   เก็บ original values ไว้ใน evidence เพื่อ debug
+  if (isGeoInMaster && geoProvince && srcObj.province) {
+    const normalizedGeoProvince = (typeof normalizeProvinceForCompare_ === 'function')
+      ? normalizeProvinceForCompare_(geoProvince)
+      : geoProvince;
+    const normalizedSrcProvince = (typeof normalizeProvinceForCompare_ === 'function')
+      ? normalizeProvinceForCompare_(srcObj.province)
+      : srcObj.province;
+    if (normalizedGeoProvince !== normalizedSrcProvince) {
+      return {
+        action: 'REVIEW', reason: 'GEO_PROVINCE_CONFLICT',
+        confidence: 50, priority: 2,
+        // [FIX Phase-B #14] เก็บ original values ไว้ใน evidence เพื่อ debug
+        evidence: `geoProvince="${geoProvince}"|srcProvince="${srcObj.province}"|normalizedGeo="${normalizedGeoProvince}"|normalizedSrc="${normalizedSrcProvince}"`
+      };
+    }
   }
 
   // [UPGRADE v5.2.005] Rule 3.5: Tiered Spatial Fuzzy Matching (รอคนตรวจตัดสินใจรวมพิกัด)
@@ -991,6 +1124,21 @@ function handleAutoMatch_(srcObj, decision, personId, placeId, geoId) {
   if (placeId)  statsToDefer.placeIds.push(placeId);
   if (geoId)    statsToDefer.geoIds.push(geoId);
 
+  // [FIX Phase-B #13] Flag incomplete destination for Rule 5 (geo + one of person/place)
+  //   Rule 5 (geo+person only OR geo+place only) สร้าง destination ที่ placeId='' หรือ personId='' (by design)
+  //   เดิม: ไม่มี flag บอกว่า incomplete → reviewer เห็น GEO_ANCHOR ธรรมดา ไม่รู้ว่าขาด place หรือ person
+  //   ตอนนี้: enrich reason/evidence ด้วย PARTIAL_MATCH_NO_PLACE / PARTIAL_MATCH_NO_PERSON
+  //   ไม่เปลี่ยน logic การทำงาน — แค่เพิ่ม flag ใน MATCH_REASON column ของ FACT_DELIVERY เพื่อ audit
+  let enrichedDecision = decision;
+  const hasPerson = !!personId;
+  const hasPlace  = !!placeId;
+  if (hasPerson !== hasPlace) {  // XOR — only one of person/place present (Rule 5 partial)
+    enrichedDecision = Object.assign({}, decision);
+    const flagStr = hasPerson ? 'PARTIAL_MATCH_NO_PLACE' : 'PARTIAL_MATCH_NO_PERSON';
+    enrichedDecision.reason   = (decision.reason   || '') + '|' + flagStr;
+    enrichedDecision.evidence = (decision.evidence || '') + '|' + flagStr;
+  }
+
   const destResult = resolveDestination(personId, placeId, geoId);
   let destId = null;
   if (destResult.status === 'FOUND' || destResult.status === 'PARTIAL_MATCH') {
@@ -1004,7 +1152,7 @@ function handleAutoMatch_(srcObj, decision, personId, placeId, geoId) {
     );
   }
 
-  const txRes = upsertFactDelivery(srcObj, personId, placeId, geoId, destId, decision);
+  const txRes = upsertFactDelivery(srcObj, personId, placeId, geoId, destId, enrichedDecision);
   return {
     txId:       txRes ? txRes.txId : null,
     factData:   txRes && txRes.isNew ? txRes.rowData : null,

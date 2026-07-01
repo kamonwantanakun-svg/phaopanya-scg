@@ -131,7 +131,7 @@ const DELIVERY_NOTE_LIST = [
 // ============================================================
 
 const PHONE_PATTERN   = /(?:\+66|0)[0-9]{1,2}[-.\s]?[0-9]{3,4}[-.\s]?[0-9]{4}/g;
-const DOC_NO_PATTERN  = /\b[0-9]{8,}\b/g;
+const DOC_NO_PATTERN  = /\b[0-9]{13}\b/g;  // [Fix #5] จำกัดเป็น 13 หลัก (บัตรประชาชน) ป้องกันตัดเลขที่บ้าน
 const REF_NO_PATTERN  = /#[0-9]+|No\.?\s*[0-9]+/gi;
 
 // ============================================================
@@ -294,14 +294,17 @@ function normNormalizeCompany_(working) {
         working = working.replace(new RegExp(safeSuffix, 'gi'), '').trim();
       }
     });
-    // [FIX v5.2.002] เก็บ Chain Store ลง Note ก่อนตัดออก
-    CHAIN_STORE_LIST.forEach(chain => {
-      if (working.includes(chain)) {
-        notes.push(chain);
-        const safeChain = escapeRegex_(chain);
-        working = working.replace(new RegExp(safeChain, 'gi'), '').trim();
-      }
-    });
+    // [Fix #4] ไม่ strip CHAIN_STORE_LIST ออกจาก working string — เก็บเป็น isCompany flag เท่านั้น
+    //   เหตุผล: ถ้าตัด chain store ออก (เช่น "ไทวัสดุ สาขา 2" → "สาขา 2")
+    //   จะเหลือ cleanName สั้นเกินไป ทำให้ match ผิดพลาด/false positive
+    //   แค่ push ลง notes เพื่อ audit trail ได้ แต่ไม่ตัดออกจาก working
+    if (hasChainStore) {
+      CHAIN_STORE_LIST.forEach(chain => {
+        if (working.includes(chain)) {
+          notes.push(chain);
+        }
+      });
+    }
   }
 
   return { working: working, isCompany: isCompany, notes: notes };
@@ -418,17 +421,22 @@ function normalizePlaceName(rawPlace) {
 function buildThaiPhoneticKey(thaiName) {
   if (!thaiName) return '';
   // ลบสระและวรรณยุกต์ไทย (U+0E30–U+0E4E) และ space
-  return thaiName.replace(/[\u0E30-\u0E4E\s]/g, '').substring(0, 6);
+  const key = thaiName.replace(/[\u0E30-\u0E4E\s]/g, '');
+  // [Fix #6] เพิ่ม length check — ถ้า key สั้นเกินไป (< 3 ตัวอักษร) ให้คืน '' เพื่อกัน false positive
+  if (key.length < 3) return '';
+  return key.substring(0, 6);
 }
 
 /**
  * normalizeForCompare — แปลงชื่อเพื่อเปรียบเทียบ
+ * [FIX Phase-B #9] เพิ่ม `/` เข้าไปใน regex strip — มิฉะนั้น "123/45 ถ.สุขุมวิท" ≠ "12345ถสุขุมวิท"
+ *   `/` พบบ่อยในที่อยู่ไทย (เลขที่บ้าน/หมู่) และในชื่อสถานที่ (บริษัท ก/ข/ค)
  */
 function normalizeForCompare(name) {
   return String(name || '')
     .trim()
     .replace(/\s+/g, '')
-    .replace(/[.\-_]/g, '')
+    .replace(/[.\-/_]/g, '')
     .toLowerCase();
 }
 
@@ -463,4 +471,33 @@ function validateAddress(address) {
   const normalized = String(address).toLowerCase().trim();
   if (normalized.length < 5) return false;
   return true;
+}
+
+/**
+ * normalizeProvinceForCompare_ — แปลง province alias → canonical ก่อนเปรียบเทียบ
+ *   [Fix #14] ใช้ TH_PROVINCES aliases เพื่อ normalize จังหวัด
+ *   ตัวอย่าง: "กทม" → "กรุงเทพมหานคร", "โคราช" → "นครราชสีมา"
+ *
+ * @param {string} province - ชื่อจังหวัด (อาจเป็น alias)
+ * @return {string} canonical province name หรือ original ถ้าไม่พบ alias
+ */
+function normalizeProvinceForCompare_(province) {
+  if (province === null || province === undefined || province === '') return '';
+  const normalized = String(province).trim();
+  if (normalized === '') return '';
+
+  // ตรวจว่าเป็น canonical name อยู่แล้วหรือไม่
+  for (let i = 0; i < TH_PROVINCES.length; i++) {
+    const entry = TH_PROVINCES[i];
+    if (entry.name === normalized) return entry.name;
+    // ตรวจ aliases
+    if (entry.aliases && entry.aliases.length > 0) {
+      for (let j = 0; j < entry.aliases.length; j++) {
+        if (entry.aliases[j] === normalized) return entry.name;
+      }
+    }
+  }
+
+  // ถ้าไม่พบใน list คืน original (อาจเป็นจังหวัดที่ยังไม่มีใน list)
+  return normalized;
 }

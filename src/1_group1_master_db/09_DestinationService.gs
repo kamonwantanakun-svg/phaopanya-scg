@@ -290,8 +290,11 @@ function loadAllDestinations_() {
       personId:   String(r[DEST_IDX.PERSON_ID]    || ''),
       placeId:    String(r[DEST_IDX.PLACE_ID]     || ''),
       geoId:      String(r[DEST_IDX.GEO_ID]       || ''),
-      lat:        Number(r[DEST_IDX.LAT]           || 0),
-      lng:        Number(r[DEST_IDX.LNG]           || 0),
+      // [FIX Phase-B #12] lat/lng: '' / null / undefined → null (NOT 0)
+      //   เดิม: Number(r[DEST_IDX.LAT] || 0) → Number('' || 0) → Number(0) → 0 → marker ตก (0,0) ที่อ่าวเบนิน
+      //   ตอนนี้: invalid lat/lng → null → consumer จะได้รู้ว่าไม่มีพิกัด และ skip marker / show warning
+      lat:        _safeParseLatLng_(r[DEST_IDX.LAT]),
+      lng:        _safeParseLatLng_(r[DEST_IDX.LNG]),
       routeLabel: String(r[DEST_IDX.ROUTE_LABEL]  || ''),  // [FIX v003] เพิ่ม
       usageCount: Number(r[DEST_IDX.USAGE_COUNT]  || 0),
       lastSeen:   r[DEST_IDX.LAST_SEEN]            || '',
@@ -379,6 +382,22 @@ function batchUpdateDestinationStats_(destStatsQueue) {
  */
 function invalidateDestCache_() {
   invalidateChunkedCache_('M_DEST_ALL', null);
+}
+
+/**
+ * _safeParseLatLng_ — [FIX Phase-B #12] Parse lat/lng cell value safely
+ *   Returns null for '', null, undefined, NaN — instead of 0 (which maps to (0,0) in Gulf of Guinea)
+ *   Returns Number value for valid numeric input (0 only if explicitly passed, which is itself invalid for TH geo)
+ * @param {*} rawVal - raw cell value from sheet
+ * @return {number|null}
+ */
+function _safeParseLatLng_(rawVal) {
+  if (rawVal === '' || rawVal === null || rawVal === undefined) return null;
+  const num = Number(rawVal);
+  if (isNaN(num)) return null;
+  // 0,0 is invalid for Thai geo — treat as null (consistent with createDestination which writes '' for 0)
+  if (num === 0) return null;
+  return num;
 }
 
 /**

@@ -355,24 +355,68 @@ function findByAlias_(cleanName) {
 /**
  * scorePersonCandidate — คำนวณคะแนน Match
  * [UPGRADE v5.1.001] เพิ่ม Phone Match Bonus = 95
+ * [Fix Phase-C #7] Phone match name-score gate
+ *   เดิม: phone match (len≥9) → return 95 ทันที โดยไม่ตรวจชื่อ
+ *   ใหม่: phone match + name match (>= SCORE_MIN_THRESHOLD) → return 95 (AUTO_MATCH)
+ *        phone match + name mismatch → return nameScore (force REVIEW หรือ reject)
+ *   เหตุผล: เบอร์บ้าน/บริษัทใช้ร่วมกันหลายคน → AUTO_MATCH ผิด
  */
 function scorePersonCandidate(queryName, candidate, queryPhone) {
-  // 1. ตรวจสอบ Phone Match ก่อน (โบนัส 95 คะแนน)
-  if (queryPhone && candidate.phone) {
-    const p1 = String(queryPhone).replace(/[^0-9]/g, '');
-    const p2 = String(candidate.phone).replace(/[^0-9]/g, '');
-    if (p1 === p2 && p1.length >= 9) return 95;
-  }
-
   const nameA = normalizeForCompare(queryName);
   const nameB = normalizeForCompare(candidate.normalized || candidate.canonical);
 
   if (!nameA || !nameB) return 0;
 
-  const levDist   = levenshteinDistance(nameA, nameB);
-  const maxLen    = Math.max(nameA.length, nameB.length);
-  const levScore  = maxLen > 0 ? Math.max(0, (1 - levDist / maxLen) * 100) : 0;
-  const diceScore = diceCoefficient(nameA, nameB) * 100;
+  // [Fix Phase-C #7] คำนวณ nameScore ก่อน — ใช้สำหรับ phone match gate
+  const nameScore = calculateNameScore_(nameA, nameB);
+
+  // [Fix Phase-C #7] Phone match name-score gate
+  //   เดิม: if (phone match) return 95;  (skip name check ทั้งหมด)
+  //   ใหม่: ตรวจชื่อด้วย — ถ้าชื่อไม่ match (nameScore < SCORE_MIN_THRESHOLD)
+  //        ให้ return nameScore แทน 95 (force REVIEW แทน AUTO_MATCH)
+  if (queryPhone && candidate.phone) {
+    const p1 = String(queryPhone).replace(/[^0-9]/g, '');
+    const p2 = String(candidate.phone).replace(/[^0-9]/g, '');
+    if (p1 === p2 && p1.length >= 9) {
+      if (nameScore >= AI_CONFIG.SCORE_MIN_THRESHOLD) {
+        return 95;  // phone + name ตรง → AUTO_MATCH
+      }
+      // phone ตรงแต่ชื่อไม่ตรง → คืน nameScore (อาจ < 70 → REVIEW หรือ < 50 → reject)
+      //   ไม่ return 95 เพื่อป้องกัน AUTO_MATCH ผิดจากเบอร์บ้าน/บริษัทใช้ร่วมกัน
+      logInfo('PersonService',
+        'Phone match but name mismatch: phone=' + queryPhone +
+        ', nameScore=' + nameScore + ' (threshold=' + AI_CONFIG.SCORE_MIN_THRESHOLD + ')');
+      return nameScore;
+    }
+  }
+
+  // [FIX v003] ใช้ Config แทน hardcode 60
+  return nameScore < AI_CONFIG.SCORE_MIN_THRESHOLD ? 0 : nameScore;
+}
+
+/**
+ * calculateNameScore_ — คำนวณ name similarity score จาก normalized names
+ * [ADD Phase-C #7] แยก logic การคำนวณ name score ออกจาก phone match gate
+ *   เพื่อให้ phone match branch สามารถตรวจ nameScore ก่อนตัดสินใจ return 95 ได้
+ *   คืน raw rounded score (0-100) — ยังไม่ผ่าน SCORE_MIN_THRESHOLD check (caller จัดการเอง)
+ *
+ * Algorithm (เดิมจาก scorePersonCandidate):
+ *   - Levenshtein distance → levScore (similarity ratio)
+ *   - Dice coefficient (bigram overlap) → diceScore
+ *   - Substring containment → ratioScore (100 exact, 80 substring, 0 otherwise)
+ *   - ถ้าชื่อสั้น (< 4 ตัว) → เน้น levenshtein เพราะ dice ไม่น่าเชื่อถือ
+ *   - ถ้าชื่อยาว (>= 4 ตัว) → เน้น dice เพราะจับความคล้ายแบบ n-gram ได้ดีกว่า
+ *
+ * @param {string} nameA - normalized query name (จาก normalizeForCompare)
+ * @param {string} nameB - normalized candidate name (จาก normalizeForCompare)
+ * @return {number} rounded score (0-100) — ยังไม่ผ่าน threshold check
+ * @private
+ */
+function calculateNameScore_(nameA, nameB) {
+  const levDist    = levenshteinDistance(nameA, nameB);
+  const maxLen     = Math.max(nameA.length, nameB.length);
+  const levScore   = maxLen > 0 ? Math.max(0, (1 - levDist / maxLen) * 100) : 0;
+  const diceScore  = diceCoefficient(nameA, nameB) * 100;
   const ratioScore = nameA === nameB ? 100 :
     (nameA.includes(nameB) || nameB.includes(nameA)) ? 80 : 0;
 
@@ -382,9 +426,7 @@ function scorePersonCandidate(queryName, candidate, queryPhone) {
   } else {
     finalScore = diceScore * 0.5 + levScore * 0.3 + ratioScore * 0.2;
   }
-
-  // [FIX v003] ใช้ Config แทน hardcode 60
-  return finalScore < AI_CONFIG.SCORE_MIN_THRESHOLD ? 0 : Math.round(finalScore);
+  return Math.round(finalScore);
 }
 
 // ============================================================

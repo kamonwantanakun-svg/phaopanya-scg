@@ -233,9 +233,46 @@ function loadGlobalAliasesMap_() {
     resultObj[dictKey].push(cleanName);
   });
 
-  // [FIX CRIT-001] ใช้ chunked cache saver แทน cache.put ตรง — ป้องกัน 100KB limit
+  // [FIX CRIT-001] ใช้ chunked cache saver แทน cache.put ตรง — ป้อนกัน 100KB limit
   saveAliasCacheChunked_(cacheKey, resultObj);
   return resultObj;
+}
+
+/**
+ * loadGlobalAliasAll_ — [ADD Phase-B #16] โหลด M_ALIAS ทั้งหมด (รวม inactive) เป็น Array ของ row objects
+ *   ใช้สำหรับ cleanup stale canonical aliases ใน autoEnrichAliasesFromFactBatch_
+ *   แตกต่างจาก loadGlobalAliasesMap_ ตรงที่:
+ *     - คืน raw row data (aliasId, confidence, activeFlag, _rowNum) และไม่กรอง inactive
+ *     - ไม่ cache ผลลัพธ์ (cache invalidation จะถูกเรียกหลัง cleanup อยู่แล้ว)
+ *   Performance: ~1 API call per batch (acceptable for once-per-batch cleanup)
+ * @return {Array<Object>} array of {aliasId, masterUuid, variantName, entityType, confidence, source, createdAt, activeFlag, _rowNum}
+ */
+function loadGlobalAliasAll_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET.M_ALIAS);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  const schemaLen = SCHEMA[SHEET.M_ALIAS].length;
+  const colsToRead = Math.min(schemaLen, sheet.getLastColumn());
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, colsToRead).getValues();
+
+  const result = [];
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    result.push({
+      aliasId:     String(row[ALIAS_IDX.ALIAS_ID]     || ''),
+      masterUuid:  String(row[ALIAS_IDX.MASTER_UUID]  || ''),
+      variantName: String(row[ALIAS_IDX.VARIANT_NAME] || ''),
+      entityType:  String(row[ALIAS_IDX.ENTITY_TYPE]  || ''),
+      confidence:  Number(row[ALIAS_IDX.CONFIDENCE]   || 0),
+      source:      String(row[ALIAS_IDX.SOURCE]       || ''),
+      createdAt:   row[ALIAS_IDX.CREATED_AT],
+      activeFlag:  row[ALIAS_IDX.ACTIVE_FLAG] === true ||
+                   String(row[ALIAS_IDX.ACTIVE_FLAG]).toUpperCase() === 'TRUE',
+      _rowNum:     i + 2  // sheet row number (1-indexed + header row)
+    });
+  }
+  return result;
 }
 
 // ============================================================
@@ -354,9 +391,13 @@ function resolveMasterUuidViaGlobalAlias(queryName, entityType) {
  * @param {string} shipToName - ชื่อปลายทางจากคอลัมน์ ShipToName
  * @param {Object} [preNormResult] - ผลลัพธ์จากการทำ normalizePersonNameFull (optional) เพื่อป้องกัน double normalization
  * @param {string} [rawAddress] - ShipToAddress ดิบ (optional - ใช้เป็น tie-breaker เมื่อ ShipToName ซ้ำ) [ADD v5.5.022-PATCH1]
+ * @param {boolean} [enableSubstringFallback=false] - [ADD Phase-C #2] opt-in substring fallback
+ *   เดิม: substring fallback ทำงานเสมอ (จำกัด 500 iter) — ถ้า M_ALIAS > 5,000 entries จะไม่ครอบคลุม
+ *   ใหม่: default = false (skip substring loop) — caller ต้องส่ง true จึงจะเปิดใช้งาน
+ *   เหตุผล: substring fallback เป็น O(N) scan ที่ไม่ scale — pipeline หลักควรใช้ exact match เท่านั้น
  * @return {Object|null} { lat, lng, destId, status, confidence, reason } หรือ null
  */
-function fastLookupByShipToName(shipToName, preNormResult, rawAddress) {
+function fastLookupByShipToName(shipToName, preNormResult, rawAddress, enableSubstringFallback) {
   if (!shipToName) return null;
   // [FIX v5.5.021 C1] ใช้ preNormResult.cleanName ถ้ามี เพื่อลด overhead
   var cleanName = (preNormResult && preNormResult.cleanName) 
@@ -368,8 +409,16 @@ function fastLookupByShipToName(shipToName, preNormResult, rawAddress) {
   var reverseIndex = loadGlobalAliasReverseIndex_();
   var matches = reverseIndex[cleanName];
 
-  if (!matches || matches.length === 0) {
-    // 2. Fallback: ลองค้นหาแบบ substring
+  // [Fix Phase-C #2] Deprecate substring fallback — เปลี่ยนเป็น opt-in (default = false)
+  //   เดิม: exact match fail → substring loop (max 500 iter) — ไม่ scale ถ้า M_ALIAS > 5,000
+  //   ใหม่: default = false → skip substring loop ไปเลย (caller ใช้ Tier 1 resolvePerson ต่อ)
+  //        ถ้า caller ส่ง enableSubstringFallback=true → ทำงานเหมือนเดิม พร้อม log warning
+  if ((!matches || matches.length === 0) && enableSubstringFallback === true) {
+    // 2. Fallback (opt-in): ลองค้นหาแบบ substring
+    logWarn('AliasService',
+      'fastLookupByShipToName: substring fallback ENABLED (opt-in) — ' +
+      'cleanName="' + cleanName + '". ' +
+      '⚠️ O(N) scan — ใช้เฉพาะกรณีจำเป็น เพราะ M_ALIAS ใหญ่ขึ้นเรื่อย ๆ');
     var maxIterations = 500; // [FIX CRIT-017] จำกัด iteration ป้องกัน timeout
     var iterated = 0;
     for (var key in reverseIndex) {
@@ -379,6 +428,11 @@ function fastLookupByShipToName(shipToName, preNormResult, rawAddress) {
         break;
       }
     }
+  } else if (!matches || matches.length === 0) {
+    // exact match failed และ substring fallback ถูกปิด (default)
+    logInfo('AliasService',
+      'fastLookupByShipToName: exact match failed, substring fallback disabled ' +
+      '(cleanName="' + cleanName + '") — caller จะ fallback ไป Tier 1');
   }
 
   if (!matches || matches.length === 0) return null;

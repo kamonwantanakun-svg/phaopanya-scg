@@ -167,12 +167,15 @@ function upsertFactDelivery(srcObj, personId, placeId, geoId, destId, decision) 
  * @return {{ txId: string, isNew: boolean, rowData: null }}
  */
 function factUpdateRow_(rowRange, rowData, personId, placeId, geoId, destId, decision, resolvedLat, resolvedLng, now, srcObj) {
-  // [FIX v5.5.001] ใช้ nullish coalescing logic แทน ||
-  // เพื่อไม่ให้ค่าว่าง '' ถูกมองเป็น falsy แล้ว fallback ไปใช้ค่าเก่า
-  rowData[FACT_IDX.PERSON_ID]    = personId  != null ? personId  : rowData[FACT_IDX.PERSON_ID];
-  rowData[FACT_IDX.PLACE_ID]     = placeId   != null ? placeId   : rowData[FACT_IDX.PLACE_ID];
-  rowData[FACT_IDX.GEO_ID]       = geoId     != null ? geoId     : rowData[FACT_IDX.GEO_ID];
-  rowData[FACT_IDX.DEST_ID]      = destId    != null ? destId    : rowData[FACT_IDX.DEST_ID];
+  // [Fix Phase-C #4] defensive: ป้องกัน '' overwrite ค่าเดิม
+  //   เดิม: personId != null ? personId : rowData[...] — ถ้า future refactor ส่ง '' แทน null จะ overwrite ค่าเดิม
+  //   ใหม่: (personId != null && personId !== '') ? personId : rowData[...]
+  //   เหตุผล: '' (empty string) เป็น falsy แต่ != null เป็น true → ต้อง check !== '' เพิ่ม
+  //   ป้องกัน regression เมื่อมีการแก้ caller ในอนาคตให้ส่ง '' แทน null
+  rowData[FACT_IDX.PERSON_ID]    = (personId  != null && personId  !== '') ? personId  : rowData[FACT_IDX.PERSON_ID];
+  rowData[FACT_IDX.PLACE_ID]     = (placeId   != null && placeId   !== '') ? placeId   : rowData[FACT_IDX.PLACE_ID];
+  rowData[FACT_IDX.GEO_ID]       = (geoId     != null && geoId     !== '') ? geoId     : rowData[FACT_IDX.GEO_ID];
+  rowData[FACT_IDX.DEST_ID]      = (destId    != null && destId    !== '') ? destId    : rowData[FACT_IDX.DEST_ID];
   // [FIX CRIT-001] ใช้ strict !== null เพื่อให้ null (ไม่มีพิกัด) รักษาค่าเดิม ไม่เขียนทับด้วย 0
   rowData[FACT_IDX.RESOLVED_LAT] = resolvedLat !== null ? resolvedLat : rowData[FACT_IDX.RESOLVED_LAT];
   rowData[FACT_IDX.RESOLVED_LNG] = resolvedLng !== null ? resolvedLng : rowData[FACT_IDX.RESOLVED_LNG];
