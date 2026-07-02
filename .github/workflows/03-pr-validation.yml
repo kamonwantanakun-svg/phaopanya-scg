@@ -118,6 +118,7 @@ jobs:
 
       - name: 💬 ส่ง PR Comment อัตโนมัติ
         uses: actions/github-script@v7
+        continue-on-error: true
         with:
           script: |
             const changedFiles = `${{ steps.changes.outputs.files || '' }}`.split('\n').filter(f => f);
@@ -185,6 +186,7 @@ jobs:
 
       - name: 🏷️ เพิ่ม Label ตาม Title + ขนาด
         uses: actions/github-script@v7
+        continue-on-error: true
         with:
           script: |
             const pr = context.payload.pull_request;
