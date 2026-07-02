@@ -1,6 +1,9 @@
 # CodeQL — Static security analysis โดย GitHub
 # ตรวจหา security vulnerabilities ในโค้ดอัตโนมัติ
 # https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors/setting-up-code-scanning-for-a-repository
+#
+# หมายเหตุ: Apps Script ใช้ .gs (ไม่ใช่ .js) — CodeQL ไม่รู้จัก .gs โดย default
+# วิธีแก้: เพิ่ม step ที่ copy .gs → .js ก่อน CodeQL สแกน
 
 name: "🔒 CodeQL Security Analysis"
 
@@ -31,13 +34,22 @@ jobs:
       - name: 📥 Checkout
         uses: actions/checkout@v7
 
+      - name: 📋 Prepare .gs files for CodeQL
+        # Apps Script ใช้ .gs ซึ่ง CodeQL ไม่รู้จัก — copy เป็น .js ก่อนสแกน
+        run: |
+          echo "=== Copying .gs files to .js for CodeQL analysis ==="
+          find src/ -name "*.gs" -type f | while read gsfile; do
+            jsfile="${gsfile%.gs}.js"
+            cp "$gsfile" "$jsfile"
+            echo "  ✅ $gsfile → $jsfile"
+          done
+          echo "=== Done. .js files created: $(find src/ -name '*.js' | wc -l) ==="
+
       - name: 🔧 Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
-          # ใช้ security-and-quality query suite เพื่อตรวจหาทั้ง security + code quality
           queries: security-and-quality
-          # ใช้ config file เพื่อข้ามไฟล์ HTML (Apps Script template scriptlets ไม่ใช่ JS มาตรฐาน)
           config-file: .github/codeql-config.yml
 
       - name: 🏗️ Autobuild
@@ -47,3 +59,9 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ matrix.language }}"
+
+      - name: 🧹 Cleanup .js files
+        if: always()
+        run: |
+          find src/ -name "*.js" -type f -delete
+          echo "Cleaned up temporary .js files"
