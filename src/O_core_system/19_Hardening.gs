@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.034
+ * VERSION: 5.5.035
  * FILE: 19_Hardening.gs
  * LMDS V5.5 — System Hardening & Preflight Audit
  * [FIX BUG-A2] v5.4.003: runPreflightAudit() เพิ่ม try-catch
@@ -561,8 +561,7 @@ function flushGlobalAliasRows_(ss, rows) {
     var masterUuid   = String(aliasRow[ALIAS_IDX.MASTER_UUID]  || '');
     var variantName  = String(aliasRow[ALIAS_IDX.VARIANT_NAME] || '');
     var entityType   = String(aliasRow[ALIAS_IDX.ENTITY_TYPE]  || '');
-    var confidence   = Number(aliasRow[ALIAS_IDX.CONFIDENCE]   || 100);
-    var source       = String(aliasRow[ALIAS_IDX.SOURCE]       || 'MANUAL');
+    // [FIX CodeQL js/unused-local-variable V5.5.035] confidence + source ไม่ถูกใช้ใน dedup logic — ลบทิ้ง
 
     // Dedup check ใน RAM
     let norm = normalizeForCompare(variantName);

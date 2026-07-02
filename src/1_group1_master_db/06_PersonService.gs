@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.034
+ * VERSION: 5.5.035
  * FILE: 06_PersonService.gs
  * LMDS V5.5 — Person Master Service
  * ===================================================
@@ -531,8 +531,8 @@ function updatePersonStats(personId) {
       return;
     }
 
-    const lastSeenCol   = PERSON_IDX.LAST_SEEN   + 1;
-    const usageCountCol = PERSON_IDX.USAGE_COUNT  + 1;
+    const lastSeenCol = PERSON_IDX.LAST_SEEN + 1;
+    // [FIX CodeQL js/unused-local-variable V5.5.035] usageCountCol ไม่ถูกใช้ — statsRange ใช้ width=2 แทน
 
     // [FIX v5.4.003] Batch write: อ่านทั้ง 2 คอลัมน์ → แก้ใน RAM → เขียนทีเดียว
     // ลดจาก 3 API calls เหลือ 1+1 = 2 API calls
@@ -566,7 +566,7 @@ function mergePersonRecords(sourceId, targetId) {
     // [FIX v5.5.001] Use PERSON_IDX constants consistently instead of headers.indexOf()
     const idCol   = PERSON_IDX.PERSON_ID;
     const statCol = PERSON_IDX.STATUS;
-    const noteCol = PERSON_IDX.NOTE;
+    // [FIX CodeQL js/unused-local-variable V5.5.035] noteCol ไม่ถูกใช้ — ลบทิ้ง
     const canCol  = PERSON_IDX.CANONICAL;
 
     let sourceCanonical = sourceId; // fallback

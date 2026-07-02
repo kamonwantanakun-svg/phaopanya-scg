@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.034
+ * VERSION: 5.5.035
  * FILE: 08_GeoService.gs
  * LMDS V5.5 — Geo Point Master Service
  * ===================================================
@@ -278,7 +278,8 @@ function createGeoPoint(lat, lng, source, resolvedAddr, province, district, plac
   const ss    = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET.M_GEO_POINT);
   if (!sheet) {
-    logError('GeoService', `ไม่พบชีต ${SHEET.M_GEO_POINT}`, new Error('SHEET_NOT_FOUND'))
+    // [FIX CodeQL js/automatic-semicolon-insertion V5.5.035] เพิ่ม semicolon ที่ขาด
+    logError('GeoService', `ไม่พบชีต ${SHEET.M_GEO_POINT}`, new Error('SHEET_NOT_FOUND'));
     return null;
   }
   const now   = new Date();
@@ -349,8 +350,8 @@ function updateGeoStats(geoId) {
       return;
     }
 
-    const lastSeenCol   = GEO_IDX.LAST_SEEN   + 1;
-    const usageCountCol = GEO_IDX.USAGE_COUNT  + 1;
+    const lastSeenCol = GEO_IDX.LAST_SEEN + 1;
+    // [FIX CodeQL js/unused-local-variable V5.5.035] usageCountCol ไม่ถูกใช้ — statsRange ใช้ width=2 แทน
 
     // [FIX v5.4.003] Batch write: อ่านทั้ง 2 คอลัมน์ → แก้ใน RAM → เขียนทีเดียว
     // ลดจาก 3 API calls เหลือ 1+1 = 2 API calls

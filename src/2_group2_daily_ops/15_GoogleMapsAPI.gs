@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.034
+ * VERSION: 5.5.035
  * FILE: 15_GoogleMapsAPI.gs
  * LMDS V5.5 — Google Maps Custom Functions (@customFunction)
  * ===================================================
@@ -339,9 +339,23 @@ const GOOGLEMAPS_DIRECTIONS = (origin, destination, mode = "driving") => {
     .map(({ legs }) => {
       return legs.map(({ steps }) => {
         return steps.map((step) => {
-          return step.html_instructions
-            .replace("><", "> <")
-            .replace(/<[^>]+>/g, "");
+          // [FIX CodeQL js/incomplete-multi-character-sanitization V5.5.035]
+          // Strip HTML tags more thoroughly:
+          //   1. Insert space between adjacent tags ("><" → "> <")
+          //   2. Remove all tags and their attributes via non-greedy match
+          //   3. Decode common HTML entities
+          //   4. Collapse whitespace
+          return String(step.html_instructions || '')
+            .replace(/>\s*</g, '> <')                    // space between tags
+            .replace(/<[^>]*>/g, '')                     // strip all tags
+            .replace(/&nbsp;/g, ' ')                     // decode entities
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/\s+/g, ' ')
+            .trim();
         });
       });
     })

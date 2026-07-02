@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.034
+ * VERSION: 5.5.035
  * FILE: 04_SourceRepository.gs
  * LMDS V5.5 — Source Data Repository
  * ===================================================
@@ -228,8 +228,8 @@ function getProcessedInvoiceSet_() {
 
   // [FIX Phase-B #2] อ่าน INVOICE_NO + MATCH_STATUS พร้อมกัน (adjacent columns: idx 6 & 22)
   // ใช้ getRange(startRow, startCol, numRows, numCols) โดย numCols = (MATCH_STATUS - INVOICE_NO) + 1
-  const invoiceCol    = FACT_IDX.INVOICE_NO + 1;     // 7 (col G)
-  const matchStatusCol = FACT_IDX.MATCH_STATUS + 1;  // 23 (col W)
+  const invoiceCol     = FACT_IDX.INVOICE_NO + 1;     // 7 (col G)
+  // [FIX CodeQL js/unused-local-variable V5.5.035] matchStatusCol ไม่ถูกใช้ — คำนวณผ่าน numColsToRead แทน
   const numColsToRead = (FACT_IDX.MATCH_STATUS - FACT_IDX.INVOICE_NO) + 1;
   const lastRow       = factSheet.getLastRow() - 1;
   const dataRange     = factSheet.getRange(2, invoiceCol, lastRow, numColsToRead)
@@ -317,8 +317,8 @@ function buildSourceObj_(row, rowNum) {
   const hasGeo = !isNaN(rawLat) && !isNaN(rawLng) &&
                  rawLat !== 0    && rawLng !== 0;
 
-  const resolvedAddr = String(row[SRC_IDX.RESOLVED_ADDR] || '').trim();
-  const rawAddr      = String(row[SRC_IDX.RAW_ADDRESS]   || '').trim();
+  // [FIX CodeQL js/unused-local-variable V5.5.035] ลบ resolvedAddr + rawAddr ที่ไม่ถูกใช้
+  // (ใช้ scgAddr + sysAddr ด้านล่างแทน — เป็นชื่อที่สื่อความหมายกว่า)
   
   // [UPGRADE v5.2.003] ปรับปรุง Mapping ให้ตรงตามความต้องการ Fact-Checking
   // 1. rawPlaceName = RAW_ADDRESS (18) — ข้อมูลมั่วๆ จาก SCG แต่จำเป็นต้องเก็บ

@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.034
+ * VERSION: 5.5.035
  * FILE: 10_MatchEngine.gs
  * LMDS V5.5 — Core Match & Resolution Engine
  * ===================================================
@@ -1087,7 +1087,8 @@ function executeDecision(srcObj, decision, personResult, placeResult, geoResult)
         geoEnrich.district    || srcObj.district,
         placeId
       );
-      if (geoResult) geoResult.geoId = geoId;
+      // [FIX CodeQL js/trivial-conditional V5.5.035] outer if บนบรรทัด 1080 ตรวจ geoResult แล้ว จึงไม่จำเป็นต้องเช็คซ้ำ
+      geoResult.geoId = geoId;
     }
   }
 

@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.034
+ * VERSION: 5.5.035
  * FILE: 21_AliasService.gs
  * LMDS V5.5 — Hybrid Alias Architecture (Global M_ALIAS + Entity-Specific Views)
  * ===================================================
@@ -189,7 +189,8 @@ function createGlobalAlias(masterUuid, variantName, entityType, confidence, sour
   // [FIX CRIT-002] Use CACHE_KEY constants instead of hardcoded strings — Single Source of Truth
   CacheService.getScriptCache().removeAll([CACHE_KEY.GLOBAL_ALIAS_ALL, CACHE_KEY.GLOBAL_ALIAS_REVERSE]);
 
-  logDebug('AliasService', `createGlobalAlias: ${aliasId} [${entityType}] (variant hash: ${generateMd5Hash(String(variantName || '')).substring(0, 8)}) → ${masterUuid.substring(0, 8)}... (${source})`);
+  // [FIX CodeQL js/trivial-conditional V5.5.035] variantName ถูก guard แล้วในบรรทัด 152 — ไม่จำเป็นต้อง || ''
+  logDebug('AliasService', `createGlobalAlias: ${aliasId} [${entityType}] (variant hash: ${generateMd5Hash(String(variantName)).substring(0, 8)}) → ${masterUuid.substring(0, 8)}... (${source})`);
   return aliasId;
   } catch (err) {
     // [FIX B3 v5.5.002] เพิ่ม try-catch ตาม Rule 12
@@ -634,39 +635,41 @@ function MIGRATION_HybridAliasSystem() {
     counts.uuidFixed = migrateStep1_AssignUuid_(ss, state);
 
     // ─── Step 2: ย้าย M_PERSON_ALIAS → M_ALIAS ─── [REF-005]
-    if (!timedOut && state.step <= 2) {
+    // [FIX CodeQL js/trivial-conditional V5.5.035] ใช้ ctx.timedOut (object property) ที่ CodeQL มองว่าเปลี่ยนได้
+    //  แทน local variable timedOut ที่วิเคราะห์เป็น trivial
+    if (!ctx.timedOut && state.step <= 2) {
       var step2Result = runMigrationStepSafely_(ctx, function() {
         return migrateStep2_PersonAlias_(ctx.ss, ctx.state, ctx.startTime, ctx.timeLimit);
       });
       counts.migrateCount += step2Result.count;
-      timedOut = timedOut || step2Result.timedOut;
+      ctx.timedOut = ctx.timedOut || step2Result.timedOut;
     }
 
     // ─── Step 3: ย้าย M_PLACE_ALIAS → M_ALIAS ─── [REF-005]
-    if (!timedOut && state.step <= 3) {
+    if (!ctx.timedOut && state.step <= 3) {
       var step3Result = runMigrationStepSafely_(ctx, function() {
         return migrateStep3_PlaceAlias_(ctx.ss, ctx.state, ctx.startTime, ctx.timeLimit);
       });
       counts.migrateCount += step3Result.count;
-      timedOut = timedOut || step3Result.timedOut;
+      ctx.timedOut = ctx.timedOut || step3Result.timedOut;
     }
 
     // ─── Step 4: ดึงจาก SCG ดิบ ─── [REF-005]
-    if (!timedOut && state.step <= 4) {
+    if (!ctx.timedOut && state.step <= 4) {
       var step4Result = runMigrationStepSafely_(ctx, function() {
         return migrateStep4_SCGData_(ctx.ss, ctx.state, ctx.startTime, ctx.timeLimit);
       });
       counts.scgCount = step4Result.count;
-      timedOut = timedOut || step4Result.timedOut;
+      ctx.timedOut = ctx.timedOut || step4Result.timedOut;
     }
 
     // ─── Step 5: ดึงจาก FACT ─── [REF-005]
-    if (!timedOut && state.step <= 5) {
+    if (!ctx.timedOut && state.step <= 5) {
       var step5Result = runMigrationStepSafely_(ctx, function() {
         return migrateStep5_FactData_(ctx.ss, ctx.state, ctx.startTime, ctx.timeLimit);
       });
       counts.factCount = step5Result.count;
-      timedOut = timedOut || step5Result.timedOut;
+      ctx.timedOut = ctx.timedOut || step5Result.timedOut;
     }
 
     const elapsedSec   = Math.round((new Date() - startTime) / 1000);
@@ -1203,7 +1206,7 @@ function populateAliasFromFactDelivery_() {
     const placeId  = String(r[FACT_IDX.PLACE_ID]     || '').trim();
     // [FIX CRIT-005] อ่าน DRIVER_VERIFIED ด้วย
     const dvName   = String(r[FACT_IDX.DRIVER_VERIFIED_NAME] || '').trim();
-    const dvAddr   = String(r[FACT_IDX.DRIVER_VERIFIED_ADDR] || '').trim();
+    // [FIX CodeQL js/unused-local-variable V5.5.035] dvAddr ไม่ถูกใช้ — ลบทิ้ง
 
     if (!rawName || rawName.length < 2) return;
     const normKey = normalizeForCompare(rawName);

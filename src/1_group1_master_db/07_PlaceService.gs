@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.034
+ * VERSION: 5.5.035
  * FILE: 07_PlaceService.gs
  * LMDS V5.5 — Place Master Service
  * ===================================================
@@ -716,8 +716,8 @@ function updatePlaceStats(placeId) {
       return;
     }
 
-    const lastSeenCol   = PLACE_IDX.LAST_SEEN   + 1;
-    const usageCountCol = PLACE_IDX.USAGE_COUNT  + 1;
+    const lastSeenCol = PLACE_IDX.LAST_SEEN + 1;
+    // [FIX CodeQL js/unused-local-variable V5.5.035] usageCountCol ไม่ถูกใช้ — statsRange ใช้ width=2 แทน
 
     // [FIX v5.4.003] Batch write: อ่านทั้ง 2 คอลัมน์ → แก้ใน RAM → เขียนทีเดียว
     // ลดจาก 3 API calls เหลือ 1+1 = 2 API calls

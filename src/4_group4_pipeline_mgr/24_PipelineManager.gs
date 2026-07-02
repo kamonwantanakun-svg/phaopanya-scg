@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.034
+ * VERSION: 5.5.035
  * FILE: 24_PipelineManager.gs
  * LMDS V5.5 — Pipeline Manager (Standalone Module)
  * ===================================================
@@ -627,9 +627,9 @@ function runPipelineBatch() {
     // ─── Step 6: เรียก runMatchEngine ───
     setPipelineState_(PIPELINE_STATES.RUNNING, 'Batch started');
 
-    let batchError = null;
-    let batchResult = null;
-
+    // [FIX CodeQL js/useless-assignment-to-local V5.5.035] ไม่กำหนดค่าเริ่มต้น — try/catch จะกำหนดให้แน่
+    let batchError;
+    let batchResult;
     try {
       // runMatchEngine มี Time Guard ในตัว (5 นาที) + มี auto-resume trigger ของมันเอง
       // Pipeline Manager จะคุม schedule เอง จึงลบ auto-resume ทิ้งหลังรัน

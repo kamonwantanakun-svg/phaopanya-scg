@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.034
+ * VERSION: 5.5.035
  * FILE: 99_Legacy.gs
  * LMDS V5.5 — Deprecated/Legacy Functions (Compatibility Layer)
  * ===================================================
@@ -24,12 +24,21 @@
  * ===================================================
  * CHANGELOG: See /docs/CHANGELOG.md for full history.
  *   V5.5.034 (2026-07-03) — Created 99_Legacy.gs, moved 3 deprecated functions
+ *   V5.5.035 (2026-07-03) — SonarCloud fixes: extract MODULE_NAME constant + block comments
  * ===================================================
  */
 
-// ============================================================
-// SECTION 1: Schema Helpers (moved from 02_Schema.gs)
-// ============================================================
+/* ============================================================
+ * SECTION 1: Module Constants
+ * [FIX SonarCloud S1192 V5.5.035] Extract repeated literals as constants
+ * ============================================================ */
+
+const LEGACY_MODULE_NAME = 'Legacy';
+const TYPE_OF_FUNCTION = 'function';
+
+/* ============================================================
+ * SECTION 2: Schema Helpers (moved from 02_Schema.gs)
+ * ============================================================ */
 
 /**
  * getColIndex — หา column index จากชื่อคอลัมน์ (0-based)
@@ -46,11 +55,11 @@
  */
 function getColIndex(schemaKey, colName) {
   // [REF-012] Log warning เมื่อถูกเรียก — ป้องกันการใช้งานในอนาคต
-  if (typeof logWarn === 'function') {
+  if (typeof logWarn === TYPE_OF_FUNCTION) {
     try {
       var stack = (new Error().stack || '').split('\n');
       var caller = stack[2] || 'unknown';
-      logWarn('Legacy', '[DEPRECATED] getColIndex("' + schemaKey + '", "' + colName + '") — Use *_IDX.* constants instead. Caller: ' + caller.trim());
+      logWarn(LEGACY_MODULE_NAME, '[DEPRECATED] getColIndex("' + schemaKey + '", "' + colName + '") — Use *_IDX.* constants instead. Caller: ' + caller.trim());
     } catch (e) { /* ignore log error */ }
   }
   const headers = SCHEMA[schemaKey];
@@ -58,9 +67,9 @@ function getColIndex(schemaKey, colName) {
   return headers.indexOf(colName);
 }
 
-// ============================================================
-// SECTION 2: Destination Helpers (moved from 09_DestinationService.gs)
-// ============================================================
+/* ============================================================
+ * SECTION 3: Destination Helpers (moved from 09_DestinationService.gs)
+ * ============================================================ */
 
 /**
  * getDestinationsByPerson — [ADD v5.1.001] ดึง Destination ทั้งหมดของบุคคล
@@ -73,9 +82,9 @@ function getColIndex(schemaKey, colName) {
  * Moved to 99_Legacy.gs in V5.5.034 (DOC-CODE SYNC workflow step 5)
  */
 function getDestinationsByPerson(personId) {
-  if (typeof logWarn === 'function') {
+  if (typeof logWarn === TYPE_OF_FUNCTION) {
     try {
-      logWarn('Legacy', '[DEPRECATED] getDestinationsByPerson("' + personId + '") — Use getDestsByPersonId() instead.');
+      logWarn(LEGACY_MODULE_NAME, '[DEPRECATED] getDestinationsByPerson("' + personId + '") — Use getDestsByPersonId() instead.');
     } catch (e) { /* ignore log error */ }
   }
   return getDestsByPersonId(personId);
@@ -92,9 +101,9 @@ function getDestinationsByPerson(personId) {
  * Moved to 99_Legacy.gs in V5.5.034 (DOC-CODE SYNC workflow step 5)
  */
 function getDestinationsByPlace(placeId) {
-  if (typeof logWarn === 'function') {
+  if (typeof logWarn === TYPE_OF_FUNCTION) {
     try {
-      logWarn('Legacy', '[DEPRECATED] getDestinationsByPlace("' + placeId + '") — Use getDestsByPlaceId() instead.');
+      logWarn(LEGACY_MODULE_NAME, '[DEPRECATED] getDestinationsByPlace("' + placeId + '") — Use getDestsByPlaceId() instead.');
     } catch (e) { /* ignore log error */ }
   }
   return getDestsByPlaceId(placeId);

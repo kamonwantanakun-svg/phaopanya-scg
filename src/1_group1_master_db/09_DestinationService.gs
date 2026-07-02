@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.034
+ * VERSION: 5.5.035
  * FILE: 09_DestinationService.gs
  * LMDS V5.5 — Destination Master Service
  * ===================================================
@@ -63,9 +63,11 @@ function resolveDestination(personId, placeId, geoId) {
   }
 
   // Normalize กัน null/'' ปน
-  const pId = String(personId || '').trim();
-  const plId = String(placeId  || '').trim();
-  const gId  = String(geoId    || '').trim();
+  // [FIX CodeQL js/trivial-conditional V5.5.035] หลัง guard clause ข้างบน ตัวแปรทั้ง 3 ตัวเป็น truthy แน่นอน
+  //  จึงไม่จำเป็นต้องใช้ || '' fallback
+  const pId  = String(personId).trim();
+  const plId = String(placeId).trim();
+  const gId  = String(geoId).trim();
 
   if (!pId || !plId || !gId) {
     return { destId: null, status: 'INSUFFICIENT', isNew: false };

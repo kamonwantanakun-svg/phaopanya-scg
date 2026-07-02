@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.034
+ * VERSION: 5.5.035
  * FILE: 00_App.gs
  * LMDS V5.5 — Application Entry Point & Menu Controller
  * ===================================================
@@ -620,7 +620,7 @@ function safeRun(funcName, fn) {
 // ============================================================
 
 function runFullPipeline() {
-  const ui = SpreadsheetApp.getUi();
+  // [FIX CodeQL js/unused-local-variable V5.5.035] ui ไม่ถูกใช้ — ใช้ safeUiAlert_() แทน
 
   // [ADD v003] LockService กัน double-click
   const lock = LockService.getScriptLock();

@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.034
+ * VERSION: 5.5.035
  * FILE: 12_ReviewService.gs
  * LMDS V5.5 — Review Queue Service
  * [FIX BUG-B2] v5.4.003: updateReviewRowStatus_() helper — 1 setValues แทน 5× setValue
@@ -97,7 +97,7 @@ function enqueueReview(srcObj, decision, personResult, placeResult, geoResult) {
       return null;
     }
 
-    const now = new Date();
+    // [FIX CodeQL js/unused-local-variable V5.5.035] now ไม่ถูกใช้ในฟังก์ชันนี้ — ลบทิ้ง
     const newId = generateShortId('R');
     const candPersonIds = personResult && personResult.personId
       ? JSON.stringify([personResult.personId]) : JSON.stringify([]);
@@ -264,8 +264,8 @@ function applyAllPendingDecisions() {
     const pendingStatusUpdates = [];
     const pendingFactRows = []; // [PERF-002] สะสม FACT_DELIVERY rows
     const batchNow = new Date();
-    let reviewer = 'System';
-
+    // [FIX CodeQL js/useless-assignment-to-local V5.5.035] ไม่กำหนดค่าเริ่มต้น — try/catch จะกำหนดให้แน่
+    let reviewer;
     try {
       // [SEC-007] Mask reviewer email สำหรับ Audit Trail
       const rawEmail = Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail() || 'Admin';
@@ -458,8 +458,8 @@ function applyReviewDecision(reviewId, decisionVal, rowData, optTargetRow) {
     if (!sheet) return null;
 
     const now = new Date();
-    let reviewer = 'System';
-
+    // [FIX CodeQL js/useless-assignment-to-local V5.5.035] ไม่กำหนดค่าเริ่มต้น — try/catch จะกำหนดให้แน่
+    let reviewer;
     try {
       const rawEmail = Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail() || 'Admin';
       reviewer = maskReviewerEmail_(rawEmail);
