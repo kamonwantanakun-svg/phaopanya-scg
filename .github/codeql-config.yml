@@ -1,8 +1,10 @@
 # CodeQL configuration — กำหนด paths ที่ CodeQL ควร/ไม่ควรสแกน
-# https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/codeql-code-scanning-for-compiled-languages#configuring-code-scanning-for-compiled-languages
+# https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/codeql-code-scanning-for-compiled-languages
 
-# ข้ามไฟล์ HTML เพราะ Apps Script ใช้ template scriptlets (<?= ?>, <?!= ?>)
-# ที่ CodeQL มองเป็น syntax error (ไม่ใช่ JavaScript มาตรฐาน)
+# กำหนด paths ที่จะสแกน — เฉพาะ src/ ที่มี .gs ไฟล์ (Apps Script = JavaScript)
+# ไม่สแกน HTML เพราะมี template scriptlets (<?= ?>) ที่ CodeQL มองเป็น syntax error
+paths:
+  - 'src'
 paths-ignore:
   - '**/*.html'
   - '**/*.css'
