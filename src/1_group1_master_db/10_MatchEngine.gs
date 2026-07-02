@@ -868,14 +868,18 @@ function matchCommitPlaceAlias_(ss, rows, context) {
 /**
  * processOneRow — ประมวลผล 1 Source Record
  * [FIX v003] resolvePlace ส่ง rawPlaceName + province
+ * [FIX P1 Static Audit] ส่ง rawAddress (ที่อยู่เต็ม) แทน province เพื่อให้
+ *   tryMatchBranch → extractProvince_ สามารถ fallback หารหัสไปรษณีย์ได้
+ *   เดิมส่งแค่ province (สตริงสั้น) ทำให้ extractProvince_ หา postcode ไม่เจอ
  */
 function processOneRow(srcObj) {
   const personResult = resolvePerson(srcObj.rawPersonName);
 
-  // [FIX v003] ส่ง rawPlaceName (สะอาด) + province แทน rawAddress ซ้ำ
+  // [FIX P1] ส่ง rawAddress (ที่อยู่เต็ม) เข้า arg ที่ 2 เพื่อให้ tryMatchBranch
+  //   สามารถใช้ extractProvince_ หาจังหวัด + รหัสไปรษณีย์ได้ครบ
   const placeResult  = resolvePlace(
     srcObj.rawPlaceName || srcObj.rawAddress,
-    srcObj.province || ''
+    srcObj.rawAddress || ''
   );
 
   const geoResult    = resolveGeo(srcObj.rawLat, srcObj.rawLng);
