@@ -1158,16 +1158,21 @@ function getReviewDetail(reviewId) {
 
 /**
  * haversineDistanceMeters_ — คำนวณระยะทางระหว่าง 2 พิกัด (เมตร)
- *   ใช้ Haversine formula — คิดว่าโลกกลม
+ *   [FIX Static Audit Issue 4] delegate ไป haversineDistanceM() ใน 14_Utils.gs
+ *   แทนการ re-implement Haversine formula ซ้ำ — Single Source of Truth
  * @param {number} lat1
  * @param {number} lng1
  * @param {number} lat2
  * @param {number} lng2
- * @return {number} ระยะทางในหน่วยเมตร
+ * @return {number} ระยะทางในหน่วยเมตร (rounded)
  * @private
  */
 function haversineDistanceMeters_(lat1, lng1, lat2, lng2) {
-  const R = 6371000; // รัศมีโลก (เมตร)
+  if (typeof haversineDistanceM === 'function') {
+    return Math.round(haversineDistanceM(lat1, lng1, lat2, lng2));
+  }
+  // Fallback: re-implement (กรณี 14_Utils.gs ยังไม่ถูกโหลด)
+  const R = 6371000;
   const toRad = function(deg) { return deg * Math.PI / 180; };
   const dLat = toRad(lat2 - lat1);
   const dLng = toRad(lng2 - lng1);
@@ -1523,7 +1528,7 @@ function searchLocations(query, limit) {
 
     // 3. ค้นจาก M_ALIAS → map กลับไป person/place
     aliases.forEach(function(row) {
-      const variant = String(row[ALIAS_IDX.VARIANT] || '').toLowerCase();
+      const variant = String(row[ALIAS_IDX.VARIANT_NAME] || '').toLowerCase();
       const masterUuid = String(row[ALIAS_IDX.MASTER_UUID] || '');
       const entityType = String(row[ALIAS_IDX.ENTITY_TYPE] || '');
       const active = String(row[ALIAS_IDX.ACTIVE_FLAG] || '');

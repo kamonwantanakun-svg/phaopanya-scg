@@ -720,9 +720,11 @@ function checkHasMoreWork_() {
     const lastRow = sheet.getLastRow();
     if (lastRow < 2) return false; // มีแค่ header
 
-    // อ่านเฉพาะ SYNC_STATUS column (col 37 = index 36 ใน SRC_IDX)
-    // ใช้ col 37 ตาม SRC_IDX.SYNC_STATUS
-    const syncStatusCol = 37;
+    // [FIX Static Audit Issue 3] ใช้ SRC_IDX.SYNC_STATUS แทน hardcoded 37
+    //   กรณี standalone (ไม่มี SRC_IDX) ใช้ fallback 37 (1-based, index 36)
+    const syncStatusCol = (typeof SRC_IDX !== 'undefined' && typeof SRC_IDX.SYNC_STATUS === 'number')
+      ? SRC_IDX.SYNC_STATUS + 1
+      : 37;
     const data = sheet.getRange(2, syncStatusCol, lastRow - 1, 1).getValues();
 
     // นับแถวที่ SYNC_STATUS != SUCCESS

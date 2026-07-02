@@ -304,11 +304,14 @@ function handleSelectionChange_(e) {
     const cellValue = String(e.range.getValue() || '').trim();
     if (!cellValue) return;
 
-    const matches = cellValue.match(/(PS|PL|GP|DE|DS)\w+/gi);
+    // [FIX Static Audit Issue 2] รองรับ prefix จริง: P (Person), PL (Place), G (Geo), D (Dest)
+    //   เดิมใช้ PS/GP/DE/DS ซึ่งไม่ตรง generateShortId('P'/'G'/'D')
+    //   ใช้ word boundary + ตรวจ PL ก่อน P เพื่อกัน false match
+    const matches = cellValue.match(/\b(PL|P|G|D)[0-9A-Fa-f]+\b/gi);
     if (!matches || matches.length === 0) return;
 
     const targetId = matches[0].toUpperCase().trim();
-    const prefix = targetId.substring(0, 2);
+    const prefix = resolveIdPrefix_(targetId);
     const targetSheetName = resolveTargetSheetName_(prefix);
     if (!targetSheetName) return;
 
@@ -348,9 +351,9 @@ function handleRecommendClick_(sheet, row, cell) {
   const cellValue = String(cell.getValue() || '').trim();
   if (!cellValue) return;
 
-  // Parse ID จาก string รูปแบบ "ACTION:ID"
-  // รองรับ prefix: PS (Person), PL (Place), GP (GeoPoint), DE/DS (Destination)
-  const idMatch = cellValue.match(/(PS|PL|GP|DE|DS)[\w\-]+/i);
+  // [FIX Static Audit Issue 2] รองรับ prefix จริง: P, PL, G, D
+  //   แทน PS/GP/DE/DS ที่ไม่ตรง generateShortId
+  const idMatch = cellValue.match(/\b(PL|P|G|D)[0-9A-Fa-f]+\b/i);
   if (!idMatch) {
     // ไม่มี ID ในคำแนะนำ (เช่น "CREATE_NEW" ล้วน หรือ "MANUAL_REVIEW")
     // แสดงคำอธิบายให้ reviewer ทราบ
@@ -372,7 +375,7 @@ function handleRecommendClick_(sheet, row, cell) {
   }
 
   const targetId = idMatch[0].toUpperCase().trim();
-  const prefix = targetId.substring(0, 2);
+  const prefix = resolveIdPrefix_(targetId);
   const targetSheetName = resolveTargetSheetName_(prefix);
   if (!targetSheetName) return;
 
@@ -454,30 +457,48 @@ function navigateFromRecommend_(ss, recommendAction, targetId, targetSheet, targ
 }
 
 /**
+ * resolveIdPrefix_ — ตรวจ ID prefix ที่ถูกต้องตาม generateShortId scheme
+ *   [FIX Static Audit Issue 2] รองรับ prefix จริง: PL (Place, 2 ตัว), P (Person), G (Geo), D (Dest)
+ *   ต้องตรวจ PL ก่อน P เพราะ P เป็น prefix ของ PL
+ * @param {string} targetId - ID string (UPPERCASE)
+ * @return {string} prefix ('PL' | 'P' | 'G' | 'D' | '')
+ * @private
+ */
+function resolveIdPrefix_(targetId) {
+  if (targetId.indexOf('PL') === 0) return 'PL';
+  if (targetId.indexOf('P') === 0) return 'P';
+  if (targetId.indexOf('G') === 0) return 'G';
+  if (targetId.indexOf('D') === 0) return 'D';
+  return '';
+}
+
+/**
  * resolveTargetSheetName_ — แมป ID prefix → ชื่อชีต Master
  * [REFACTOR v5.5.001] แยกจาก handleSelectionChange_ — กฎข้อ 1.1
- * @param {string} prefix — 2-char prefix (PS, PL, GP, DE, DS)
+ * [FIX Static Audit Issue 2] รองรับ prefix จริง: P, PL, G, D (แทน PS, GP, DE, DS)
+ * @param {string} prefix — prefix จาก resolveIdPrefix_
  * @return {string} sheet name หรือ '' ถ้าไม่ตรง
  */
 function resolveTargetSheetName_(prefix) {
-  if (prefix === 'PS') return SHEET.M_PERSON;
+  if (prefix === 'P') return SHEET.M_PERSON;
   if (prefix === 'PL') return SHEET.M_PLACE;
-  if (prefix === 'GP') return SHEET.M_GEO_POINT;
-  if (prefix === 'DE' || prefix === 'DS') return SHEET.M_DESTINATION;
+  if (prefix === 'G') return SHEET.M_GEO_POINT;
+  if (prefix === 'D') return SHEET.M_DESTINATION;
   return '';
 }
 
 /**
  * resolveFactColIdx_ — แมป ID prefix → FACT_IDX column index
  * [REFACTOR v5.5.001] แยกจาก handleSelectionChange_ — กฎข้อ 1.1
- * @param {string} prefix — 2-char prefix
+ * [FIX Static Audit Issue 2] รองรับ prefix จริง: P, PL, G, D
+ * @param {string} prefix
  * @return {number} column index หรือ -1
  */
 function resolveFactColIdx_(prefix) {
-  if (prefix === 'PS') return FACT_IDX.PERSON_ID;
+  if (prefix === 'P') return FACT_IDX.PERSON_ID;
   if (prefix === 'PL') return FACT_IDX.PLACE_ID;
-  if (prefix === 'GP') return FACT_IDX.GEO_ID;
-  if (prefix === 'DE' || prefix === 'DS') return FACT_IDX.DEST_ID;
+  if (prefix === 'G') return FACT_IDX.GEO_ID;
+  if (prefix === 'D') return FACT_IDX.DEST_ID;
   return -1;
 }
 

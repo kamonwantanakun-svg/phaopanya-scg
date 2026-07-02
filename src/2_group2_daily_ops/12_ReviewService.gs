@@ -214,8 +214,9 @@ function buildRecommendedAction_(personResult, placeResult, geoResult, decision)
 
     // กรณี 3: มี Geo candidate แต่ไม่มี Person/Place → CREATE_NEW
     // (มีพิกัด GPS ใกล้เคียง แต่เป็นร้านใหม่)
+    // [FIX Static Audit Issue 2] ใช้ geoId ตรงๆ ไม่แปะ 'GP-' prefix ที่ไม่ตรง generateShortId('G')
     if (geoResult && geoResult.geoId) {
-      return 'CREATE_NEW:GP-' + String(geoResult.geoId).trim();
+      return 'CREATE_NEW:' + String(geoResult.geoId).trim();
     }
 
     // กรณี 4: ไม่มี candidate ใดเลย → CREATE_NEW ล้วน
