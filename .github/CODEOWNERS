@@ -1,0 +1,30 @@
+# CODEOWNERS — กำหนดผู้รับผิดชอบโค้ดแต่ละส่วน
+# ใช้สำหรับ auto-assign reviewers ใน Pull Requests
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# โครงสร้างโปรเจกต์ LMDS V5.5
+# =======================
+
+# Default — ทุกไฟล์
+*                           @Siriwat08
+
+# Core System (Config, Schema, App entry, Utils, Hardening)
+/src/O_core_system/         @Siriwat08
+
+# Group 1: Master Database (Person, Place, Geo, Destination, Alias, Match)
+/src/1_group1_master_db/    @Siriwat08
+
+# Group 2: Daily Operations (Source, Transaction, Review, Report, Search, SCG)
+/src/2_group2_daily_ops/    @Siriwat08
+
+# Group 3: Web Application (Dashboard, Frontend)
+/src/3_group3_webapp/       @Siriwat08
+
+# Group 4: Pipeline Manager
+/src/4_group4_pipeline_mgr/ @Siriwat08
+
+# GitHub Actions + CI/CD
+/.github/                   @Siriwat08
+
+# Documentation
+/docs/                      @Siriwat08

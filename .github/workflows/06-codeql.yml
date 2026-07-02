@@ -1,0 +1,47 @@
+# CodeQL — Static security analysis โดย GitHub
+# ตรวจหา security vulnerabilities ในโค้ดอัตโนมัติ
+# https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors/setting-up-code-scanning-for-a-repository
+
+name: "🔒 CodeQL Security Analysis"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # รันทุกวันจันทร์ 08:00 ICT (Asia/Bangkok)
+    - cron: '0 01 * * 1'  # UTC 01:00 = ICT 08:00
+
+jobs:
+  analyze:
+    name: 🔍 Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript']
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # ใช้ security-and-quality query suite เพื่อตรวจหาทั้ง security + code quality
+          queries: security-and-quality
+
+      - name: 🏗️ Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: 🔍 Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

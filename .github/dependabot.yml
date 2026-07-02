@@ -1,0 +1,45 @@
+# Dependabot configuration — ตรวจสอบ dependencies และอัปเดตอัตโนมัติ
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+
+updates:
+  # GitHub Actions — ตรวจสอบ action versions ใน workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Asia/Bangkok"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    reviewers:
+      - "Siriwat08"
+
+  # npm — สำหรับ clasp และ dev dependencies (ถ้ามี package.json)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Asia/Bangkok"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    reviewers:
+      - "Siriwat08"
+    # ไม่อัปเดต major version อัตโนมัติ — ต้อง review เอง
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
