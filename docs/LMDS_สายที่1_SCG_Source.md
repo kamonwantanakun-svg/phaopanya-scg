@@ -1,6 +1,6 @@
 # 🟢 สายที่ 1: เริ่มจากชีต "SCGนครหลวงJWDภูมิภาค" (Source Sheet)
 
-> **เอกสารประกอบ LMDS V5.5.022**
+> **เอกสารประกอบ LMDS V5.5.034**
 > อธิบาย Data Flow สายที่ 1 — จากชีต Source ดิบไปจนถึงการเขียน Master Data และ FACT_DELIVERY
 > เกี่ยวข้องกับ: `00_App.gs`, `04_SourceRepository.gs`, `05_NormalizeService.gs`, `06_PersonService.gs`, `07_PlaceService.gs`, `08_GeoService.gs`, `10_MatchEngine.gs`
 
@@ -303,4 +303,4 @@ M_DESTINATION คือ "Trinity" ที่ผูก Person + Place + Geo เป
 
 ---
 
-*เอกสารนี้เป็นส่วนหนึ่งของชุดเอกสาร LMDS V5.5.022 — ดูเอกสารที่เกี่ยวข้อง: [LMDS_สายที่2_Daily_Job.md](LMDS_สายที่2_Daily_Job.md) | [LMDS_Q_REVIEW_คู่มือ.md](LMDS_Q_REVIEW_คู่มือ.md)*
+*เอกสารนี้เป็นส่วนหนึ่งของชุดเอกสาร LMDS V5.5.034 — ดูเอกสารที่เกี่ยวข้อง: [LMDS_สายที่2_Daily_Job.md](LMDS_สายที่2_Daily_Job.md) | [LMDS_Q_REVIEW_คู่มือ.md](LMDS_Q_REVIEW_คู่มือ.md)*

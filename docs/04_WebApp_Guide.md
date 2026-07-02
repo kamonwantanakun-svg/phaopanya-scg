@@ -1,6 +1,6 @@
 # 📖 คู่มือ LMDS Dashboard Web App (Phase 1)
 
-> **เอกสารประกอบ LMDS V5.5.022**
+> **เอกสารประกอบ LMDS V5.5.034**
 > คู่มือติดตั้งและใช้งาน Web App สำหรับดูข้อมูล LMDS แบบ real-time
 
 ---
@@ -60,7 +60,7 @@ LMDS Dashboard Web App เป็นหน้าเว็บที่ทำงา
 1. ใน Apps Script Editor ไปที่ **Deploy → New deployment**
 2. คลิก **Select type → Web app**
 3. ตั้งค่า:
-   - **Description:** `LMDS Dashboard V5.5.022`
+   - **Description:** `LMDS Dashboard V5.5.034`
    - **Execute as:** `Me (your-email@gmail.com)`
    - **Who has access:** `Anyone with Google Account`
 4. คลิก **Deploy**
@@ -239,4 +239,4 @@ LMDS Dashboard Web App เป็นหน้าเว็บที่ทำงา
 
 ---
 
-*เอกสารนี้เป็นส่วนหนึ่งของชุดเอกสาร LMDS V5.5.022 — Phase 1 Web App*
+*เอกสารนี้เป็นส่วนหนึ่งของชุดเอกสาร LMDS V5.5.034 — Phase 1 Web App*

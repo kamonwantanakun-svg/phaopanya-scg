@@ -1,6 +1,6 @@
 # อธิบายชีต Q_REVIEW (22 คอลัมน์) — คิวรอคนตรวจสอบ
 
-> **เอกสารประกอบ LMDS V5.5.022**
+> **เอกสารประกอบ LMDS V5.5.034 (DOC-CODE SYNC, 2026-07-03)**
 > อธิบายโครงสร้างและวิธีใช้งานชีต Q_REVIEW สำหรับคนตรวจสอบข้อมูล
 > เกี่ยวข้องกับ: `02_Schema.gs`, `12_ReviewService.gs`, `10_MatchEngine.gs`, `00_App.gs`
 
@@ -186,4 +186,4 @@ REJECTED / SKIP → ลบออก
 
 ---
 
-*เอกสารนี้เป็นส่วนหนึ่งของชุดเอกสาร LMDS V5.5.022 — ดูเอกสารที่เกี่ยวข้อง: [LMDS_สายที่1_SCG_Source.md](LMDS_สายที่1_SCG_Source.md) | [LMDS_สายที่2_Daily_Job.md](LMDS_สายที่2_Daily_Job.md)*
+*เอกสารนี้เป็นส่วนหนึ่งของชุดเอกสาร LMDS V5.5.034 — ดูเอกสารที่เกี่ยวข้อง: [LMDS_สายที่1_SCG_Source.md](LMDS_สายที่1_SCG_Source.md) | [LMDS_สายที่2_Daily_Job.md](LMDS_สายที่2_Daily_Job.md)*

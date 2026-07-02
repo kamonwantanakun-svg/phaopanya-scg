@@ -7,13 +7,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 | Version | Date | Cycle | Issues |
 |---------|------|-------|--------|
-| 5.5.029 | 2026-07-01 | PHASE 3.4: 7-DAY DELIVERY TREND CHART | Trend chart on Dashboard |
-| 5.5.028 | 2026-07-01 | PHASE 3: MATCH ENGINE METRICS | Dashboard สถิติ Match Engine |
-| 5.5.027 | 2026-07-01 | PHASE 2.4: SOURCE SHEET VIEW | Source Sheet page implementation |
-| 5.5.026 | 2026-07-01 | PHASE 2.3: FACT_DELIVERY VIEW | FACT_DELIVERY page implementation |
-| 5.5.025 | 2026-06-30 | PHASE 2.2: Q_REVIEW DETAIL PANEL | Click row → expand comparison |
-| 5.5.024 | 2026-06-30 | PHASE 2.1: Q_REVIEW VIEW | Q_REVIEW page implementation |
-| 5.5.023 | 2026-06-30 | WEBAPP WHITE SCREEN v2 FIX | 4 root cause fixes |
+| 5.5.034 | 2026-07-03 | DOC-CODE SYNC | โค้ด ↔ เอกสารตรง 100% (steps 1-15) |
+| 5.5.033 | 2026-07-03 | DOC-CODE SYNC (steps 8-12) | docs/ version alignment |
+| 5.5.032 | 2026-07-03 | DOC-CODE SYNC (steps 5-7) | Code issues + README/BLUEPRINT/CONTEXT/Supreme Engineer |
+| 5.5.031 | 2026-07-03 | DOC-CODE SYNC (step 4) | Bump VERSION header 5.5.022 → 5.5.034 (24 .gs) |
+| 5.5.030 | 2026-07-03 | DOC-CODE SYNC (steps 1-3) | Baseline + policy decisions + branch backup |
+| 5.5.029 | 2026-07-01 | DASHBOARD PHASE 2-3 ROLLOUT | รวม 7 features: WebApp white screen fix, Q_REVIEW view + detail, FACT_DELIVERY view, Source Sheet view, Match Engine Metrics, 7-Day Delivery Trend |
 | 5.5.022 | 2026-06-26 | CONSISTENCY SYNC + DEEP DIVE FIX | 9 BUG fixes + 168 doc inconsistencies |
 | 5.5.021 | 2026-06-22 | REFACTOR_CYCLE6_RESIDUAL | REF-005 cleanup + REF-011 pilot |
 | 5.5.020 | 2026-06-22 | REFACTOR_CYCLE6_RESIDUAL | REF-005 cleanup + REF-011 pilot |

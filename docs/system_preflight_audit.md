@@ -1,4 +1,4 @@
-# 📋 LMDS V5.5.022 — Pre-Flight System Audit Report
+# 📋 LMDS V5.5.034 — Pre-Flight System Audit Report
 
 **วันที่ตรวจสอบ:** 2026-06-23
 **สถานะการตรวจสอบ:** ✅ **GO — พร้อมใช้งาน 97% (Security Hardened)**
@@ -9,7 +9,7 @@
 
 ### สถานะ Git (Git Status)
 - **สถานะ:** เนื่องจากไดเรกทอรีนี้เป็นโฟลเดอร์แชร์บน Google Drive (`g:\ไดรฟ์ของฉัน\แชร์ไฟล์_Kamonwantanakun\...`) และไม่ได้มีการติดตั้ง `git` ใน Path ของเครื่องผู้ใช้ปัจจุบัน จึงไม่สามารถเรียกใช้คำสั่ง `git status` ได้โดยตรง
-- **ความเรียบร้อย:** อย่างไรก็ตาม โครงสร้างไฟล์ทั้งหมดสอดคล้องตรงตามเวอร์ชัน **V5.5.022** (ไม่มีไฟล์แปลกปลอมหรือไฟล์ค้างจากการ Merge)
+- **ความเรียบร้อย:** อย่างไรก็ตาม โครงสร้างไฟล์ทั้งหมดสอดคล้องตรงตามเวอร์ชัน **V5.5.034** (ไม่มีไฟล์แปลกปลอมหรือไฟล์ค้างจากการ Merge)
 
 ### โครงสร้างโมดูล (Project Structure)
 แบ่งออกเป็น 3 ส่วนหลัก (Domain Separation) อย่างชัดเจน:
@@ -84,15 +84,15 @@ graph TD
 
 ---
 
-## 3. 🛡️ สแกนจุดเสี่ยงจาก Patch ล่าสุด (V5.5.022)
+## 3. 🛡️ สแกนจุดเสี่ยงจาก Patch ล่าสุด (V5.5.034)
 
 Changelog ล่าสุดระบุว่ามีการทำ **REF-005 Residual Cleanup** และ **REF-011 Pilot Implementation** ซึ่งเราพบความเสี่ยงที่ได้รับการป้องกันแล้วดังนี้:
 
 ### 1) การใช้ `withEntryPointGuard_` (REF-011 Pilot)
 การย้ายไปใช้ Wrapper กลางใน 3 จุดนี้:
-1. `populateGeoMetadata()` (ใน [20_ThGeoService.gs](file:///g:/ไดรฟ์ของฉัน/แชร์ไฟล์_Kamonwantanakun/สร้างระบบฐานข้อมูล/23_06_2026/phaopanya-scgjwd-final-test-tong/src/1_group1_master_db/20_ThGeoService.gs))
-2. `buildGeoDictionary()` (ใน [16_GeoDictionaryBuilder.gs](file:///g:/ไดรฟ์ของฉัน/แชร์ไฟล์_Kamonwantanakun/สร้างระบบฐานข้อมูล/23_06_2026/phaopanya-scgjwd-final-test-tong/src/1_group1_master_db/16_GeoDictionaryBuilder.gs))
-3. `fetchDataFromSCGJWD()` (ใน [18_ServiceSCG.gs](file:///g:/ไดรฟ์ของฉัน/แชร์ไฟล์_Kamonwantanakun/สร้างระบบฐานข้อมูล/23_06_2026/phaopanya-scgjwd-final-test-tong/src/2_group2_daily_ops/18_ServiceSCG.gs))
+1. `populateGeoMetadata()` (ใน `20_ThGeoService.gs` (`20_ThGeoService.gs`))
+2. `buildGeoDictionary()` (ใน `16_GeoDictionaryBuilder.gs` (`16_GeoDictionaryBuilder.gs`))
+3. `fetchDataFromSCGJWD()` (ใน `18_ServiceSCG.gs` (`18_ServiceSCG.gs`))
 
 **การประเมินความเสี่ยง:**
 - **ความกังวล:** หาก `lock.releaseLock()` หรือ `flushLogBuffer_()` มีการดึงตัวแปรที่ไม่ได้นิยาม อาจส่งผลให้สคริปต์ล่มในจุด `finally`

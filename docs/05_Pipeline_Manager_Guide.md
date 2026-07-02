@@ -1,6 +1,6 @@
 # ⚡ Pipeline Manager — คู่มือใช้งาน (Standalone Module)
 
-> **เอกสารประกอบ LMDS V5.5.022**
+> **เอกสารประกอบ LMDS V5.5.034**
 > โมดูลจัดการการรัน `runMatchEngine()` สำหรับข้อมูลหลักหมื่นแถว
 > **ไม่ปนกับชุดหลัก** — อยู่ในไฟล์ `src/4_group4_pipeline_mgr/24_PipelineManager.gs` เพียงไฟล์เดียว
 
@@ -328,4 +328,4 @@ console.log('Last error:', cb.lastError);
 
 ---
 
-*เอกสารนี้เป็นส่วนหนึ่งของชุดเอกสาร LMDS V5.5.022 — Pipeline Manager Module*
+*เอกสารนี้เป็นส่วนหนึ่งของชุดเอกสาร LMDS V5.5.034 — Pipeline Manager Module*

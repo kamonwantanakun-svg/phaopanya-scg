@@ -478,8 +478,8 @@ ADMIN มีบทบาทหลักในการ:
 
 > **เอกสารฉบับนี้จัดทำสำหรับ ADMIN ของระบบ LMDS V5.5**
 >
-> **เวอร์ชันเอกสาร:** 1.3 (ปรับปรุงตามโค้ดจริง V5.5.022) | **วันที่:** มิถุนายน 2569
+> **เวอร์ชันเอกสาร:** 1.4 (ปรับปรุงตามโค้ดจริง V5.5.034 DOC-CODE SYNC) | **วันที่:** กรกฎาคม 2569
 >
-> **หมายเหตุ:** ข้อมูลในเอกสารนี้อ้างอิงจากโค้ดจริงใน Repository (APP_VERSION = 5.5.022) ซึ่งตรงกันกับ LMDS_System_Guide.md แล้ว ระบบ Search Service ใช้ 2 Tier เท่านั้น (Tier 0: M_ALIAS Fast Track + Tier 1: resolvePerson → getDestsByPersonId + NOT_FOUND) ตามนโยบาย ShipToName-Only v5.4.003 — ไม่ใช่ 6 Tier ตาม Guide ฉบับเก่าที่ถูกลบออกไปแล้ว
+> **หมายเหตุ:** ข้อมูลในเอกสารนี้อ้างอิงจากโค้ดจริงใน Repository (APP_VERSION = 5.5.034) ซึ่งตรงกันกับ LMDS_System_Guide.md แล้ว ระบบ Search Service ใช้ 2 Tier เท่านั้น (Tier 0: M_ALIAS Fast Track + Tier 1: resolvePerson → getDestsByPersonId + NOT_FOUND) ตามนโยบาย ShipToName-Only v5.4.003 — ไม่ใช่ 6 Tier ตาม Guide ฉบับเก่าที่ถูกลบออกไปแล้ว
 >
-> **สถิติระบบ:** ฟังก์ชัน 385 | บรรทัดโค้ด ~16,545 | IDX sets 16 | Compliance 16/16 COMPLIANT (Rule 16: Security-First Design, SEC-001→012, 14 audit cycles, 97% readiness)
+> **สถิติระบบ:** ฟังก์ชัน 435 | บรรทัดโค้ด ~17,459 | IDX sets 16 | Compliance 16/16 COMPLIANT (Rule 16: Security-First Design, SEC-001→012, 18 audit cycles, 97% readiness)

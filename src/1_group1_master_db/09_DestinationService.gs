@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.022
+ * VERSION: 5.5.034
  * FILE: 09_DestinationService.gs
  * LMDS V5.5 — Destination Master Service
  * ===================================================
@@ -401,23 +401,18 @@ function _safeParseLatLng_(rawVal) {
 }
 
 /**
- * getDestinationsByPerson — [ADD v5.1.001] ดึง Destination ทั้งหมดของบุคคล
- * @public สาธารณะ convenience wrapper สำหรับ external caller
- * @deprecated [REF-020] Use getDestsByPersonId() instead. This pass-through wrapper
- *   adds no logic and will be removed in a future version.
- * @param {string} personId
+ * DEPRECATED FUNCTIONS — MOVED to 99_Legacy.gs in V5.5.034
+ * ==================================================
+ * The following convenience wrappers were deprecated in REF-020 and have been
+ * moved to src/O_core_system/99_Legacy.gs to separate legacy code from the
+ * main codebase:
+ *
+ *   - getDestinationsByPerson(personId)  → Use getDestsByPersonId() directly
+ *   - getDestinationsByPlace(placeId)    → Use getDestsByPlaceId() directly
+ *
+ * Backward compatibility: callers from external scripts will still work —
+ * the wrappers in 99_Legacy.gs will log a deprecation warning and forward
+ * the call to the new API.
+ *
+ * @see 99_Legacy.gs for the deprecated implementations
  */
-function getDestinationsByPerson(personId) {
-  return getDestsByPersonId(personId);
-}
-
-/**
- * getDestinationsByPlace — [ADD v5.1.001] ดึง Destination ทั้งหมดของสถานที่
- * @public สาธารณะ convenience wrapper สำหรับ external caller
- * @deprecated [REF-020] Use getDestsByPlaceId() instead. This pass-through wrapper
- *   adds no logic and will be removed in a future version.
- * @param {string} placeId
- */
-function getDestinationsByPlace(placeId) {
-  return getDestsByPlaceId(placeId);
-}

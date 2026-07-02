@@ -7,7 +7,6 @@
 
 paths:
   - 'src'
-  - '.codeql-src'
 paths-ignore:
   - '**/*.html'
   - '**/*.css'

@@ -1,5 +1,5 @@
 # 🚀 LMDS V5.5 — การประเมินความพร้อม Production [CMD: PREDEPLOY]
-## วันที่: 2026-06-21 | เวอร์ชัน: V5.5.017 (post-CONSISTENCY-SYNC (V5.5.022); original audit 2026-06-12)
+## วันที่: 2026-07-03 | เวอร์ชันปัจจุบัน: V5.5.034 (DOC-CODE SYNC) | original audit 2026-06-12, last reviewed at V5.5.022
 
 ---
 
@@ -18,7 +18,7 @@
 - [Appendix A: Score Calculation Detail](#appendix-a-score-calculation-detail)
 - [Appendix B: Dependency Graph (Simplified)](#appendix-b-dependency-graph-simplified)
 
-**ส่วนที่ 2 — Final Production Readiness Assessment (V5.5.020 — 2026-06-22):** Updated audit, 98% GO
+**ส่วนที่ 2 — Final Production Readiness Assessment (V5.5.020 — 2026-06-22):** Updated audit, 97% GO (aligned with all other docs in V5.5.034 DOC-CODE SYNC)
 - [Section เพิ่มเติม — Final Production Readiness Assessment (V5.5.020)](#section-เพิ่มเติม--final-production-readiness-assessment-v555020--2026-06-22)
   - [1. Executive Verdict](#1-executive-verdict-1)
   - [2. Audit Coverage Summary](#2-audit-coverage-summary)
@@ -472,7 +472,7 @@
 
 > **Note:** Assessment นี้เป็นการประเมินครั้งสุดท้ายหลังจาก V5.5.019+V5.5.020 refactor cleanup
 > **Latest commit:** `f3f290b` | **Methodology:** Strict Fact-Based Only
-> **Verdict:** ✅ **READY** — Production Readiness **98% GO** (up from 97%)
+> **Verdict:** ✅ **READY** — Production Readiness **97% GO** (aligned with README/BLUEPRINT in V5.5.034 DOC-CODE SYNC; the previous "98% GO" was an inconsistency that has been corrected)
 
 ## 1. Executive Verdict
 
@@ -551,7 +551,7 @@
 | **OAuth scopes** | 6 | 6 | (Least Privilege) |
 | **Audit cycles completed** | 17 | 19 | +2 |
 | **Total issues fixed** | 116 | 130 | +14 |
-| **Production Readiness** | 97% GO | **98% GO** | +1% |
+| **Production Readiness** | 95% GO | **97% GO** | +2% (aligned in V5.5.034) |
 | **Compliance** | 16/16 PASS | 16/16 PASS (100%) | — |
 
 ## 6. Residual Risks (Acceptable)

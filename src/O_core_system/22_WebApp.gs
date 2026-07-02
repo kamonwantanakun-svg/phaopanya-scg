@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.022
+ * VERSION: 5.5.034
  * FILE: 22_WebApp.gs
  * LMDS V5.5 — Web App Server (Dashboard)
  * ===================================================
@@ -38,9 +38,9 @@
  *     - isAutoMatchStatus_(status)              — Check auto-match status (internal)
  *     - formatDateForCompare_(date)             — YYYY-MM-DD format (internal)
  *     - ping()                       — Health check endpoint
- *     - getFactDeliveryPage() (stub) — Phase 2 (TODO)
- *     - getQReviewPage() (stub)      — Phase 2 (TODO)
- *     - getMatchEngineMetrics() (stub) — Phase 3 (TODO)
+ *     - getFactDeliveryPage()         — Phase 2 (FACT_DELIVERY pagination + filter)
+ *     - getQReviewPage()              — Phase 2 (Q_REVIEW pagination + status filter)
+ *     - getMatchEngineMetrics()       — Phase 3 (Match Engine statistics)
  *   USED BY:
  *     - Web App deployment (script.google.com/macros/s/.../exec)
  * ===================================================
@@ -603,11 +603,11 @@ function ping() {
 }
 
 // ============================================================
-// SECTION 5: Phase 2+ Stub Functions (forward declarations)
+// SECTION 5: Phase 2+ Page Functions (FACT_DELIVERY, Q_REVIEW, Match Engine)
 // ============================================================
 
 /**
- * getFactDeliveryPage — Phase 2 (TODO)
+ * getFactDeliveryPage — Phase 2 (FACT_DELIVERY pagination + filter)
  *   คืนข้อมูล FACT_DELIVERY แบบ pagination + filter
  *
  * @param {number} offset - แถวเริ่มต้น (0-based, หลัง header)

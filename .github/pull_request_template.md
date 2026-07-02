@@ -14,6 +14,9 @@
 - [ ] 01_Config.gs *(breaking change ต้องระวัง)*
 - [ ] 02_Schema.gs *(breaking change ต้องระวัง)*
 - [ ] 03-21: ________________
+- [ ] 22_WebApp.gs
+- [ ] 24_PipelineManager.gs
+- [ ] 99_Legacy.gs (deprecated functions)
 
 ## ✅ 16 Immutable Laws Checklist
 - [ ] **Law 1**: ไม่มี Hardcoded Index (ใช้ `XXX_IDX.NAME` แทน `row[N]`)

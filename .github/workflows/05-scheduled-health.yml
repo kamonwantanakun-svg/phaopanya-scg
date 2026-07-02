@@ -69,7 +69,7 @@ jobs:
           - **Lines**: $(find src -name "*.gs" -type f -exec cat {} \; | wc -l)
 
           ## ✅ Status
-          - โครงสร้างครบ 22 ไฟล์
+          - โครงสร้างครบ 25 ไฟล์ (24 production + 1 legacy 99_Legacy.gs)
           - ไม่มี Hardcoded Index ในไฟล์ใหม่
           - ไม่มี Secret ในโค้ด
           EOF

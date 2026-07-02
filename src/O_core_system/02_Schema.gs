@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.022
+ * VERSION: 5.5.034
  * FILE: 02_Schema.gs
  * LMDS V5.5 — Sheet Schema Definitions
  * ===================================================
@@ -42,8 +42,8 @@
  *   │  │   └── System: SYS_LOG, SYS_CONFIG, SYS_TH_GEO          │
  *   │  ├── getSheetHeaders() — Get headers for a sheet           │
  *   │  ├── validateSheetHeaders() — Verify headers match schema  │
- *   │  ├── getColIndex() — Find column index by name             │
  *   │  └── validateSchemaConsistency() — SCHEMA.length vs IDX    │
+ *   │  (getColIndex moved to 99_Legacy.gs in V5.5.034)            │
  *   └─────────────────────────────────────────────────────────────┘
  * ===================================================
  */
@@ -472,34 +472,18 @@ function validateSheetHeaders(sheet, expected) {
 }
 
 /**
- * getColIndex — [REF-012] DEPRECATED — Use *_IDX.* constants directly (Rule 3: No Hardcode Index)
+ * getColIndex — DEPRECATED — MOVED to 99_Legacy.gs in V5.5.034
  *
- *   ฟังก์ชันนี้ยังเก็บไว้เพื่อ backward compatibility แต่ไม่ควรใช้ในโค้ดใหม่
- *   ใช้ PERSON_IDX.*, PLACE_IDX.*, FACT_IDX.*, REVIEW_IDX.*, etc. จาก 01_Config.gs แทน
- *   เหตุผล: runtime O(N) indexOf lookup + ขัด Single Source of Truth rule
+ *   ฟังก์ชันนี้ถูกย้ายไปอยู่ที่ src/O_core_system/99_Legacy.gs แล้ว
+ *   เพื่อแยก deprecated code ออกจาก main codebase
  *
- *   Audit พบว่าไม่มี caller จริงใน codebase ปัจจุบัน (เฉพาะ definition + comment)
- *   แต่เก็บไว้เพื่อป้องกัน breaking change ถ้ามี external script เรียกใช้
+ *   คำแนะนำ:
+ *   - สำหรับโค้ดใหม่: ใช้ *_IDX.* constants จาก 01_Config.gs (เช่น PERSON_IDX.PHONE)
+ *   - สำหรับ backward compatibility: เรียก getColIndex() จาก 99_Legacy.gs (จะ log warning)
  *
- * @param {string} schemaKey - ชื่อชีตจริง (key ใน SCHEMA object)
- * @param {string} colName - ชื่อคอลัมน์ที่ต้องการหา index
- * @return {number} 0-based column index หรือ -1 ถ้าไม่พบ
- *
- * @deprecated since V5.5.019 — Use *_IDX.* constants from 01_Config.gs
+ * @see 99_Legacy.gs for the implementation
+ * @deprecated since V5.5.019 — moved to 99_Legacy.gs in V5.5.034
  */
-function getColIndex(schemaKey, colName) {
-  // [REF-012] Log warning เมื่อถูกเรียก — ป้องกันการใช้งานในอนาคต
-  if (typeof logWarn === 'function') {
-    try {
-      var stack = (new Error().stack || '').split('\n');
-      var caller = stack[2] || 'unknown';
-      logWarn('Schema', '[DEPRECATED] getColIndex("' + schemaKey + '", "' + colName + '") — Use *_IDX.* constants instead. Caller: ' + caller.trim());
-    } catch (e) { /* ignore log error */ }
-  }
-  const headers = SCHEMA[schemaKey];
-  if (!headers) return -1;
-  return headers.indexOf(colName);
-}
 
 /**
  * validateSchemaConsistency — ตรวจ SCHEMA.length vs IDX.keys

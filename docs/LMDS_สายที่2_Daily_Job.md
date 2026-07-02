@@ -1,6 +1,6 @@
 # 🔵 สายที่ 2: เริ่มจากชีต "ตารางงานประจำวัน"
 
-> **เอกสารประกอบ LMDS V5.5.022**
+> **เอกสารประกอบ LMDS V5.5.034**
 > อธิบาย Data Flow สายที่ 2 — การดึงข้อมูล SCG JWD รายวัน และการหาพิกัด GPS จาก Master DB
 > เกี่ยวข้องกับ: `00_App.gs`, `17_SearchService.gs`, `18_ServiceSCG.gs`, `21_AliasService.gs`, `04_SourceRepository.gs`
 
@@ -224,4 +224,4 @@ ShipToName "บริษัท ไทวัสดุ จำกัด 081-234-567
 
 ---
 
-*เอกสารนี้เป็นส่วนหนึ่งของชุดเอกสาร LMDS V5.5.022 — ดูเอกสารที่เกี่ยวข้อง: [LMDS_สายที่1_SCG_Source.md](LMDS_สายที่1_SCG_Source.md) | [LMDS_Q_REVIEW_คู่มือ.md](LMDS_Q_REVIEW_คู่มือ.md)*
+*เอกสารนี้เป็นส่วนหนึ่งของชุดเอกสาร LMDS V5.5.034 — ดูเอกสารที่เกี่ยวข้อง: [LMDS_สายที่1_SCG_Source.md](LMDS_สายที่1_SCG_Source.md) | [LMDS_Q_REVIEW_คู่มือ.md](LMDS_Q_REVIEW_คู่มือ.md)*

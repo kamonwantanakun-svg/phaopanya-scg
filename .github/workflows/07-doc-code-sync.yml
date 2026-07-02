@@ -1,0 +1,89 @@
+# 🔗 Doc-Code Sync Check
+#
+# ตรวจสอบว่าโค้ด ↔ เอกสารยังตรงกัน 100% หลัง merge PR
+# กัน regression ของ version drift, stat mismatch, dead paths, phantom deps
+#
+# Triggers:
+#   - pull_request: เมื่อมี PR แตะ src/ หรือ docs/
+#   - push to main: เมื่อ merge PR เข้า main
+#   - workflow_dispatch: รัน manual ได้
+#
+# ถ้า check ใด fail → PR จะถูก block (except 'warning' checks)
+
+name: 🔗 Doc-Code Sync Check
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'docs/**'
+      - '*.md'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/07-doc-code-sync.yml'
+      - '.github/scripts/doc-code-sync-checks/**'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'docs/**'
+      - '*.md'
+      - 'package.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  sync-check:
+    name: Sync Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v7
+
+      - name: 🛠️ Setup permissions
+        run: chmod +x .github/scripts/doc-code-sync-checks/*.sh
+
+      - name: 📋 Check 1 — Version Consistency
+        id: check1
+        continue-on-error: false
+        run: .github/scripts/doc-code-sync-checks/check_01_version.sh
+
+      - name: 📋 Check 2 — Stats Consistency
+        id: check2
+        continue-on-error: true
+        run: .github/scripts/doc-code-sync-checks/check_02_stats.sh
+
+      - name: 📋 Check 3 — No file:/// Paths
+        id: check3
+        continue-on-error: false
+        run: .github/scripts/doc-code-sync-checks/check_03_local_paths.sh
+
+      - name: 📋 Check 4 — No Phantom Deps
+        id: check4
+        continue-on-error: false
+        run: .github/scripts/doc-code-sync-checks/check_04_phantom_deps.sh
+
+      - name: 📋 Check 5 — Internal Links Resolve
+        id: check5
+        continue-on-error: true
+        run: .github/scripts/doc-code-sync-checks/check_05_internal_links.sh
+
+      - name: 📊 Summary Report
+        if: always()
+        run: |
+          echo "## 🔗 Doc-Code Sync Check Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 1. Version Consistency | ${{ steps.check1.outcome == 'success' && '✅ PASS' || '❌ FAIL' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 2. Stats Consistency | ${{ steps.check2.outcome == 'success' && '✅ PASS' || '⚠️ WARN' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 3. No file:/// Paths | ${{ steps.check3.outcome == 'success' && '✅ PASS' || '❌ FAIL' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 4. No Phantom Deps | ${{ steps.check4.outcome == 'success' && '✅ PASS' || '❌ FAIL' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 5. Internal Links | ${{ steps.check5.outcome == 'success' && '✅ PASS' || '⚠️ WARN' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Critical checks (1, 3, 4) must pass. Warnings (2, 5) are advisory.**" >> $GITHUB_STEP_SUMMARY

@@ -1,7 +1,7 @@
 # LMDS V5.5 — Performance Fix Cycle Verification Report
 
 > เอกสารตรวจสอบยืนยันการแก้ไขประสิทธิภาพ (Post-Fix Performance Verification)
-> Version: V5.5.017 (SECURITY-POSTFIX) | Date: 2026-06-21 | Original audit: V5.5.003 (2026-06-11)
+> Current Version: V5.5.034 (DOC-CODE SYNC) | Date: 2026-07-03 | Original audit: V5.5.003 (2026-06-11) | Last reviewed at: V5.5.017 (SECURITY-POSTFIX, 2026-06-21)
 > Commands: FIRST_AUDIT_PERFORMANCE → FIX_PERFORMANCE_PLAN → APPLY_PERFORMANCE_FIX → VERIFY_PERFORMANCE_FIX
 
 ---
@@ -275,9 +275,9 @@
 
 ---
 
-## Security Fix Cycle (V5.5.004 — historical; current release V5.5.016 — 2026-06-21)
+## Security Fix Cycle (V5.5.004 — historical; current release V5.5.034 — 2026-07-03)
 
-หลังจาก Performance Fix Cycle เสร็จสิ้น ได้ดำเนินการ Security Audit และแก้ไขช่องโหว่เพิ่มเติม 7 รายการ (ปัจจุบัน V5.5.022 เป็นเวอร์ชันที่ปล่อยแล้ว — APP_VERSION = '5.5.022'):
+หลังจาก Performance Fix Cycle เสร็จสิ้น ได้ดำเนินการ Security Audit และแก้ไขช่องโหว่เพิ่มเติม 7 รายการ (ปัจจุบัน V5.5.034 เป็นเวอร์ชันที่ปล่อยแล้ว — APP_VERSION = '5.5.034'):
 
 | SEC ID | ช่องโหว่ | Severity | Verdict |
 |--------|----------|----------|---------|

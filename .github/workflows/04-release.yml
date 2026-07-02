@@ -39,7 +39,7 @@ jobs:
       - name: 🔍 ดึง Version ปัจจุบันจากโค้ด
         id: version
         run: |
-          current=$(grep "VERSION:" src/O_core_system/00_App.gs | head -1 | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" || echo "5.5.022")
+          current=$(grep "VERSION:" src/O_core_system/00_App.gs | head -1 | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" || echo "5.5.034")
           echo "  📋 Current version: v$current"
           input_version="${{ github.event.inputs.version }}"
           if [[ -n "$input_version" ]]; then

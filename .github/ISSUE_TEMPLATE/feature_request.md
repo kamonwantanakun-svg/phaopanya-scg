@@ -38,6 +38,9 @@ assignees: ''
 - [ ] 19_Hardening.gs
 - [ ] 20_ThGeoService.gs
 - [ ] 21_AliasService.gs
+- [ ] 22_WebApp.gs
+- [ ] 24_PipelineManager.gs
+- [ ] 99_Legacy.gs (deprecated functions)
 
 ## 📊 Estimated Impact
 <!-- ผลกระทบต่อระบบ / Performance / Users -->

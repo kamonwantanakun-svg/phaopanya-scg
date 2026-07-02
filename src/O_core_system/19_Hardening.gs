@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.022
+ * VERSION: 5.5.034
  * FILE: 19_Hardening.gs
  * LMDS V5.5 — System Hardening & Preflight Audit
  * [FIX BUG-A2] v5.4.003: runPreflightAudit() เพิ่ม try-catch
@@ -24,7 +24,7 @@
  *     - 07_PlaceService (loadAllPlaces_)
  *     - 08_GeoService (loadAllGeos_)
  *     - 09_DestinationService (loadAllDestinations_)
- *     - 11_TransactionService (loadAllFacts_)
+ *     - 11_TransactionService (findFactRowByInvoice_)
  *     - 05_NormalizeService (normalizeForCompare)
  *     - 14_Utils (generateShortId, normalizeInvoiceNo)
  *   CALLS (Invokes):

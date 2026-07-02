@@ -32,7 +32,7 @@ assignees: ''
 ## 🌐 Environment
 - **Module**: เช่น 12_ReviewService.gs / 10_MatchEngine.gs
 - **Function**: เช่น applyReviewDecision()
-- **Version**: v5.5.022
+- **Version**: v5.5.034 (ดู APP_VERSION ใน 01_Config.gs หรือเมนู LMDS V5.5 → ข้อมูลระบบ)
 - **Sheet ID**: (ถ้ามี)
 - **Browser**: Chrome / Safari / etc.
 
