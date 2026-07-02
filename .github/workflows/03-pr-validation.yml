@@ -179,7 +179,7 @@ jobs:
 
     steps:
       - name: 🏷️ ใส่ Label ตามไฟล์ที่เปลี่ยน
-        uses: actions/labeler@v5
+        uses: actions/labeler@v6
         with:
           configuration-path: .github/labeler.yml
           fail-on-error: false
