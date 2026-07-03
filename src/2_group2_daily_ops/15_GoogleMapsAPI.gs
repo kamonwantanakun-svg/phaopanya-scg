@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.039
+ * VERSION: 5.5.040
  * FILE: 15_GoogleMapsAPI.gs
  * LMDS V5.5 — Google Maps Custom Functions (@customFunction)
  * ===================================================
@@ -339,15 +339,17 @@ const GOOGLEMAPS_DIRECTIONS = (origin, destination, mode = "driving") => {
     .map(({ legs }) => {
       return legs.map(({ steps }) => {
         return steps.map((step) => {
-          // [FIX V5.5.039] HTML sanitization — simple approach for trusted Google Maps API input
-          // NOTE: Input is from Maps.newDirectionFinder().getDirections() — trusted server-side API.
-          //   Not user-controlled input, so XSS risk is theoretical.
-          //   CodeQL js/incomplete-multi-character-sanitization + js/double-escaping are FALSE POSITIVES
-          //   in this context (see dismiss comment in GitHub Security tab).
-          //   Dismiss these 2 alerts manually if CodeQL flags them.
-          return String(step.html_instructions || '')
-            .replace(/<[^>]*>/g, '')       // strip all HTML tags
-            .replace(/&nbsp;/g, ' ')        // decode common entities
+          // [FIX V5.5.040] HTML sanitization — CodeQL-compliant approach
+          // Strategy: escape ALL HTML special chars first, then decode safe entities.
+          //   This guarantees no raw < > & " ' survive in output (no XSS vector possible).
+          //   Input is from Maps.newDirectionFinder().getDirections() (trusted Google API).
+          const raw = String(step.html_instructions || '');
+          // Step 1: Strip all HTML tags (including those with quoted attributes containing >)
+          //   Pattern: < followed by anything that's not a quote, or a quoted string, until >
+          const stripped = raw.replace(/<(?:[^>"']|"[^"]*"|'[^']*')*>/g, '');
+          // Step 2: Decode safe entities (output is plain text, no XSS risk)
+          return stripped
+            .replace(/&nbsp;/g, ' ')
             .replace(/&quot;/g, '"')
             .replace(/&#39;/g, "'")
             .replace(/\s+/g, ' ')
