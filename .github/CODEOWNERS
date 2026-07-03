@@ -6,25 +6,25 @@
 # =======================
 
 # Default — ทุกไฟล์
-*                           @Siriwat08
+*                           @kamonwantanakun-svg
 
 # Core System (Config, Schema, App entry, Utils, Hardening)
-/src/O_core_system/         @Siriwat08
+/src/O_core_system/         @kamonwantanakun-svg
 
 # Group 1: Master Database (Person, Place, Geo, Destination, Alias, Match)
-/src/1_group1_master_db/    @Siriwat08
+/src/1_group1_master_db/    @kamonwantanakun-svg
 
 # Group 2: Daily Operations (Source, Transaction, Review, Report, Search, SCG)
-/src/2_group2_daily_ops/    @Siriwat08
+/src/2_group2_daily_ops/    @kamonwantanakun-svg
 
 # Group 3: Web Application (Dashboard, Frontend)
-/src/3_group3_webapp/       @Siriwat08
+/src/3_group3_webapp/       @kamonwantanakun-svg
 
 # Group 4: Pipeline Manager
-/src/4_group4_pipeline_mgr/ @Siriwat08
+/src/4_group4_pipeline_mgr/ @kamonwantanakun-svg
 
 # GitHub Actions + CI/CD
-/.github/                   @Siriwat08
+/.github/                   @kamonwantanakun-svg
 
 # Documentation
-/docs/                      @Siriwat08
+/docs/                      @kamonwantanakun-svg
