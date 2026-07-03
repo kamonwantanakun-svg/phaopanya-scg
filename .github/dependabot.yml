@@ -20,7 +20,7 @@ updates:
       prefix: "chore(deps)"
       include: "scope"
     reviewers:
-      - "Siriwat08"
+      - "kamonwantanakun-svg"
 
   # npm — สำหรับ clasp และ dev dependencies (ถ้ามี package.json)
   - package-ecosystem: "npm"
@@ -38,7 +38,7 @@ updates:
       prefix: "chore(deps)"
       include: "scope"
     reviewers:
-      - "Siriwat08"
+      - "kamonwantanakun-svg"
     # ไม่อัปเดต major version อัตโนมัติ — ต้อง review เอง
     ignore:
       - dependency-name: "*"
