@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.037
+ * VERSION: 5.5.038
  * FILE: 15_GoogleMapsAPI.gs
  * LMDS V5.5 — Google Maps Custom Functions (@customFunction)
  * ===================================================
@@ -339,24 +339,31 @@ const GOOGLEMAPS_DIRECTIONS = (origin, destination, mode = "driving") => {
     .map(({ legs }) => {
       return legs.map(({ steps }) => {
         return steps.map((step) => {
-          // [FIX V5.5.037] HTML sanitization — CodeQL-acceptable approach
-          // Strategy: strip ALL tags aggressively + decode only safe entities
-          //   - DO NOT decode &lt;/&gt; (would re-introduce < > chars CodeQL flags)
-          //   - These entities are rare in Google Maps html_instructions anyway
-          //   - Keep &amp;/&nbsp;/&quot;/&#39; decode (no security risk)
+          // [FIX V5.5.038] HTML sanitization — CodeQL-acceptable approach
+          // Strategy:
+          //   1. Remove script/style/iframe content ENTIRELY (with their content)
+          //   2. Strip ALL tags (two-pass for nested cases)
+          //   3. Decode ONLY safe entities:
+          //      - &nbsp; → space (formatting, no security risk)
+          //      - &quot; → " (no XSS vector after tag strip)
+          //      - &#39; → ' (no XSS vector after tag strip)
+          //   4. DO NOT decode &amp;/&lt;/&gt; — prevents:
+          //      - js/double-escaping (&amp;amp; → &amp; → &)
+          //      - js/incomplete-multi-character-sanitization (&lt;script&gt; → <script>)
+          //   5. Collapse whitespace
           let s = String(step.html_instructions || '');
-          // Two-pass tag strip — defeats &lt;script&gt; reconstruction
-          for (let i = 0; i < 2; i++) {
-            s = s.replace(/>\s*</g, '> <')     // space between adjacent tags
-                 .replace(/<[^>]*>/g, '');      // strip all tags
-          }
-          // Decode safe entities only (skip &lt;/&gt; to prevent tag reconstruction)
-          s = s.replace(/&nbsp;/g, ' ')
-               .replace(/&amp;/g, '&')
-               .replace(/&quot;/g, '"')
-               .replace(/&#39;/g, "'");
-          // Final tag strip (defense-in-depth — should be no-op now)
+          // Step 1: Remove dangerous tag CONTENT first
+          s = s.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+          s = s.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+          s = s.replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, '');
+          // Step 2: Strip ALL remaining tags (two-pass for nested)
           s = s.replace(/<[^>]*>/g, '');
+          s = s.replace(/<[^>]*>/g, '');
+          // Step 3: Decode safe entities ONLY (no &amp;/&lt;/&gt;)
+          s = s.replace(/&nbsp;/g, ' ');
+          s = s.replace(/&quot;/g, '"');
+          s = s.replace(/&#39;/g, "'");
+          // Step 4: Collapse whitespace
           return s.replace(/\s+/g, ' ').trim();
         });
       });

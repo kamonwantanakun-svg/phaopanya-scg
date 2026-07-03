@@ -7,7 +7,7 @@
 - **APIs:** Google Maps API (Geocoding), Gemini API (AI Reasoning)
 
 # 📂 Architecture & Domain Separation
-โปรเจกต์มี 25 ไฟล์ (24 production + 1 legacy `99_Legacy.gs`) — `00_App` ถึง `24_PipelineManager` + `99_Legacy.gs` รวม 435 ฟังก์ชัน ~17,459 บรรทัด แบ่ง Domain ชัดเจน ห้ามก้าวก่ายกัน:
+โปรเจกต์มี 25 ไฟล์ (24 production + 1 legacy `99_Legacy.gs`) — `00_App` ถึง `24_PipelineManager` + `99_Legacy.gs` รวม 435 ฟังก์ชัน ~17,567 บรรทัด แบ่ง Domain ชัดเจน ห้ามก้าวก่ายกัน:
 1. **🟩 Group 1 (The Brain & Master DB):** `05` ถึง `10`, `16`, `20`, และ `21`
    - *หน้าที่:* ทำความสะอาดข้อมูล, จับคู่ (MatchEngine), เป็นเจ้าของฐานข้อมูล `M_PERSON`, `M_PLACE`, `M_GEO_POINT`, `M_ALIAS`
    - *รวมถึง:* `16_GeoDictionaryBuilder` (สร้างพจนานุกรมภูมิศาสตร์สำหรับ Master DB) และ `20_ThGeoService` (บริการข้อมูลภูมิศาสตร์ไทยสำหรับ Master DB)
@@ -46,7 +46,7 @@
 - ใน block catch ต้องบันทึก log ด้วย: `logError('ModuleName', e.message, e)` ห้ามเกิด Silent Fail (Rule 13 — V5.5.034)
 
 # 🎯 Current Focus & Known Issues
-- **Focus:** V5.5.034 DOC-CODE SYNC — โค้ด ↔ เอกสารตรง 100% — 18 audit cycles complete (CRITICAL → PERF → SECURITY → REVIEW15 → REFACTOR → SYNC → CACHE-FIX → CACHE-CLEANUP → DOC-SYNC → GOOGLE-MAPS-REFACTOR → DRIVER-VERIFIED → CRITICAL FIX → PERFORMANCE-FIX → SECURITY-POSTFIX → REVIEW15-CLEAN-CODE-FIX), 116 code issues fixed across 25 files (24 production + 1 legacy), function count 435, 17,459 lines, production readiness 97% (Security Hardened), 16/16 COMPLIANT (Rule 2 SRP — Phases 4-5 deferred to next iteration)
+- **Focus:** V5.5.034 DOC-CODE SYNC — โค้ด ↔ เอกสารตรง 100% — 18 audit cycles complete (CRITICAL → PERF → SECURITY → REVIEW15 → REFACTOR → SYNC → CACHE-FIX → CACHE-CLEANUP → DOC-SYNC → GOOGLE-MAPS-REFACTOR → DRIVER-VERIFIED → CRITICAL FIX → PERFORMANCE-FIX → SECURITY-POSTFIX → REVIEW15-CLEAN-CODE-FIX), 116 code issues fixed across 25 files (24 production + 1 legacy), function count 435, 17,567 lines, production readiness 97% (Security Hardened), 16/16 COMPLIANT (Rule 2 SRP — Phases 4-5 deferred to next iteration)
 - **Gotchas:** ถ้าระบบขึ้นสีแดง `NOT_FOUND` ตอนโหลดงาน มักเกิดจาก Schema หัวคอลัมน์ในชีตไม่ตรงกับความยาวของ Array ในสคริปต์
 
 # ⚖️ The 16 Immutable Laws (รัฐธรรมนูญของโปรเจกต์)

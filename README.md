@@ -9,7 +9,7 @@
 | **Platform** | Google Apps Script + Google Sheets |
 | **Core Engine** | MatchEngine V5.5 with Hybrid Alias Architecture |
 | **Total Files** | 25 `.gs` files (24 production + 1 legacy `99_Legacy.gs`) |
-| **Total Lines** | ~17,459 (non-blank) |
+| **Total Lines** | ~17,567 (non-blank) |
 | **Total Functions** | 435 |
 | **Total Sheets** | 19 |
 | **Total IDX Sets** | 16 |
