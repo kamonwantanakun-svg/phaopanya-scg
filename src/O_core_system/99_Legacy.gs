@@ -69,7 +69,7 @@ function getColIndex(schemaKey, colName) {
           caller.trim()
       );
     } catch (e) {
-      /* ignore log error */
+      // ignore log error
     }
   }
   const headers = SCHEMA[schemaKey];
@@ -99,7 +99,7 @@ function getDestinationsByPerson(personId) {
         '[DEPRECATED] getDestinationsByPerson("' + personId + '") — Use getDestsByPersonId() instead.'
       );
     } catch (e) {
-      /* ignore log error */
+      // ignore log error
     }
   }
   return getDestsByPersonId(personId);
@@ -123,7 +123,7 @@ function getDestinationsByPlace(placeId) {
         '[DEPRECATED] getDestinationsByPlace("' + placeId + '") — Use getDestsByPlaceId() instead.'
       );
     } catch (e) {
-      /* ignore log error */
+      // ignore log error
     }
   }
   return getDestsByPlaceId(placeId);
