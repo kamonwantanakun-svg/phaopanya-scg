@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.043
+ * VERSION: 5.5.044
  * FILE: 12_ReviewService.gs
  * LMDS V5.5 — Review Queue Service
  * [FIX BUG-B2] v5.4.003: updateReviewRowStatus_() helper — 1 setValues แทน 5× setValue
@@ -313,10 +313,8 @@ function applyAllPendingDecisions() {
         factSheet.getRange(factSheet.getLastRow() + 1, 1, rowsToWrite.length, factSheetCols)
           .setValues(rowsToWrite);
         if (typeof invalidateFactInvoiceCache_ === 'function') invalidateFactInvoiceCache_();
-        // [FIX v5.5.007 P0 #3] เพิ่ม invalidations ที่ขาดหายไป ให้ตรงกับ persistResult_ ของ MatchEngine
-        // เดิมลืม invalidate same-day dest cache และ alias enrichment สำหรับ Review-approved FACT rows
-        // ทำให้ cache เก่าและ M_ALIAS ไม่ถูก enrich หลัง Review
-        if (typeof invalidateSameDayDestCache_ === 'function') invalidateSameDayDestCache_();
+        // [REMOVED V5.5.044] invalidateSameDayDestCache_ — ลบ dead code (ดู comment ใน 10_MatchEngine SECTION 5)
+        // [FIX v5.5.007 P0 #3] alias enrichment สำหรับ Review-approved FACT rows
         try {
           if (typeof autoEnrichAliasesFromFactBatch_ === 'function') {
             autoEnrichAliasesFromFactBatch_(pendingFactRows);
@@ -1552,113 +1550,6 @@ function clearReprocessCheckpoint_() {
   PropertiesService.getScriptProperties().deleteProperty(REPROCESS_REVIEW_CHECKPOINT_KEY);
 }
 
-/**
- * analyzeReviewPatterns — [V5.5.010] วิเคราะห์ Q_REVIEW ปัจจุบัน
- * แสดงสถิติแบบแบ่งตาม issue type และคาดการณ์จำนวนที่ auto-resolve ได้
- *
- * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
- *   ฟังก์ชันนี้มี self-reference ใน log string แต่ไม่มี caller จริง
- *   อาจถูกเรียกจาก Apps Script Editor หรือ external script เพื่อ debug
- *
- * @deprecated since V5.5.043 — ไม่มี internal caller
- */
-function analyzeReviewPatterns() {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var reviewSheet = ss.getSheetByName(SHEET.Q_REVIEW);
+// [REMOVED V5.5.044] analyzeReviewPatterns — dead code (mark @deprecated ใน V5.5.043, ไม่มี caller ใน .gs ใด)
+//   หากมี external caller ที่ต้องการ restore → ดู git history ของ commit นี้
 
-    if (!reviewSheet || reviewSheet.getLastRow() < 2) {
-      safeUiAlert_('Q_REVIEW ว่าง — ไม่มีข้อมูลวิเคราะห์');
-      return;
-    }
-
-    var totalRows = reviewSheet.getLastRow() - 1;
-    var totalCols = SCHEMA[SHEET.Q_REVIEW].length;
-
-    // [PERF-013] ใช้ REVIEW_IDX.* constants แทน headers.indexOf() — Single Source of Truth
-    //   เดิมอ่าน headers แล้ว indexOf ทำให้ละเมิด V5.5.012 anti-pattern rule
-    //   และเสี่ยง silent wrong data ถ้า sheet header เปลี่ยน
-    //   ตอนนี้อ้างอิงจาก REVIEW_IDX (01_Config.gs) โดยตรง + ลด 1 API call (no headers read)
-    var data = reviewSheet.getRange(2, 1, totalRows, totalCols).getValues();
-
-    var col = {
-      issueType:  REVIEW_IDX.ISSUE_TYPE,
-      score:      REVIEW_IDX.MATCH_SCORE,
-      status:     REVIEW_IDX.STATUS,
-      rawLat:     REVIEW_IDX.RAW_LAT,
-      candPerson: REVIEW_IDX.CAND_PERSONS,
-      candPlace:  REVIEW_IDX.CAND_PLACES,
-      candGeo:    REVIEW_IDX.CAND_GEOS
-    };
-
-    var patterns = {
-      NEW_GPS: 0, NEW_NO_GPS: 0,
-      FUZZY_85: 0, FUZZY_80: 0, FUZZY_70: 0,
-      GEO_Y_MATCH: 0, GEO_Y_NO: 0, GEO_O: 0,
-      total: 0
-    };
-
-    for (var i = 0; i < totalRows; i++) {
-      var st = String(safeExtractArr_(data[i], col.status)).trim();
-      if (st !== 'Pending') continue;
-      patterns.total++;
-
-      var it = String(safeExtractArr_(data[i], col.issueType)).trim();
-      var sc = parseInt(safeExtractArr_(data[i], col.score)) || 0;
-
-      if (it === 'NEW_RECORD_PENDING') {
-        var lat = safeExtractArr_(data[i], col.rawLat);
-        if (lat && parseFloat(lat) !== 0) {
-          patterns.NEW_GPS++;
-        } else {
-          patterns.NEW_NO_GPS++;
-        }
-      } else if (it === 'FUZZY_MATCH') {
-        if (sc >= 85) patterns.FUZZY_85++;
-        else if (sc >= 80) patterns.FUZZY_80++;
-        else patterns.FUZZY_70++;
-      } else if (it === 'GEO_NEARBY_YELLOW') {
-        var cp = String(safeExtractArr_(data[i], col.candPerson) || '[]').trim();
-        var cpl = String(safeExtractArr_(data[i], col.candPlace) || '[]').trim();
-        if (cp !== '[]' || cpl !== '[]') {
-          patterns.GEO_Y_MATCH++;
-        } else {
-          patterns.GEO_Y_NO++;
-        }
-      } else if (it === 'GEO_NEARBY_ORANGE') {
-        patterns.GEO_O++;
-      }
-    }
-
-    var expectedA = Math.round(patterns.GEO_Y_MATCH * 0.95);
-    var expectedB = Math.round(patterns.NEW_GPS * 0.14);
-    var expectedC = Math.round(patterns.FUZZY_85 * 1.0);
-    var totalExpected = expectedA + expectedB + expectedC;
-
-    var message =
-      '📊 วิเคราะห์ Q_REVIEW Pattern\n\n' +
-      'Q_Pending ทั้งหมด: ' + patterns.total + ' รายการ\n\n' +
-      '🟢 [Group A] GEO_NEARBY_YELLOW + ชื่อตรง: ' + patterns.GEO_Y_MATCH +
-      '\n   → Auto-resolve ได้ ~' + expectedA + ' รายการ\n\n' +
-      '🔵 [Group B] NEW_RECORD_PENDING (มี GPS): ' + patterns.NEW_GPS +
-      '\n   → ในจำนวนนี้ มี Geo candidate ~' + Math.round(patterns.NEW_GPS * 0.14) +
-      ' → Auto-create ได้ ~' + expectedB + ' รายการ\n\n' +
-      '🟡 [Group C] FUZZY_MATCH (score 85-89): ' + patterns.FUZZY_85 +
-      '\n   → Auto-resolve ได้ ~' + expectedC + ' รายการ\n\n' +
-      '📊 คาดการณ์ลด Q_REVIEW: ~' + totalExpected + ' รายการ (' +
-      Math.round(totalExpected / patterns.total * 100) + '%)\n' +
-      '   คงเหลือรอ Review: ~' + (patterns.total - totalExpected) + ' รายการ\n\n' +
-      '━━━ รายละเอียดเพิ่มเติม ━━━\n' +
-      'FUZZY_MATCH 80-84: ' + patterns.FUZZY_80 + '\n' +
-      'FUZZY_MATCH 70-79: ' + patterns.FUZZY_70 + '\n' +
-      'GEO_NEARBY_YELLOW (ไม่มีชื่อ): ' + patterns.GEO_Y_NO + '\n' +
-      'GEO_NEARBY_ORANGE: ' + patterns.GEO_O;
-
-    safeUiAlert_(message);
-    logInfo('ReviewService', 'analyzeReviewPatterns: ' + message.replace(/\n/g, ' | '));
-
-  } catch (err) {
-    logError('ReviewService', 'analyzeReviewPatterns ล้มเหลว: ' + err.message, err);
-    safeUiAlert_('วิเคราะห์ล้มเหลว: ' + err.message);
-  }
-}

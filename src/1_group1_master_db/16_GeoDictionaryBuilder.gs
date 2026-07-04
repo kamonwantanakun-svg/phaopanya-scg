@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.043
+ * VERSION: 5.5.044
  * FILE: 16_GeoDictionaryBuilder.gs
  * LMDS V5.5 — Geo Dictionary Builder (SYS_TH_GEO)
  * ===================================================
@@ -393,32 +393,8 @@ function scanAddressAgainstDictionary(rawAddress, knownPostcode) {
   return null;
 }
 
-/**
- * listAllAreasByPostcode — ดึงพื้นที่ทั้งหมดตามรหัสไปรษณีย์
- * @public สาธารณะ query API สำหรับ admin/debug
- *
- * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
- *   ฟังก์ชันนี้อาจถูกเรียกจาก Apps Script Editor หรือ external script เพื่อ debug
- *   หากไม่มี external caller จริง → ลบได้หลัง verify
- *
- * @deprecated since V5.5.043 — ไม่มี internal caller
- * @param {string} postcode
- * @return {Array} รายการพื้นที่ {subDistrict, district, province}
- */
-function listAllAreasByPostcode(postcode) {
-  const clean = String(postcode || '').replace(/[^0-9]/g, '').padStart(5, '0');
-  if (clean.length !== 5) return [];
-
-  // [PERF-009] ใช้ loadCachedGeoRows_() แทนการอ่าน Sheet ตรง — ใช้ RAM cache ที่มีอยู่แล้ว
-  const data = loadCachedGeoRows_();
-  return data.filter(r => String(r.postcode || '').trim().padStart(5, '0') === clean)
-             .map(r => ({
-               // [REF-014] ใช้ stripThaiAdminPrefix_ และ stripThaiProvincePrefix_ แทน inline regex
-               subDistrict: stripThaiAdminPrefix_(r.subDistrict),
-               district:    stripThaiAdminPrefix_(r.district),
-               province:    stripThaiProvincePrefix_(r.province)
-             }));
-}
+// [REMOVED V5.5.044] listAllAreasByPostcode — dead code (mark @deprecated ใน V5.5.043, ไม่มี caller ใน .gs ใด)
+//   หากมี external caller ที่ต้องการ restore → ดู git history ของ commit นี้
 
 function isValidProvince(provinceName) {
   if (!provinceName || provinceName.length < 4) return false;

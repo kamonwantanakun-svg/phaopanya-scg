@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.043
+ * VERSION: 5.5.044
  * FILE: 10_MatchEngine.gs
  * LMDS V5.5 — Core Match & Resolution Engine
  * ===================================================
@@ -1246,84 +1246,17 @@ function handleReview_(srcObj, decision, personResult, placeResult, geoResult) {
 // SECTION 5: Helper Functions
 // ============================================================
 
-/**
- * getSameDayDestinations
- * [FIX v003] ใช้ Utilities.formatDate แทน toDateString (timezone safe)
- * [FIX v003] อ่านเฉพาะ DELIVERY_DATE + GEO_ID + TX_ID + PERSON_ID + PLACE_ID
- */
-// [PERF-005] RAM cache สำหรับ getSameDayDestinations — ลดการอ่านชีต FACT_DELIVERY ซ้ำซ้อน
-// Key: "yyyy-MM-dd::geoId" → Array of results
-let _SAME_DAY_DEST_CACHE = null;
-
-/**
- * getSameDayDestinations
- * [FIX v003] ใช้ Utilities.formatDate แทน toDateString (timezone safe)
- * [FIX v003] อ่านเฉพาะ DELIVERY_DATE + GEO_ID + TX_ID + PERSON_ID + PLACE_ID
- * [PERF-005] เพิ่ม RAM cache — อ่านชีต FACT_DELIVERY ครั้งเดียว แล้ว index ด้วย Map
- *            เดิม: ทุกครั้งที่เรียก = 1 getRange().getValues() + O(N) loop
- *            ใหม่: อ่าน 1 ครั้ง → สร้าง Map → ค้นหาด้วย key O(1)
- *
- * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
- *   ฟังก์ชันนี้ implement สมบูรณ์ (พร้อม RAM cache) แต่ไม่ถูกเรียกใน .gs ไฟล์ใดเลย
- *   อาจเป็น utility สำหรับ external caller หรือ leftover จาก PERF-005 refactor
- *   หากไม่มี external caller → ลบได้หลัง verify (รวมถึง _SAME_DAY_DEST_CACHE)
- *
- * @deprecated since V5.5.043 — ไม่มี internal caller
- */
-function getSameDayDestinations(deliveryDate, geoId) {
-  if (!deliveryDate || !geoId) return [];
-
-  const tz         = Session.getScriptTimeZone();
-  const targetDate = Utilities.formatDate(
-    new Date(deliveryDate), tz, 'yyyy-MM-dd'
-  );
-  const cacheKey   = targetDate + '::' + geoId;
-
-  // [PERF-005] สร้าง RAM cache ถ้ายังไม่มี
-  if (!_SAME_DAY_DEST_CACHE) {
-    _SAME_DAY_DEST_CACHE = new Map();
-    const ss    = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
-    if (!sheet || sheet.getLastRow() < 2) return [];
-
-    const colsNeeded = [
-      FACT_IDX.TX_ID, FACT_IDX.PERSON_ID, FACT_IDX.PLACE_ID,
-      FACT_IDX.GEO_ID, FACT_IDX.DELIVERY_DATE
-    ];
-    const maxCol = Math.max(...colsNeeded) + 1;
-    const data   = sheet.getRange(2, 1, sheet.getLastRow() - 1, maxCol).getValues();
-
-    // Index ทั้งชีตเป็น Map: "date::geoId" → results[]
-    for (let i = 0; i < data.length; i++) {
-      const rowDate = data[i][FACT_IDX.DELIVERY_DATE];
-      if (!rowDate) continue;
-      const formattedDate = Utilities.formatDate(
-        new Date(rowDate), tz, 'yyyy-MM-dd'
-      );
-      const rowGeoId = String(data[i][FACT_IDX.GEO_ID] || '');
-      if (!rowGeoId) continue;
-      const key = formattedDate + '::' + rowGeoId;
-      if (!_SAME_DAY_DEST_CACHE.has(key)) {
-        _SAME_DAY_DEST_CACHE.set(key, []);
-      }
-      _SAME_DAY_DEST_CACHE.get(key).push({
-        txId:     data[i][FACT_IDX.TX_ID],
-        personId: data[i][FACT_IDX.PERSON_ID],
-        placeId:  data[i][FACT_IDX.PLACE_ID],
-        geoId:    rowGeoId,
-      });
-    }
-  }
-
-  return _SAME_DAY_DEST_CACHE.has(cacheKey) ? _SAME_DAY_DEST_CACHE.get(cacheKey) : [];
-}
-
-/**
- * invalidateSameDayDestCache_ — [PERF-005] ล้าง RAM cache เมื่อ FACT_DELIVERY เปลี่ยน
- */
-function invalidateSameDayDestCache_() {
-  _SAME_DAY_DEST_CACHE = null;
-}
+// [REMOVED V5.5.044] getSameDayDestinations + _SAME_DAY_DEST_CACHE + invalidateSameDayDestCache_
+//   ทั้ง 3 อย่างเป็น dead code — mark @deprecated ใน V5.5.043
+//   - getSameDayDestinations: ไม่มี caller ใน .gs ใด (ตรวจด้วย grep)
+//   - _SAME_DAY_DEST_CACHE: ใช้เฉพาะใน getSameDayDestinations
+//   - invalidateSameDayDestCache_: ถูกเรียกใน 10_MatchEngine:1459, 12_ReviewService:319, 01_Config:106
+//     แต่ทั้ง 3 caller ใช้ `typeof === 'function'` guard → จะ skip อัตโนมัติ
+//   Caller cleanup:
+//   - 10_MatchEngine.gs:1459 — ลบบรรทัด invalidateSameDayDestCache_()
+//   - 12_ReviewService.gs:319 — ลบบรรทัด invalidateSameDayDestCache_()
+//   - 01_Config.gs:106 — ลบบรรทัด invalidateSameDayDestCache_()
+//   หากต้องการ restore → ดู git history ของ commit นี้
 
 /**
  * detectSameGeoMultiPerson — [AUDIT-002 V5.5.042] ⚠️ DEAD CODE — ไม่ถูกเรียกใช้ใน production
@@ -1455,8 +1388,7 @@ function persistResult_(factData, reviewData) {
     factSheet.getRange(factSheet.getLastRow() + 1, 1, factData.length, factData[0].length).setValues(factData);
     // [FIX CRIT-003] ล้าง FACT invoice RAM cache เพราะมีแถวใหม่ถูกเขียน
     if (typeof invalidateFactInvoiceCache_ === 'function') invalidateFactInvoiceCache_();
-    // [PERF-005] ล้าง same-day dest cache เพราะ FACT_DELIVERY เปลี่ยน
-    if (typeof invalidateSameDayDestCache_ === 'function') invalidateSameDayDestCache_();
+    // [REMOVED V5.5.044] invalidateSameDayDestCache_ — ลบ dead code (ดู comment ใน SECTION 5)
     // [UPGRADE v5.2.010] สร้าง Alias อัตโนมัติแบบ Real-time ทันทีที่บันทึก FACT สำเร็จ
     // [FIX v5.4.001] ห่อด้วย try-catch เพื่อป้องกัน alias error ทำให้ SYNC_STATUS ไม่ถูกอัปเดต
     try {

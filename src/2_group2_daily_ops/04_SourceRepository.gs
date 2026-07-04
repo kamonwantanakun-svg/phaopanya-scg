@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.043
+ * VERSION: 5.5.044
  * FILE: 04_SourceRepository.gs
  * LMDS V5.5 — Source Data Repository
  * ===================================================
@@ -369,40 +369,11 @@ function buildSourceObj_(row, rowNum) {
 }
 
 // ============================================================
-// SECTION 5: Batch Processor
+// SECTION 5: [REMOVED V5.5.044] Batch Processor
 // ============================================================
-
-/**
- * processSrcBatch_ — ส่ง Source Batch เข้า Match Engine
- * [FIX v003] คืนค่า Batch สำหรับเขียนทีเดียว
- *
- * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
- *   ฟังก์ชันนี้มี self-reference ใน error log string แต่ไม่มี caller จริง
- *   อาจเป็น leftover จาก refactor รอบก่อน (ปัจจุบันใช้ processOneRow ตรงๆ ใน MatchEngine)
- *   หากไม่มี external caller → ลบได้หลัง verify
- *
- * @deprecated since V5.5.043 — ไม่มี internal caller
- * @param {Array} batch - array ของ source objects
- * @return {Object} { processed, factBatch, reviewBatch }
- */
-function processSrcBatch_(batch) {
-  let processed = 0;
-  const factBatch = [];
-  const reviewBatch = [];
-
-  batch.forEach(srcObj => {
-    try {
-      const result = processOneRow(srcObj);
-      processed++;
-      if (result.factData)   factBatch.push(result.factData);
-      if (result.reviewData) reviewBatch.push(result.reviewData);
-    } catch (err) {
-      logError('SourceRepo',
-        `processSrcBatch_ แถว ${srcObj.sourceRow} — ${err.message}`);
-    }
-  });
-  return { processed, factBatch, reviewBatch };
-}
+// processSrcBatch_ ถูก mark @deprecated ใน V5.5.043 และลบออกใน V5.5.044
+//   เป็น leftover จาก refactor รอบก่อน (ปัจจุบันใช้ processOneRow ตรงๆ ใน MatchEngine)
+//   หากมี external caller ที่ต้องการ restore → ดู git history ของ commit นี้
 
 // ============================================================
 // SECTION 6: Cache Management

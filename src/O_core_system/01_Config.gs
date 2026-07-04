@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.043
+ * VERSION: 5.5.044
  * FILE: 01_Config.gs
  * LMDS V5.5 — System Configuration & Constants
  * ===================================================
@@ -63,8 +63,8 @@
  * ===================================================
  */
 
-const APP_VERSION = '5.5.043';
-const SCHEMA_VERSION = '5.5.043';
+const APP_VERSION = '5.5.044';
+const SCHEMA_VERSION = '5.5.044';
 const APP_NAME    = 'LMDS V5.5';
 
 // [NEW v5.2.001] Global RAM Caches for batch runs
@@ -76,10 +76,12 @@ let _GLOBAL_GEO_POINTS_CACHE = null;
  * invalidateAllGlobalCaches — [NEW v5.2.003] เคลียร์ค่า Cache ใน RAM ทั้งหมด
  * @summary ใช้สำหรับเคลียร์ความจำของสคริปต์เพื่อให้โหลดข้อมูลใหม่จากชีต 100%
  *
- * [FIX v5.5.007] แก้ bug H1: ล้าง RAM cache ครบทั้ง 11 ตัว (เดิมล้างแค่ 6/11)
+ * [FIX v5.5.007] แก้ bug H1: ล้าง RAM cache ครบทั้ง 10 ตัว (เดิมล้างแค่ 6/10)
  *   รายการที่เพิ่ม: _GLOBAL_GEO_DICT_PROVINCE_INDEX, _GLOBAL_GEO_DICT_SEARCH_KEY_INDEX,
- *   _SOURCE_ROWS_RAM_CACHE, _FACT_INVOICE_RAM_CACHE, _GEO_LATLNG_RAM_CACHE, _SAME_DAY_DEST_CACHE
+ *   _SOURCE_ROWS_RAM_CACHE, _FACT_INVOICE_RAM_CACHE, _GEO_LATLNG_RAM_CACHE
  *   ผ่านการเรียก invalidate*Cache_* ของแต่ละโมดูล ซึ่งจะไปล้างทั้ง RAM และ CacheService
+ *
+ * [REMOVED V5.5.044] _SAME_DAY_DEST_CACHE — ลบพร้อม getSameDayDestinations (dead code)
  *
  * หมายเหตุ: _MAPS_SHEET_CACHE และ _MAPS_SHEET_HIT_DIRTY ไม่ถูกล้างที่นี่
  *   เพราะ geocode results เป็น immutable — ใช้เมนู clearMapsCache() แยก
@@ -103,9 +105,9 @@ function invalidateAllGlobalCaches() {
   if (typeof invalidateSourceCache         === 'function') invalidateSourceCache();          // ล้าง _SOURCE_ROWS_RAM_CACHE + SOURCE_ROWS_V3, PROCESSED_INVOICES_V3 CacheService
   if (typeof invalidateFactInvoiceCache_   === 'function') invalidateFactInvoiceCache_();    // ล้าง _FACT_INVOICE_RAM_CACHE
   if (typeof invalidateGeoLatLngCache_     === 'function') invalidateGeoLatLngCache_();      // [P1 #5] ล้าง _GEO_LATLNG_RAM_CACHE
-  if (typeof invalidateSameDayDestCache_   === 'function') invalidateSameDayDestCache_();    // ล้าง _SAME_DAY_DEST_CACHE
+  // [REMOVED V5.5.044] invalidateSameDayDestCache_ — ลบ dead code (ดู comment ใน 10_MatchEngine SECTION 5)
 
-  logInfo('System', 'ล้างข้อมูลในความจำ (Cache) ทั้งหมดเรียบร้อยแล้ว — ครอบคลุม 11 RAM caches + 13 CacheService keys');
+  logInfo('System', 'ล้างข้อมูลในความจำ (Cache) ทั้งหมดเรียบร้อยแล้ว — ครอบคลุม 10 RAM caches + 13 CacheService keys');
 }
 
 // ============================================================

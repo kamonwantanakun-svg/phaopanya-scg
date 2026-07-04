@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.043
+ * VERSION: 5.5.044
  * FILE: 14_Utils.gs
  * LMDS V5.5 — Utility Functions
  * ===================================================
@@ -1091,81 +1091,10 @@ function buildGlobalAliasDedupSet_() {
 }
 
 // ============================================================
-// SECTION 12: [ADD v5.5.007 P1 #9] Safe Cache Helpers
-// ป้องกัน cache.get()/put() ล้มเหลวจาก quota exceeded หรือ transient errors
-// ทำให้ calling function crash — ปัจจุบัน fallback ไป sheet read ได้
+// SECTION 12: [REMOVED V5.5.044] Safe Cache Helpers (dead code)
 // ============================================================
-
-/**
- * safeCacheGet_ — [ADD v5.5.007 P1 #9] Safe wrapper สำหรับ CacheService.get()
- *   ถ้า cache.get() throw exception (quota, transient) → คืน null แทน และ log warning
- *   ทำให้ caller สามารถ fallback ไป sheet read ได้โดยไม่ crash
- *
- * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
- *   ถูกแทนที่ด้วย saveChunkedCache_/loadChunkedCache_/invalidateChunkedCache_ ใน V5.5.008+
- *   comment เดิมบอกว่า consumed by 04/07/16/21 แต่ verify จริงแล้ว module เหล่านั้นใช้ chunked helpers
- *   คงไว้เพื่อ backward compatibility สำหรับ external caller หากมี
- *
- * @deprecated since V5.5.043 — ใช้ chunked cache helpers แทน
- * @param {GoogleAppsScript.Cache.Cache} cache - CacheService instance
- * @param {string} key - Cache key
- * @return {string|null} Cached value หรือ null ถ้าไม่พบ/error
- */
-function safeCacheGet_(cache, key) {
-  if (!cache || !key) return null;
-  try {
-    return cache.get(key);
-  } catch (e) {
-    logWarn('Utils', 'safeCacheGet_ error for key "' + key + '": ' + e.message);
-    return null;
-  }
-}
-
-/**
- * safeCachePut_ — [ADD v5.5.007 P1 #9] Safe wrapper สำหรับ CacheService.put()
- *   ถ้า cache.put() throw exception (quota, >100KB, transient) → log warning แล้วไม่ crash
- *
- * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
- *   ถูกแทนที่ด้วย saveChunkedCache_ ใน V5.5.008+ (รองรับ chunking สำหรับ >100KB payloads)
- *
- * @deprecated since V5.5.043 — ใช้ saveChunkedCache_ แทน
- * @param {GoogleAppsScript.Cache.Cache} cache - CacheService instance
- * @param {string} key - Cache key
- * @param {string} value - Value to cache (string)
- * @param {number} [ttl] - TTL in seconds (default: 21600 = 6h)
- * @return {boolean} true ถ้าสำเร็จ, false ถ้าล้มเหลว
- */
-function safeCachePut_(cache, key, value, ttl) {
-  if (!cache || !key || !value) return false;
-  var effectiveTtl = ttl || (typeof AI_CONFIG !== 'undefined' && AI_CONFIG.CACHE_TTL_SEC) ? (ttl || AI_CONFIG.CACHE_TTL_SEC) : 21600;
-  try {
-    cache.put(key, value, effectiveTtl);
-    return true;
-  } catch (e) {
-    logWarn('Utils', 'safeCachePut_ error for key "' + key + '" (size: ' + value.length + ' chars): ' + e.message);
-    return false;
-  }
-}
-
-/**
- * safeCacheRemoveAll_ — [ADD v5.5.007 P1 #9] Safe wrapper สำหรับ CacheService.removeAll()
- *   ถ้า removeAll() throw exception → log warning แล้วไม่ crash
- *
- * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
- *   ถูกแทนที่ด้วย invalidateChunkedCache_ ใน V5.5.008+
- *
- * @deprecated since V5.5.043 — ใช้ invalidateChunkedCache_ แทน
- * @param {GoogleAppsScript.Cache.Cache} cache - CacheService instance
- * @param {string[]} keys - Array of keys to remove
- * @return {boolean} true ถ้าสำเร็จ, false ถ้าล้มเหลว
- */
-function safeCacheRemoveAll_(cache, keys) {
-  if (!cache || !keys || keys.length === 0) return false;
-  try {
-    cache.removeAll(keys);
-    return true;
-  } catch (e) {
-    logWarn('Utils', 'safeCacheRemoveAll_ error for ' + keys.length + ' keys: ' + e.message);
-    return false;
-  }
-}
+// safeCacheGet_/safeCachePut_/safeCacheRemoveAll_ ถูก mark @deprecated ใน V5.5.043
+//   และลบออกใน V5.5.044 เพราะไม่มี internal caller ใน codebase
+//   ถูกแทนที่ด้วย chunked cache helpers (saveChunkedCache_/loadChunkedCache_/invalidateChunkedCache_)
+//   ตั้งแต่ V5.5.008+ ซึ่งรองรับ payloads >100KB
+//   หากมี external caller ที่ต้องการ restore → ดู git history ของ commit นี้

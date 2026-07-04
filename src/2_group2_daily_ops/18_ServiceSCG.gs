@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.043
+ * VERSION: 5.5.044
  * FILE: 18_ServiceSCG.gs
  * LMDS V5.5 — SCG API Service (Group 2 Commander)
  * ===================================================
@@ -961,32 +961,5 @@ function clearAllSCGSheets_UI() {
   }
 }
 
-/**
- * clearDailyJobLatLng — ล้างพิกัด LatLong_Actual ทั้งหมดในตารางงานประจำวัน
- *
- * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
- *   ฟังก์ชันนี้มี self-reference ใน log string แต่ไม่มี caller จริง
- *   อาจถูกเรียกจาก Apps Script Editor หรือ external script เพื่อ debug
- *
- * @deprecated since V5.5.043 — ไม่มี internal caller
- */
-function clearDailyJobLatLng() {
-  // [FIX B5 v5.5.002] เพิ่ม try-catch — ป้องกัน unhandled error จาก sheet operations
-  try {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEET.DAILY_JOB);
-  if (!sheet || sheet.getLastRow() < 2) return;
-
-  const totalRows    = sheet.getLastRow() - 1;
-  const latActualCol = DATA_IDX.LATLNG_ACTUAL + 1;
-
-  sheet.getRange(2, latActualCol, totalRows, 1).clearContent();
-  sheet.getRange(2, 1, totalRows, SCHEMA[SHEET.DAILY_JOB].length)
-       .setBackground(null);
-
-  logInfo('ServiceSCG', `clearDailyJobLatLng: ล้าง ${totalRows} แถว`);
-
-  } catch (e) {
-    logError('ServiceSCG', 'clearDailyJobLatLng ล้มเหลว: ' + e.message, e);
-  }
-}
+// [REMOVED V5.5.044] clearDailyJobLatLng — dead code (mark @deprecated ใน V5.5.043, ไม่มี caller ใน .gs ใด)
+//   หากมี external caller ที่ต้องการ restore → ดู git history ของ commit นี้

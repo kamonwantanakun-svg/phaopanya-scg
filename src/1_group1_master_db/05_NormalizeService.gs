@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.043
+ * VERSION: 5.5.044
  * FILE: 05_NormalizeService.gs
  * LMDS V5.5 — Thai Name & Place Normalization
  * ===================================================
@@ -487,46 +487,10 @@ function stripCompanySuffixWithBoundary_(working, suffix) {
   var pattern = '(?<=^|[\\s\\(\\u0E00-\\u0E7Fa-zA-Z])' + safeSuffix + lookAhead;
   return working.replace(new RegExp(pattern, 'gi'), '').replace(/\s+/g, ' ').trim();
 }
-/**
- * validatePersonName — [ADD v5.1.001] ตรวจสอบชื่อมีคุณภาพ
- * @public สาธารณะสำหรับ external caller / custom function
- *
- * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
- *   ฟังก์ชันนี้ถูก design เป็น public API แต่ไม่มี caller ใน .gs หรือ .html ใดเลย
- *   อาจถูกเรียกจาก external Apps Script หรือ custom function ใน spreadsheet
- *   หากไม่มี external caller จริง → ลบได้หลัง verify
- *
- * @deprecated since V5.5.043 — ไม่มี internal caller
- * @param {string} name
- * @return {boolean}
- */
-function validatePersonName(name) {
-  if (!name) return false;
-  const normalized = String(name).toLowerCase().trim();
-  if (normalized.length < 2) return false;
-  if (/^[0-9]+$/.test(normalized)) return false;
-  return true;
-}
 
-/**
- * validateAddress — [ADD v5.1.001] ตรวจสอบที่อยู่มีคุณภาพ
- * @public สาธารณะสำหรับ external caller / custom function
- *
- * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
- *   ฟังก์ชันนี้ถูก design เป็น public API แต่ไม่มี caller ใน .gs หรือ .html ใดเลย
- *   อาจถูกเรียกจาก external Apps Script หรือ custom function ใน spreadsheet
- *   หากไม่มี external caller จริง → ลบได้หลัง verify
- *
- * @deprecated since V5.5.043 — ไม่มี internal caller
- * @param {string} address
- * @return {boolean}
- */
-function validateAddress(address) {
-  if (!address) return false;
-  const normalized = String(address).toLowerCase().trim();
-  if (normalized.length < 5) return false;
-  return true;
-}
+// [REMOVED V5.5.044] validatePersonName + validateAddress — dead code (mark @deprecated ใน V5.5.043)
+//   ทั้ง 2 ฟังก์ชัน design เป็น public API แต่ไม่มี caller ใน .gs หรือ .html ใดเลย
+//   หากมี external caller (custom function ใน spreadsheet) ที่ต้องการ restore → ดู git history ของ commit นี้
 
 /**
  * normalizeProvinceForCompare_ — แปลง province alias → canonical ก่อนเปรียบเทียบ
