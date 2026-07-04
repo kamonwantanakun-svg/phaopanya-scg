@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.042
+ * VERSION: 5.5.043
  * FILE: 12_ReviewService.gs
  * LMDS V5.5 — Review Queue Service
  * [FIX BUG-B2] v5.4.003: updateReviewRowStatus_() helper — 1 setValues แทน 5× setValue
@@ -1537,6 +1537,10 @@ function loadReprocessCheckpoint_() {
     }
     return cp;
   } catch (e) {
+    // [FIX BUG-AUDIT-013 V5.5.043] log ก่อน reset checkpoint เพื่อให้วินิจฉัย corruption ได้
+    logWarn('ReviewService',
+      'loadReprocessCheckpoint_: JSON.parse ล้มเหลว — reset to startIdx=0. ' +
+      'raw="' + String(raw).substring(0, 200) + '", error=' + e.message);
     return { startIdx: 0 };
   }
 }
@@ -1551,6 +1555,12 @@ function clearReprocessCheckpoint_() {
 /**
  * analyzeReviewPatterns — [V5.5.010] วิเคราะห์ Q_REVIEW ปัจจุบัน
  * แสดงสถิติแบบแบ่งตาม issue type และคาดการณ์จำนวนที่ auto-resolve ได้
+ *
+ * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
+ *   ฟังก์ชันนี้มี self-reference ใน log string แต่ไม่มี caller จริง
+ *   อาจถูกเรียกจาก Apps Script Editor หรือ external script เพื่อ debug
+ *
+ * @deprecated since V5.5.043 — ไม่มี internal caller
  */
 function analyzeReviewPatterns() {
   try {

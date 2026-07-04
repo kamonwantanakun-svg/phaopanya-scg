@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.042
+ * VERSION: 5.5.043
  * FILE: 19_Hardening.gs
  * LMDS V5.5 — System Hardening & Preflight Audit
  * [FIX BUG-A2] v5.4.003: runPreflightAudit() เพิ่ม try-catch
@@ -447,6 +447,10 @@ function loadHardeningAliasCheckpoint_() {
     }
     return cp;
   } catch (e) {
+    // [FIX BUG-AUDIT-014 V5.5.043] log ก่อน reset checkpoint เพื่อให้วินิจฉัย corruption ได้
+    logWarn('Hardening',
+      'loadHardeningAliasCheckpoint_: JSON.parse ล้มเหลว — reset to startIdx=0. ' +
+      'raw="' + String(raw).substring(0, 200) + '", error=' + e.message);
     return { startIdx: 0 };
   }
 }

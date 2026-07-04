@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.042
+ * VERSION: 5.5.043
  * FILE: 09_DestinationService.gs
  * LMDS V5.5 — Destination Master Service
  * ===================================================
@@ -242,6 +242,21 @@ function getDestsByPlaceId(placeId) {
     .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0));
 }
 
+/**
+ * getDestsByPersonAndPlace — [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
+ *
+ *   ฟังก์ชันนี้ implement สมบูรณ์แต่ไม่ถูกเรียกใน .gs ไฟล์ใดเลย (ตรวจด้วย grep)
+ *   อาจเป็น utility สำหรับ external caller (เช่น Apps Script อื่น, Web App, custom function)
+ *   หรืออาจเป็น leftover จาก refactor รอบก่อน
+ *
+ *   หากไม่มี external caller → ลบได้หลัง verify ในรอบถัดไป
+ *   หากมี external caller → ควรย้ายไป 99_Legacy.gs หรือเอกสารไว้ใน public API
+ *
+ * @deprecated since V5.5.043 — ไม่มี internal caller
+ * @param {string} personId
+ * @param {string} placeId
+ * @return {Array} destination rows
+ */
 function getDestsByPersonAndPlace(personId, placeId) {
   const allDests = loadAllDestinations_();
   return allDests
@@ -253,6 +268,16 @@ function getDestsByPersonAndPlace(personId, placeId) {
     .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0));
 }
 
+/**
+ * getDominantDestByGeo — [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
+ *
+ *   ฟังก์ชันนี้ implement สมบูรณ์แต่ไม่ถูกเรียกใน .gs ไฟล์ใดเลย (ตรวจด้วย grep)
+ *   อาจเป็น utility สำหรับ external caller หรือ leftover จาก refactor
+ *
+ * @deprecated since V5.5.043 — ไม่มี internal caller
+ * @param {string} geoId
+ * @return {Object|null} dominant destination หรือ null ถ้าไม่มี
+ */
 function getDominantDestByGeo(geoId) {
   const allDests  = loadAllDestinations_();
   const filtered  = allDests

@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.042
+ * VERSION: 5.5.043
  * FILE: 04_SourceRepository.gs
  * LMDS V5.5 — Source Data Repository
  * ===================================================
@@ -375,6 +375,15 @@ function buildSourceObj_(row, rowNum) {
 /**
  * processSrcBatch_ — ส่ง Source Batch เข้า Match Engine
  * [FIX v003] คืนค่า Batch สำหรับเขียนทีเดียว
+ *
+ * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
+ *   ฟังก์ชันนี้มี self-reference ใน error log string แต่ไม่มี caller จริง
+ *   อาจเป็น leftover จาก refactor รอบก่อน (ปัจจุบันใช้ processOneRow ตรงๆ ใน MatchEngine)
+ *   หากไม่มี external caller → ลบได้หลัง verify
+ *
+ * @deprecated since V5.5.043 — ไม่มี internal caller
+ * @param {Array} batch - array ของ source objects
+ * @return {Object} { processed, factBatch, reviewBatch }
  */
 function processSrcBatch_(batch) {
   let processed = 0;

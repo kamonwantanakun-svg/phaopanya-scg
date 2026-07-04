@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.042
+ * VERSION: 5.5.043
  * FILE: 14_Utils.gs
  * LMDS V5.5 — Utility Functions
  * ===================================================
@@ -1100,6 +1100,13 @@ function buildGlobalAliasDedupSet_() {
  * safeCacheGet_ — [ADD v5.5.007 P1 #9] Safe wrapper สำหรับ CacheService.get()
  *   ถ้า cache.get() throw exception (quota, transient) → คืน null แทน และ log warning
  *   ทำให้ caller สามารถ fallback ไป sheet read ได้โดยไม่ crash
+ *
+ * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
+ *   ถูกแทนที่ด้วย saveChunkedCache_/loadChunkedCache_/invalidateChunkedCache_ ใน V5.5.008+
+ *   comment เดิมบอกว่า consumed by 04/07/16/21 แต่ verify จริงแล้ว module เหล่านั้นใช้ chunked helpers
+ *   คงไว้เพื่อ backward compatibility สำหรับ external caller หากมี
+ *
+ * @deprecated since V5.5.043 — ใช้ chunked cache helpers แทน
  * @param {GoogleAppsScript.Cache.Cache} cache - CacheService instance
  * @param {string} key - Cache key
  * @return {string|null} Cached value หรือ null ถ้าไม่พบ/error
@@ -1117,6 +1124,11 @@ function safeCacheGet_(cache, key) {
 /**
  * safeCachePut_ — [ADD v5.5.007 P1 #9] Safe wrapper สำหรับ CacheService.put()
  *   ถ้า cache.put() throw exception (quota, >100KB, transient) → log warning แล้วไม่ crash
+ *
+ * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
+ *   ถูกแทนที่ด้วย saveChunkedCache_ ใน V5.5.008+ (รองรับ chunking สำหรับ >100KB payloads)
+ *
+ * @deprecated since V5.5.043 — ใช้ saveChunkedCache_ แทน
  * @param {GoogleAppsScript.Cache.Cache} cache - CacheService instance
  * @param {string} key - Cache key
  * @param {string} value - Value to cache (string)
@@ -1138,6 +1150,11 @@ function safeCachePut_(cache, key, value, ttl) {
 /**
  * safeCacheRemoveAll_ — [ADD v5.5.007 P1 #9] Safe wrapper สำหรับ CacheService.removeAll()
  *   ถ้า removeAll() throw exception → log warning แล้วไม่ crash
+ *
+ * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
+ *   ถูกแทนที่ด้วย invalidateChunkedCache_ ใน V5.5.008+
+ *
+ * @deprecated since V5.5.043 — ใช้ invalidateChunkedCache_ แทน
  * @param {GoogleAppsScript.Cache.Cache} cache - CacheService instance
  * @param {string[]} keys - Array of keys to remove
  * @return {boolean} true ถ้าสำเร็จ, false ถ้าล้มเหลว

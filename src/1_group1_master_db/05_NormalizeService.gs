@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.042
+ * VERSION: 5.5.043
  * FILE: 05_NormalizeService.gs
  * LMDS V5.5 — Thai Name & Place Normalization
  * ===================================================
@@ -490,6 +490,15 @@ function stripCompanySuffixWithBoundary_(working, suffix) {
 /**
  * validatePersonName — [ADD v5.1.001] ตรวจสอบชื่อมีคุณภาพ
  * @public สาธารณะสำหรับ external caller / custom function
+ *
+ * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
+ *   ฟังก์ชันนี้ถูก design เป็น public API แต่ไม่มี caller ใน .gs หรือ .html ใดเลย
+ *   อาจถูกเรียกจาก external Apps Script หรือ custom function ใน spreadsheet
+ *   หากไม่มี external caller จริง → ลบได้หลัง verify
+ *
+ * @deprecated since V5.5.043 — ไม่มี internal caller
+ * @param {string} name
+ * @return {boolean}
  */
 function validatePersonName(name) {
   if (!name) return false;
@@ -502,6 +511,15 @@ function validatePersonName(name) {
 /**
  * validateAddress — [ADD v5.1.001] ตรวจสอบที่อยู่มีคุณภาพ
  * @public สาธารณะสำหรับ external caller / custom function
+ *
+ * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
+ *   ฟังก์ชันนี้ถูก design เป็น public API แต่ไม่มี caller ใน .gs หรือ .html ใดเลย
+ *   อาจถูกเรียกจาก external Apps Script หรือ custom function ใน spreadsheet
+ *   หากไม่มี external caller จริง → ลบได้หลัง verify
+ *
+ * @deprecated since V5.5.043 — ไม่มี internal caller
+ * @param {string} address
+ * @return {boolean}
  */
 function validateAddress(address) {
   if (!address) return false;

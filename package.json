@@ -1,6 +1,6 @@
 {
   "name": "lmds-phaopanya-scg",
-  "version": "5.5.042",
+  "version": "5.5.043",
   "description": "LMDS V5.5 \u2014 Logistics Master Data System for SCG/JWD logistics pipeline. Google Apps Script Web App + Master Data Management with automated matching engine.",
   "private": true,
   "scripts": {

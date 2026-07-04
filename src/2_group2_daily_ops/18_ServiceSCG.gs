@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.042
+ * VERSION: 5.5.043
  * FILE: 18_ServiceSCG.gs
  * LMDS V5.5 — SCG API Service (Group 2 Commander)
  * ===================================================
@@ -961,6 +961,15 @@ function clearAllSCGSheets_UI() {
   }
 }
 
+/**
+ * clearDailyJobLatLng — ล้างพิกัด LatLong_Actual ทั้งหมดในตารางงานประจำวัน
+ *
+ * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
+ *   ฟังก์ชันนี้มี self-reference ใน log string แต่ไม่มี caller จริง
+ *   อาจถูกเรียกจาก Apps Script Editor หรือ external script เพื่อ debug
+ *
+ * @deprecated since V5.5.043 — ไม่มี internal caller
+ */
 function clearDailyJobLatLng() {
   // [FIX B5 v5.5.002] เพิ่ม try-catch — ป้องกัน unhandled error จาก sheet operations
   try {

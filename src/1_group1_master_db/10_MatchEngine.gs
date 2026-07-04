@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.042
+ * VERSION: 5.5.043
  * FILE: 10_MatchEngine.gs
  * LMDS V5.5 — Core Match & Resolution Engine
  * ===================================================
@@ -1262,6 +1262,13 @@ let _SAME_DAY_DEST_CACHE = null;
  * [PERF-005] เพิ่ม RAM cache — อ่านชีต FACT_DELIVERY ครั้งเดียว แล้ว index ด้วย Map
  *            เดิม: ทุกครั้งที่เรียก = 1 getRange().getValues() + O(N) loop
  *            ใหม่: อ่าน 1 ครั้ง → สร้าง Map → ค้นหาด้วย key O(1)
+ *
+ * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
+ *   ฟังก์ชันนี้ implement สมบูรณ์ (พร้อม RAM cache) แต่ไม่ถูกเรียกใน .gs ไฟล์ใดเลย
+ *   อาจเป็น utility สำหรับ external caller หรือ leftover จาก PERF-005 refactor
+ *   หากไม่มี external caller → ลบได้หลัง verify (รวมถึง _SAME_DAY_DEST_CACHE)
+ *
+ * @deprecated since V5.5.043 — ไม่มี internal caller
  */
 function getSameDayDestinations(deliveryDate, geoId) {
   if (!deliveryDate || !geoId) return [];

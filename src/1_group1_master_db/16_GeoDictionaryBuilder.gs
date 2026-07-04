@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.042
+ * VERSION: 5.5.043
  * FILE: 16_GeoDictionaryBuilder.gs
  * LMDS V5.5 — Geo Dictionary Builder (SYS_TH_GEO)
  * ===================================================
@@ -396,6 +396,14 @@ function scanAddressAgainstDictionary(rawAddress, knownPostcode) {
 /**
  * listAllAreasByPostcode — ดึงพื้นที่ทั้งหมดตามรหัสไปรษณีย์
  * @public สาธารณะ query API สำหรับ admin/debug
+ *
+ * [AUDIT V5.5.043] ⚠️ DEPRECATED — ไม่มี internal caller ใน codebase
+ *   ฟังก์ชันนี้อาจถูกเรียกจาก Apps Script Editor หรือ external script เพื่อ debug
+ *   หากไม่มี external caller จริง → ลบได้หลัง verify
+ *
+ * @deprecated since V5.5.043 — ไม่มี internal caller
+ * @param {string} postcode
+ * @return {Array} รายการพื้นที่ {subDistrict, district, province}
  */
 function listAllAreasByPostcode(postcode) {
   const clean = String(postcode || '').replace(/[^0-9]/g, '').padStart(5, '0');
