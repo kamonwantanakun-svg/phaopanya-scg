@@ -280,30 +280,30 @@
      */
     function renderRouteView_(route) {
       switch (route) {
-      case 'dashboard':
-        renderView_('DashboardView', 'Dashboard');
-        break;
-      case 'qreview':
-        renderView_('QReviewView', 'Q_REVIEW');
-        break;
-      case 'fact':
-        renderView_('FactDeliveryView', 'FACT_DELIVERY');
-        break;
-      case 'source':
-        renderView_('SourceSheetView', 'Source Sheet');
-        break;
-      case 'match':
-        renderView_('MatchEngineView', 'Match Engine');
-        break;
-      case 'search':
-        // Search view ไม่มี error fallback (silent)
-        if (globalThis.SearchView) {
-          globalThis.SearchView.render(currentData, viewContainer);
-          renderIcons_();
-        }
-        break;
-      default:
-        renderNotFound_();
+        case 'dashboard':
+          renderView_('DashboardView', 'Dashboard');
+          break;
+        case 'qreview':
+          renderView_('QReviewView', 'Q_REVIEW');
+          break;
+        case 'fact':
+          renderView_('FactDeliveryView', 'FACT_DELIVERY');
+          break;
+        case 'source':
+          renderView_('SourceSheetView', 'Source Sheet');
+          break;
+        case 'match':
+          renderView_('MatchEngineView', 'Match Engine');
+          break;
+        case 'search':
+          // Search view ไม่มี error fallback (silent)
+          if (globalThis.SearchView) {
+            globalThis.SearchView.render(currentData, viewContainer);
+            renderIcons_();
+          }
+          break;
+        default:
+          renderNotFound_();
       }
     }
 

@@ -646,11 +646,11 @@ function applySheetProtection_UI() {
     const adminsStr = String(PropertiesService.getScriptProperties().getProperty('LMDS_ADMINS') || '').trim();
     const adminEmails = adminsStr
       ? adminsStr
-        .split(',')
-        .map(function (e) {
-          return e.trim();
-        })
-        .filter(Boolean)
+          .split(',')
+          .map(function (e) {
+            return e.trim();
+          })
+          .filter(Boolean)
       : [];
 
     // === 1. Protected Ranges: ชีตที่มี PII ===

@@ -154,29 +154,29 @@ function collectSystemStats_(ss) {
       const matchStatus = String(matchStatusData[i][0] || '').trim();
 
       switch (matchStatus) {
-      case APP_CONST.MATCH_FULL:
-      case APP_CONST.MATCH_GEO:
-      case APP_CONST.MATCH_FUZZY:
-      case 'AUTO_MATCH':
-        autoCount++;
-        break;
-      case APP_CONST.MATCH_NEW:
-      case 'CREATE_NEW':
-        newCount++;
-        break;
-      case APP_CONST.MATCH_REVIEW:
-      case 'REVIEW':
-      case 'NEEDS_REVIEW':
-        reviewCount++;
-        break;
-      case APP_CONST.MATCH_ERROR:
-      case 'ERROR':
-        errorCount++;
-        break;
-      default:
-        // [FIX v003] นับ unclassified
-        if (matchStatus) unclassifiedCount++;
-        break;
+        case APP_CONST.MATCH_FULL:
+        case APP_CONST.MATCH_GEO:
+        case APP_CONST.MATCH_FUZZY:
+        case 'AUTO_MATCH':
+          autoCount++;
+          break;
+        case APP_CONST.MATCH_NEW:
+        case 'CREATE_NEW':
+          newCount++;
+          break;
+        case APP_CONST.MATCH_REVIEW:
+        case 'REVIEW':
+        case 'NEEDS_REVIEW':
+          reviewCount++;
+          break;
+        case APP_CONST.MATCH_ERROR:
+        case 'ERROR':
+          errorCount++;
+          break;
+        default:
+          // [FIX v003] นับ unclassified
+          if (matchStatus) unclassifiedCount++;
+          break;
       }
     }
   }

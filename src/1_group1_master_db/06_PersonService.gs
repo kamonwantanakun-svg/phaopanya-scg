@@ -463,7 +463,7 @@ function createPerson(normResult) {
     const now = new Date();
     const newId = generateShortId('P');
 
-    const phoneStr = normResult.extractedPhone ? '\'' + normResult.extractedPhone : '';
+    const phoneStr = normResult.extractedPhone ? "'" + normResult.extractedPhone : '';
 
     // [FIX v5.2.002] รวบรวม Note ทั้งหมด (Phone, Doc, Prefix)
     const allNotes = normResult.deliveryNotes || [];

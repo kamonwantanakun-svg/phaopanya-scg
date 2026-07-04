@@ -303,8 +303,8 @@ function applyAllPendingDecisions() {
           factSheetCols === factSchemaLen
             ? pendingFactRows
             : pendingFactRows.map(function (row) {
-              return row.slice(0, factSheetCols);
-            });
+                return row.slice(0, factSheetCols);
+              });
         factSheet.getRange(factSheet.getLastRow() + 1, 1, rowsToWrite.length, factSheetCols).setValues(rowsToWrite);
         if (typeof invalidateFactInvoiceCache_ === 'function') invalidateFactInvoiceCache_();
         // [REMOVED V5.5.044] invalidateSameDayDestCache_ — ลบ dead code (ดู comment ใน 10_MatchEngine SECTION 5)
@@ -509,21 +509,21 @@ function applyReviewDecision(reviewId, decisionVal, rowData, optTargetRow) {
     let result = null;
 
     switch (decisionVal) {
-    case 'CREATE_NEW':
-      result = executeReviewCreateNew_(ss, sheet, targetRow, rowArr, reviewer, now, decisionVal);
-      break;
-    case 'MERGE_TO_CANDIDATE':
-      result = executeMergeDecision_(ss, sheet, targetRow, rowArr, reviewer, now, decisionVal);
-      break;
-    case 'ESCALATE':
-      updateReviewRowStatus_(sheet, targetRow, 'Escalated', reviewer, now, decisionVal, '');
-      break;
-    case 'IGNORE':
-      updateReviewRowStatus_(sheet, targetRow, 'Done', reviewer, now, decisionVal, '');
-      break;
-    default:
-      logWarn('ReviewService', 'applyReviewDecision: Unknown decision ' + decisionVal);
-      break;
+      case 'CREATE_NEW':
+        result = executeReviewCreateNew_(ss, sheet, targetRow, rowArr, reviewer, now, decisionVal);
+        break;
+      case 'MERGE_TO_CANDIDATE':
+        result = executeMergeDecision_(ss, sheet, targetRow, rowArr, reviewer, now, decisionVal);
+        break;
+      case 'ESCALATE':
+        updateReviewRowStatus_(sheet, targetRow, 'Escalated', reviewer, now, decisionVal, '');
+        break;
+      case 'IGNORE':
+        updateReviewRowStatus_(sheet, targetRow, 'Done', reviewer, now, decisionVal, '');
+        break;
+      default:
+        logWarn('ReviewService', 'applyReviewDecision: Unknown decision ' + decisionVal);
+        break;
     }
 
     logInfo('ReviewService', 'applyReviewDecision: ' + reviewId + ' → ' + decisionVal + ' โดย ' + reviewer);

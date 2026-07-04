@@ -1185,19 +1185,19 @@ function executeDecision(srcObj, decision, personResult, placeResult, geoResult)
 
   // ─── Dispatch to handler ───────────────────────────────────
   switch (decision.action) {
-  case 'AUTO_MATCH':
-    return handleAutoMatch_(srcObj, decision, personId, placeId, geoId);
-  case 'CREATE_NEW':
-    return handleCreateNew_(srcObj, decision, personResult, placeResult, geoId, geoEnrich);
-  case 'REVIEW':
-    return handleReview_(srcObj, decision, personResult, placeResult, geoResult);
-  default:
-    logError(
-      'MatchEngine',
-      `executeDecision: Unknown action: ${decision.action}`,
-      new Error('UNKNOWN_ACTION:' + decision.action)
-    );
-    return { txId: null, factData: null, reviewData: null };
+    case 'AUTO_MATCH':
+      return handleAutoMatch_(srcObj, decision, personId, placeId, geoId);
+    case 'CREATE_NEW':
+      return handleCreateNew_(srcObj, decision, personResult, placeResult, geoId, geoEnrich);
+    case 'REVIEW':
+      return handleReview_(srcObj, decision, personResult, placeResult, geoResult);
+    default:
+      logError(
+        'MatchEngine',
+        `executeDecision: Unknown action: ${decision.action}`,
+        new Error('UNKNOWN_ACTION:' + decision.action)
+      );
+      return { txId: null, factData: null, reviewData: null };
   }
 }
 

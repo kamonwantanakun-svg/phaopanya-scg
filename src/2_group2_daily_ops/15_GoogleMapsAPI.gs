@@ -341,7 +341,7 @@ const GOOGLEMAPS_DIRECTIONS = (origin, destination, mode = 'driving') => {
           return stripped
             .replace(/&nbsp;/g, ' ')
             .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, '\'')
+            .replace(/&#39;/g, "'")
             .replace(/\s+/g, ' ')
             .trim();
         });
