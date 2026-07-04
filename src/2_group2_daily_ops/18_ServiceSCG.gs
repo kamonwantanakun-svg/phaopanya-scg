@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.041
+ * VERSION: 5.5.042
  * FILE: 18_ServiceSCG.gs
  * LMDS V5.5 — SCG API Service (Group 2 Commander)
  * ===================================================
@@ -92,6 +92,28 @@ function sanitizeCookie_(raw) {
   }
 
   return clean;
+}
+
+// ============================================================
+// SECTION 0a: buildShopKey_ — [FIX BUG-AUDIT-014B V5.5.042]
+//   Normalize ShopKey ที่ใช้ join ระหว่าง Source sheet กับ DAILY_JOB
+//   เดิมใช้แค่ .trim() → ถ้า SCG API ส่ง "SHIP-123|ABC  Store" (double space)
+//   หรือ "SHIP-123|abc store" (lowercase) แต่คนขับกรอก "SHIP-123|ABC Store"
+//   → join miss แบบเงียบ → DriverVerifiedName/Addr ว่าง
+//   แก้โดย: lowercase + collapse internal whitespace ทั้งสองฝั่ง
+// ============================================================
+
+/**
+ * buildShopKey_ — สร้าง normalized ShopKey สำหรับ join ข้อมูล
+ * @param {string} shipmentNo
+ * @param {string} shipToName
+ * @return {string} "shipmentNo|shipToName" แบบ normalized (lowercase + single-space)
+ * @private
+ */
+function buildShopKey_(shipmentNo, shipToName) {
+  var sNo = String(shipmentNo || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  var sName = String(shipToName || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return sNo + '|' + sName;
 }
 
 // ============================================================
@@ -406,7 +428,7 @@ function buildDailyJobRow_(shipment, note, item, destCount, destListStr, rowNum)
   row[DATA_IDX.DEST_LIST]       = destListStr;
   row[DATA_IDX.SCAN_STATUS]     = 'รอสแกน';
   row[DATA_IDX.DELIVERY_STATUS] = 'ยังไม่ได้ส่ง';
-  row[DATA_IDX.SHOP_KEY]        = String(shipment.ShipmentNo || '').trim() + '|' + String(note.ShipToName || '').trim();  // [FIX CRIT-004] trim ทั้งสองฝั่ง
+  row[DATA_IDX.SHOP_KEY]        = buildShopKey_(shipment.ShipmentNo, note.ShipToName);  // [FIX BUG-AUDIT-014B V5.5.042] normalize ด้วย buildShopKey_
   return row;
 }
 
@@ -679,7 +701,9 @@ function copyDriverVerifiedToDailyJob_() {
       var dvName = String(r[SRC_IDX.DRIVER_VERIFIED_NAME] || '').trim();
       var dvAddr = String(r[SRC_IDX.DRIVER_VERIFIED_ADDR] || '').trim();
       if (shipmentNo && shipToName) {
-        var key = shipmentNo + '|' + shipToName;
+        // [FIX BUG-AUDIT-014B V5.5.042] ใช้ buildShopKey_ เพื่อ normalize
+        //   ให้ตรงกับฝั่ง buildDailyJobRow_ → กัน join miss แบบเงียบ
+        var key = buildShopKey_(shipmentNo, shipToName);
         // [FIX CRIT-003] merge mode — เติม field ที่ว่าง แทน one-shot
         if (!lookup[key]) lookup[key] = { name: '', addr: '' };
         if (dvName && !lookup[key].name) lookup[key].name = dvName;

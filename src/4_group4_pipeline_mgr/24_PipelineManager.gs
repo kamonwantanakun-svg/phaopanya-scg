@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.041
+ * VERSION: 5.5.042
  * FILE: 24_PipelineManager.gs
  * LMDS V5.5 — Pipeline Manager (Standalone Module)
  * ===================================================
@@ -143,6 +143,9 @@ function getPipelineState_() {
   try {
     return JSON.parse(raw);
   } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset เพื่อให้วินิจฉัย state corruption ได้
+    logPipeline_('warn', 'getPipelineState_: JSON.parse ล้มเหลว — reset to IDLE. raw="' +
+      String(raw).substring(0, 200) + '", error=' + e.message);
     return {
       state: PIPELINE_STATES.IDLE,
       lastUpdated: null,
@@ -188,6 +191,9 @@ function getPipelineCheckpoint_() {
   try {
     return JSON.parse(raw);
   } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset checkpoint
+    logPipeline_('warn', 'getPipelineCheckpoint_: JSON.parse ล้มเหลว — reset to defaults. raw="' +
+      String(raw).substring(0, 200) + '", error=' + e.message);
     return {
       lastRunAt: null,
       runCount: 0,
@@ -253,6 +259,9 @@ function getDailyQuota_() {
     }
     return quota;
   } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset quota
+    logPipeline_('warn', 'getDailyQuota_: JSON.parse ล้มเหลว — reset to 0. raw="' +
+      String(raw).substring(0, 200) + '", error=' + e.message);
     return {
       date: today,
       runtimeMs: 0,
@@ -345,6 +354,9 @@ function getCircuitBreaker_() {
   try {
     return JSON.parse(raw);
   } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset circuit breaker
+    logPipeline_('warn', 'getCircuitBreaker_: JSON.parse ล้มเหลว — reset to 0 errors. raw="' +
+      String(raw).substring(0, 200) + '", error=' + e.message);
     return {
       consecutiveErrors: 0,
       lastError: '',
@@ -1044,6 +1056,9 @@ function savePipelineHistory_(checkpoint) {
   try {
     if (raw) history = JSON.parse(raw) || [];
   } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset history
+    logPipeline_('warn', 'savePipelineHistory_: JSON.parse ล้มเหลว — reset to []. raw="' +
+      String(raw).substring(0, 200) + '", error=' + e.message);
     history = [];
   }
 
@@ -1075,6 +1090,9 @@ function getPipelineHistory() {
   try {
     return JSON.parse(raw) || [];
   } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน return empty
+    logPipeline_('warn', 'getPipelineHistory: JSON.parse ล้มเหลว — return []. raw="' +
+      String(raw).substring(0, 200) + '", error=' + e.message);
     return [];
   }
 }

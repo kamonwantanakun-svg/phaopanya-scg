@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.041
+ * VERSION: 5.5.042
  * FILE: 05_NormalizeService.gs
  * LMDS V5.5 — Thai Name & Place Normalization
  * ===================================================
@@ -287,11 +287,12 @@ function normNormalizeCompany_(working) {
   if (hasCompanySuffix || hasChainStore) {
     isCompany = true;
     // [FIX v5.2.002] เก็บ Suffix ลง Note ก่อนตัดออก
+    // [FIX BUG-AUDIT-014A V5.5.042] ใช้ stripCompanySuffixWithBoundary_ แทน raw regex
+    //   เพื่อไม่ให้ตัด suffix ที่อยู่กลางคำอื่นแบบเงียบ (เช่น 'ร้าn จำกัดสินค้า' → 'ร้าn สินค้า')
     COMPANY_SUFFIX_LIST.forEach(suffix => {
       if (working.includes(suffix)) {
         notes.push(suffix);
-        const safeSuffix = escapeRegex_(suffix);
-        working = working.replace(new RegExp(safeSuffix, 'gi'), '').trim();
+        working = stripCompanySuffixWithBoundary_(working, suffix);
       }
     });
     // [Fix #4] ไม่ strip CHAIN_STORE_LIST ออกจาก working string — เก็บเป็น isCompany flag เท่านั้น
@@ -397,11 +398,11 @@ function normalizePlaceName(rawPlace) {
   });
 
   // --- Step 4: ดึงพวก บจก./จำกัด ออก ---
+  // [FIX BUG-AUDIT-014A V5.5.042] ใช้ stripCompanySuffixWithBoundary_ แทน raw regex
   COMPANY_SUFFIX_LIST.forEach(suffix => {
     if (working.includes(suffix)) {
       notes.push(suffix);
-      const safeSuffix = escapeRegex_(suffix);
-      working = working.replace(new RegExp(safeSuffix, 'gi'), '').trim();
+      working = stripCompanySuffixWithBoundary_(working, suffix);
     }
   });
 
@@ -449,6 +450,42 @@ function normalizeForCompare(name) {
  */
 function escapeRegex_(string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * stripCompanySuffixWithBoundary_ — ตัด company suffix ออกจาก string
+ *   โดยใช้ boundary anchor ที่สอดคล้องกับขั้นตอนตรวจจับ (normNormalizeCompany_)
+ *   [FIX BUG-AUDIT-014A V5.5.042] เดิมใช้ new RegExp(safeSuffix, 'gi') ไม่มี boundary
+ *   → ตัด suffix ที่อยู่กลางคำที่ไม่เกี่ยวข้องแบบเงียบ เช่น "ร้าน จำกัดสินค้า" → "ร้าน สินค้า"
+ *
+ *   Boundary rules (mirror ขั้นตอนตรวจจับ normNormalizeCompany_):
+ *   - ก่อน suffix ต้องเป็น start-of-string, whitespace, '(', หรือ CJK/Latin letter
+ *   - หลัง suffix ต้องเป็น end-of-string, whitespace, ')', หรือ punctuation
+ *
+ *   ใช้ lookbehind/lookahead ที่ GAS V8 (Chrome 89+) รองรับ
+ *   Reference: https://v8.dev/blog/v8-release-89
+ *
+ * @param {string} working - string ต้นทาง
+ * @param {string} suffix - suffix ที่จะตัด
+ * @return {string} string หลังตัด suffix (collapsed whitespace)
+ * @private
+ */
+function stripCompanySuffixWithBoundary_(working, suffix) {
+  var safeSuffix = escapeRegex_(suffix);
+  // (?<=...) = lookbehind; (?=...) = lookahead
+  //   ก่อน suffix: start-of-string หรือ whitespace, '(', หรือ CJK/Latin letter
+  //
+  //   หลัง suffix (lookahead) — ขึ้นกับว่า suffix ลงท้ายด้วย '.' หรือไม่:
+  //   - ถ้า suffix ลงท้ายด้วย '.' (เช่น 'บจก.', 'หจก.', 'บมจ.') ให้ยอมรับ letter ตามด้วย
+  //     → 'บจก.สมชาย' → 'สมชาย' (เพราะปกติเขียนติดกัน ไม่มี space)
+  //   - ถ้า suffix ไม่ลงท้ายด้วย '.' (เช่น 'จำกัด') ให้รับเฉพาะ punctuation/whitespace/end
+  //     → 'ไม่จำกัดจำนวน' จะไม่ถูกตัด (เพราะ 'จำกัด' อยู่กลางคำ ไม่ใช่ suffix จริง)
+  var endsWithDot = /\.$/.test(suffix);
+  var lookAhead = endsWithDot
+    ? '(?=$|[\\s\\)\\.,;:\\u0E00-\\u0E7Fa-zA-Z])'
+    : '(?=$|[\\s\\)\\.,;:])';
+  var pattern = '(?<=^|[\\s\\(\\u0E00-\\u0E7Fa-zA-Z])' + safeSuffix + lookAhead;
+  return working.replace(new RegExp(pattern, 'gi'), '').replace(/\s+/g, ' ').trim();
 }
 /**
  * validatePersonName — [ADD v5.1.001] ตรวจสอบชื่อมีคุณภาพ

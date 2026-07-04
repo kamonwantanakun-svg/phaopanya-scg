@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.041
+ * VERSION: 5.5.042
  * FILE: 10_MatchEngine.gs
  * LMDS V5.5 — Core Match & Resolution Engine
  * ===================================================
@@ -1318,7 +1318,33 @@ function invalidateSameDayDestCache_() {
   _SAME_DAY_DEST_CACHE = null;
 }
 
+/**
+ * detectSameGeoMultiPerson — [AUDIT-002 V5.5.042] ⚠️ DEAD CODE — ไม่ถูกเรียกใช้ใน production
+ *
+ *   ฟังก์ชันนี้ถูก implement สมบูรณ์ตั้งแต่ v5.4 แต่ไม่ได้ถูก wire เข้า makeMatchDecision()
+ *   หรือ flow อื่นใดใน pipeline ทำให้ฟีเจอร์ "ตรวจจับหลายบุคคลใช้พิกัดเดียวกัน"
+ *   ที่ BLUEPRINT.md §6 อ้างว่ามี — จริงๆ แล้วไม่เคยทำงาน
+ *
+ *   ผู้ดูแลควรตัดสินใจ:
+ *   - ถ้าต้องการฟีเจอร์นี้ → wire เข้า makeMatchDecision() ใน Rule 3.5 (NEARBY_PENDING)
+ *     โดยเรียก detectSameGeoMultiPerson(geoId, currentPersonId) แล้วส่งเข้า Q_REVIEW
+ *     ถ้าพบ conflict (return true)
+ *   - ถ้าไม่ต้องการ → ลบฟังก์ชันนี้ทิ้ง + แก้ BLUEPRINT.md §6 ให้ตรงกับโค้ด
+ *
+ *   ตอนนี้คงไว้เป็น utility function สำหรับ admin เรียกดูด้วยตนเองผ่าน Apps Script Editor
+ *
+ * @param {string} geoId
+ * @param {string} currentPersonId
+ * @return {boolean} true ถ้ามี person อื่นใช้ geoId เดียวกัน
+ */
 function detectSameGeoMultiPerson(geoId, currentPersonId) {
+  // [AUDIT-002 V5.5.042] Log warning ถ้าถูกเรียก เพื่อให้ผู้ดูแลสังเกตเห็นว่า
+  //   ฟังก์ชันนี้ยังไม่ได้ wire เข้า production pipeline
+  if (typeof logWarn === 'function') {
+    logWarn('MatchEngine',
+      'detectSameGeoMultiPerson() ถูกเรียก — หมายเหตุ: ฟังก์ชันนี้ไม่ได้ wire เข้า makeMatchDecision ' +
+      '(dead code ตั้งแต่ v5.4) ตรวจสอบ BLUEPRINT.md §6 สำหรับการ wire ที่ถูกต้อง');
+  }
   const allDests = loadAllDestinations_();
   return allDests.some(d =>
     d.geoId    === geoId &&
@@ -1640,7 +1666,11 @@ function reprocResolveOrCreatePlaceForReview_(rawPlace, rawAddr) {
   var placeInput = rawPlace || rawAddr || '';
   if (!placeInput) return { placeId: null, error: null };
   try {
-    var plRes = resolvePlace(placeInput, '');
+    // [FIX BUG-AUDIT-003 V5.5.042] ส่ง rawAddr ต่อให้ resolvePlace แทนการทิ้งเป็น ''
+    //   เหตุผล: resolvePlace ใช้ rawAddress ใน extractProvince_() + findPlaceCandidates()
+    //   เพื่อกรอง candidate ตามจังหวัด — ถ้าส่ง '' ระบบจะเลือก place ผิดจังหวัดแบบเงียบ
+    //   กระทบ flow: Reprocess Review Queue (Group A/B/C ใน reprocessReviewQueue)
+    var plRes = resolvePlace(placeInput, rawAddr || '');
     if (plRes && plRes.status === 'FOUND' && plRes.placeId) {
       return { placeId: plRes.placeId, error: null };
     }

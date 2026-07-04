@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.041
+ * VERSION: 5.5.042
  * FILE: 14_Utils.gs
  * LMDS V5.5 — Utility Functions
  * ===================================================
@@ -310,6 +310,17 @@ function parseLatLng(latLngStr) {
 /**
  * callGeminiAPI — เรียกใช้งาน Google Gemini API
  * [ADD v003] รองรับ AI Reasoning Tier F
+ * [FIX BUG-AUDIT-009 V5.5.042] เพิ่ม retry สำหรับ 429/503 แบบ exponential backoff
+ *   เดิม fetch ครั้งเดียว → ถ้า Gemini ตอบ 429 (rate limit) หรือ 503 ชั่วคราว
+ *   จะ return null ทันที → ฟีเจอร์ AI enrichment หายไปแบบเงียบ
+ *   ตอนนี้ retry 3 ครั้ง (1s → 2s → 4s) เหมือน fetchWithRetry_ ของฝั่ง SCG
+ *
+ *   หมายเหตุ: ปัจจุบัน (V5.5.041+) USE_AI_REASONING=false และไม่มี call site ใน production
+ *   แต่ฟังก์ชันนี้อยู่ใน public API พร้อมใช้เมื่อเปิดใช้งาน AI ในอนาคต
+ *
+ * @param {string} prompt - ข้อความส่งเข้า Gemini
+ * @param {string} modelName - model name (default: AI_CONFIG.MODEL)
+ * @return {string|null} ข้อความตอบกลับ หรือ null ถ้าล้มเหลวทุก retry
  */
 function callGeminiAPI(prompt, modelName = AI_CONFIG.MODEL) {
   // [FIX v5.5.001] ใช้ getGeminiApiKey() แทน duplicate validation — consistency + format check
@@ -337,26 +348,58 @@ function callGeminiAPI(prompt, modelName = AI_CONFIG.MODEL) {
     headers: { 'x-goog-api-key': apiKey }  // [SEC-006] ส่งผ่าน Header แทน URL
   };
 
-  try {
-    const response = UrlFetchApp.fetch(url, options);
-    const resCode  = response.getResponseCode();
-    const resText  = response.getContentText();
+  // [FIX BUG-AUDIT-009 V5.5.042] Retry 3 ครั้งสำหรับ 429/503 (transient errors)
+  const maxRetries = APP_CONST.MAX_RETRIES || 3;
+  const baseDelayMs = 1000;
+  let lastError = null;
 
-    if (resCode !== 200) {
-      logError('Utils', `Gemini API Error (${resCode}): ${resText}`, new Error(`GEMINI_API_${resCode}`));
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = UrlFetchApp.fetch(url, options);
+      const resCode  = response.getResponseCode();
+      const resText  = response.getContentText();
+
+      if (resCode === 200) {
+        const json = JSON.parse(resText);
+        if (json.candidates && json.candidates[0].content && json.candidates[0].content.parts) {
+          return json.candidates[0].content.parts[0].text;
+        }
+        return null;
+      }
+
+      // 429 (rate limit) หรือ 503 (service unavailable) → retry
+      if ((resCode === 429 || resCode === 503) && attempt < maxRetries) {
+        const delayMs = baseDelayMs * Math.pow(2, attempt - 1); // 1s, 2s, 4s
+        logWarn('Utils', `Gemini API ${resCode} — retry ${attempt}/${maxRetries} ใน ${delayMs}ms`);
+        Utilities.sleep(delayMs);
+        continue;
+      }
+
+      // 4xx อื่นๆ (ยกเว้น 429) หรือ retry หมดแล้ว → log + return null
+      // [SEC-012] ไม่แสดง resText ทั้งหมด เพื่อกัน API key/cookie รั่วผ่าน log
+      const preview = resText ? resText.substring(0, 200) : '';
+      logError('Utils', `Gemini API Error (${resCode}) [attempt ${attempt}/${maxRetries}]: ${preview}`,
+        new Error(`GEMINI_API_${resCode}`));
+      return null;
+
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
+        logWarn('Utils', `callGeminiAPI exception — retry ${attempt}/${maxRetries} ใน ${delayMs}ms: ${err.message}`);
+        Utilities.sleep(delayMs);
+        continue;
+      }
+      logError('Utils', `callGeminiAPI ล้มเหลวหลัง ${maxRetries} ครั้ง: ${err.message}`, err);
       return null;
     }
-
-    const json = JSON.parse(resText);
-    if (json.candidates && json.candidates[0].content && json.candidates[0].content.parts) {
-      return json.candidates[0].content.parts[0].text;
-    }
-    return null;
-
-  } catch (err) {
-    logError('Utils', `callGeminiAPI ล้มเหลว: ${err.message}`, err);
-    return null;
   }
+
+  // ไม่ควรถึงตรงนี้ แต่ไว้เป็น defense-in-depth
+  if (lastError) {
+    logError('Utils', `callGeminiAPI exhausted retries: ${lastError.message}`, lastError);
+  }
+  return null;
 }
 
 /**
