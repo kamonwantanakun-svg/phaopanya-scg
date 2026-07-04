@@ -84,7 +84,6 @@ const _mapsSetCache = (key, value) => {
   }
 };
 
-
 // ============================================================
 // SECTION 2: @customFunction — สูตรสำหรับพิมพ์ใน Google Sheet
 // ============================================================
@@ -106,7 +105,7 @@ const GOOGLEMAPS_DISTANCE = (origin, destination, mode = 'driving') => {
     return 'ต้องระบุจุดเริ่มต้นและปลายทาง';
   }
   if (origin.map) {
-    return origin.map(o => GOOGLEMAPS_DISTANCE(o, destination, mode));
+    return origin.map((o) => GOOGLEMAPS_DISTANCE(o, destination, mode));
   }
 
   const key = ['distance', origin, destination, mode].join(',');
@@ -128,7 +127,6 @@ const GOOGLEMAPS_DISTANCE = (origin, destination, mode = 'driving') => {
   return distance;
 };
 
-
 /**
  * GOOGLEMAPS_DURATION — คำนวณเวลาเดินทางระหว่าง 2 จุด
  *
@@ -146,7 +144,7 @@ const GOOGLEMAPS_DURATION = (origin, destination, mode = 'driving') => {
     return 'ต้องระบุจุดเริ่มต้นและปลายทาง';
   }
   if (origin.map) {
-    return origin.map(o => GOOGLEMAPS_DURATION(o, destination, mode));
+    return origin.map((o) => GOOGLEMAPS_DURATION(o, destination, mode));
   }
 
   const key = ['duration', origin, destination, mode].join(',');
@@ -168,7 +166,6 @@ const GOOGLEMAPS_DURATION = (origin, destination, mode = 'driving') => {
   return time;
 };
 
-
 /**
  * GOOGLEMAPS_LATLONG — แปลงที่อยู่เป็นพิกัด lat,lng
  *
@@ -184,7 +181,7 @@ const GOOGLEMAPS_LATLONG = (address) => {
     return 'ต้องระบุที่อยู่';
   }
   if (address.map) {
-    return address.map(a => GOOGLEMAPS_LATLONG(a));
+    return address.map((a) => GOOGLEMAPS_LATLONG(a));
   }
 
   const key = ['latlong', address].join(',');
@@ -202,7 +199,6 @@ const GOOGLEMAPS_LATLONG = (address) => {
   return answer;
 };
 
-
 /**
  * GOOGLEMAPS_ADDRESS — แปลงรหัสไปรษณีย์/ที่อยู่บางส่วนเป็นที่อยู่เต็ม
  *
@@ -218,7 +214,7 @@ const GOOGLEMAPS_ADDRESS = (address) => {
     return 'ต้องระบุที่อยู่';
   }
   if (address.map) {
-    return address.map(a => GOOGLEMAPS_ADDRESS(a));
+    return address.map((a) => GOOGLEMAPS_ADDRESS(a));
   }
 
   const key = ['address', address].join(',');
@@ -234,7 +230,6 @@ const GOOGLEMAPS_ADDRESS = (address) => {
   _mapsSetCache(key, formatted_address);
   return formatted_address;
 };
-
 
 /**
  * GOOGLEMAPS_REVERSEGEOCODE — แปลงพิกัด lat,lng เป็นที่อยู่
@@ -256,14 +251,12 @@ const GOOGLEMAPS_REVERSEGEOCODE = (latitude, longitude) => {
   const value = _mapsGetCache(key);
   if (value !== null) return value;
 
-  const { results: [data = {}] = [] } = Maps.newGeocoder()
-    .reverseGeocode(latitude, longitude);
+  const { results: [data = {}] = [] } = Maps.newGeocoder().reverseGeocode(latitude, longitude);
 
   const { formatted_address } = data;
   _mapsSetCache(key, formatted_address);
   return formatted_address;
 };
-
 
 /**
  * GOOGLEMAPS_COUNTRY — ดึงชื่อประเทศจากที่อยู่
@@ -279,7 +272,7 @@ const GOOGLEMAPS_COUNTRY = (address) => {
     return 'ต้องระบุที่อยู่';
   }
   if (address.map) {
-    return address.map(a => GOOGLEMAPS_COUNTRY(a));
+    return address.map((a) => GOOGLEMAPS_COUNTRY(a));
   }
 
   const key = ['country', address].join(',');
@@ -291,9 +284,7 @@ const GOOGLEMAPS_COUNTRY = (address) => {
     return 'ไม่พบที่อยู่';
   }
 
-  const [{ short_name, long_name } = {}] = data.address_components.filter(
-    ({ types: [level] }) => level === 'country'
-  );
+  const [{ short_name, long_name } = {}] = data.address_components.filter(({ types: [level] }) => level === 'country');
 
   if (!short_name) {
     return 'ไม่พบประเทศ';
@@ -303,7 +294,6 @@ const GOOGLEMAPS_COUNTRY = (address) => {
   _mapsSetCache(key, answer);
   return answer;
 };
-
 
 /**
  * GOOGLEMAPS_DIRECTIONS — แสดงเส้นทางขับขี่ระหว่าง 2 จุด
@@ -351,7 +341,7 @@ const GOOGLEMAPS_DIRECTIONS = (origin, destination, mode = 'driving') => {
           return stripped
             .replace(/&nbsp;/g, ' ')
             .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, '\'')
+            .replace(/&#39;/g, "'")
             .replace(/\s+/g, ' ')
             .trim();
         });

@@ -68,54 +68,58 @@ function onOpen() {
     validateConfig();
   } catch (cfgErr) {
     // [FIX BUG-04 v5.5.001] เปลี่ยน getUi().alert() เป็น safeUiAlert_() — trigger-safe (onOpen)
-    safeUiAlert_(
-      '⚠️ Config Warning:\n' + cfgErr.message +
-      '\n\nระบบยังใช้งานได้ แต่กรุณาตรวจสอบก่อนรัน Pipeline'
-    );
+    safeUiAlert_('⚠️ Config Warning:\n' + cfgErr.message + '\n\nระบบยังใช้งานได้ แต่กรุณาตรวจสอบก่อนรัน Pipeline');
   }
 
   // [FIX v5.2.016] พยายามติดตั้ง Smart Navigation อัตโนมัติ
   // [FIX v5.5.001] เพิ่ม logDebug แทน catch เงียบ — กฎข้อ 13 (Logging with Context)
-  try { autoInstallSmartNav_(); } catch (navErr) { logDebug('App', 'autoInstallSmartNav_: ' + navErr.message); }
+  try {
+    autoInstallSmartNav_();
+  } catch (navErr) {
+    logDebug('App', 'autoInstallSmartNav_: ' + navErr.message);
+  }
 
   const ui = SpreadsheetApp.getUi();
 
   ui.createMenu(`🚚 ${APP_NAME}`)
-    .addItem('🚀 Run Full Pipeline',  'runFullPipeline')
+    .addItem('🚀 Run Full Pipeline', 'runFullPipeline')
     .addItem('📍 จับคู่พิกัดวันนี้', 'applyMasterCoordinatesToDailyJob')
     .addSeparator()
 
     .addSubMenu(
-      ui.createMenu('🟩 กลุ่ม 1: ล้างข้อมูล & Master')
+      ui
+        .createMenu('🟩 กลุ่ม 1: ล้างข้อมูล & Master')
         .addItem('▶️ รัน Full Pipeline (ทั้งหมด)', 'runFullPipeline')
         .addSeparator()
         .addItem('Step 1 — โหลดข้อมูลดิบจากแหล่ง', 'runLoadSource')
-        .addItem('Step 2 — Normalize ชื่อ/ที่อยู่',  'runNormalize')
-        .addItem('Step 3 — Match Engine',              'runMatchEngine')
+        .addItem('Step 2 — Normalize ชื่อ/ที่อยู่', 'runNormalize')
+        .addItem('Step 3 — Match Engine', 'runMatchEngine')
         .addSeparator()
-        .addItem('📋 เปิด Review Queue',       'openReviewQueue')
+        .addItem('📋 เปิด Review Queue', 'openReviewQueue')
         .addItem('▶️ รันคำสั่งที่เลือกไว้ทั้งหมด', 'applyAllPendingDecisions')
-        .addItem('📊 รายงาน Data Quality',     'buildFullQualityReport')
+        .addItem('📊 รายงาน Data Quality', 'buildFullQualityReport')
     )
 
     .addSubMenu(
-      ui.createMenu('🟦 กลุ่ม 2: งานประจำวัน (SCG)')
-        .addItem('📥 ดึงข้อมูล SCG API',   'fetchDataFromSCGJWD')
-        .addItem('📍 จับคู่พิกัด',          'applyMasterCoordinatesToDailyJob')
+      ui
+        .createMenu('🟦 กลุ่ม 2: งานประจำวัน (SCG)')
+        .addItem('📥 ดึงข้อมูล SCG API', 'fetchDataFromSCGJWD')
+        .addItem('📍 จับคู่พิกัด', 'applyMasterCoordinatesToDailyJob')
         .addSeparator()
-        .addItem('🗑️ ล้างข้อมูลทั้งหมด',  'clearAllSCGSheets_UI')
+        .addItem('🗑️ ล้างข้อมูลทั้งหมด', 'clearAllSCGSheets_UI')
         .addSeparator()
-        .addItem('🔐 ตั้งค่า SCG Cookie',  'setSCGCookie_UI')
+        .addItem('🔐 ตั้งค่า SCG Cookie', 'setSCGCookie_UI')
     )
 
     .addSeparator()
 
     .addSubMenu(
-      ui.createMenu('🔧 ระบบ & ตั้งค่า')
-        .addItem('⚙️ ตั้งค่า API Key',           'setupEnvironment')
-        .addItem('🔐 ตั้งค่า SCG Cookie',         'setSCGCookie_UI')
-        .addItem('👥 ตั้งค่ารายชื่อ Admin',       'setupAdminList_UI')
-        .addItem('🏗️ สร้างชีตทั้งหมด',          'setupAllSheets')
+      ui
+        .createMenu('🔧 ระบบ & ตั้งค่า')
+        .addItem('⚙️ ตั้งค่า API Key', 'setupEnvironment')
+        .addItem('🔐 ตั้งค่า SCG Cookie', 'setSCGCookie_UI')
+        .addItem('👥 ตั้งค่ารายชื่อ Admin', 'setupAdminList_UI')
+        .addItem('🏗️ สร้างชีตทั้งหมด', 'setupAllSheets')
         .addItem('🌍 อัปเดตฐานข้อมูลภูมิศาสตร์ (SYS_TH_GEO)', 'buildGeoDictionary')
         .addItem('🛠️ เติมข้อมูลภูมิศาสตร์ (16 คอลัมน์)', 'populateGeoMetadata')
         .addItem('🔗 สร้าง Alias อัตโนมัติจากประวัติ (FACT)', 'generatePersonAliasesFromHistory')
@@ -123,18 +127,18 @@ function onOpen() {
         .addItem('🔗 ตรวจสอบ Master UUID', 'assignMasterUuidIfMissing')
         .addItem('📥 ดึงชื่อจาก SCG ดิบ → M_ALIAS', 'populateAliasFromSCGRawData')
         .addSeparator()
-        .addItem('🛡️ ป้องกันข้อมูล Sensitive',  'applySheetProtection_UI')
+        .addItem('🛡️ ป้องกันข้อมูล Sensitive', 'applySheetProtection_UI')
         .addSeparator()
-        .addItem('🛡️ [PH2] Preflight Audit',      'runPreflightAudit')
-        .addItem('🧹 [PH2] Detect Duplicates',     'detectDoubleProcessing')
-        .addItem('✅ ตรวจสอบ System Integrity',   'checkSystemIntegrity')
+        .addItem('🛡️ [PH2] Preflight Audit', 'runPreflightAudit')
+        .addItem('🧹 [PH2] Detect Duplicates', 'detectDoubleProcessing')
+        .addItem('✅ ตรวจสอบ System Integrity', 'checkSystemIntegrity')
         .addItem('🔍 วินิจฉัย Pipeline (Diagnostic)', 'diagnoseSystemState')
         .addSeparator()
         .addItem('🔄 รีเซ็ตสถานะ SYNC (เพื่อรันใหม่)', 'resetSourceSyncStatus')
-        .addItem('🧹 ล้างความจำระบบ (Clear Cache)',  'invalidateAllGlobalCaches')
-        .addItem('📖 ดู Version Info',            'showVersionInfo')
+        .addItem('🧹 ล้างความจำระบบ (Clear Cache)', 'invalidateAllGlobalCaches')
+        .addItem('📖 ดู Version Info', 'showVersionInfo')
         .addSeparator()
-        .addItem('🚀 ติดตั้ง Smart Navigation (คลิกนำทาง)',  'installSmartNavTrigger')
+        .addItem('🚀 ติดตั้ง Smart Navigation (คลิกนำทาง)', 'installSmartNavTrigger')
     )
 
     .addToUi();
@@ -151,7 +155,7 @@ function onOpen() {
 function onEdit(e) {
   if (!e || !e.range) return;
   const sheet = e.range.getSheet();
-  const name  = sheet.getName();
+  const name = sheet.getName();
 
   // 1. ตรวจสอบว่าแก้ไขในชีต Q_REVIEW หรือไม่
   if (name === SHEET.Q_REVIEW) {
@@ -175,9 +179,9 @@ function onEdit(e) {
         //   ใหม่: ส่ง row → single-row update (22 cell ops/click, ลด ~95%)
         //   ถ้าเป็น bulk paste (multi-row) → fallback ไป full refresh อัตโนมัติ
         if (e.range.getNumRows() > 1) {
-          highlightHighPriorityReviews();  // multi-row edit → full refresh
+          highlightHighPriorityReviews(); // multi-row edit → full refresh
         } else {
-          highlightHighPriorityReviews(row);  // single-row edit → targeted update
+          highlightHighPriorityReviews(row); // single-row edit → targeted update
         }
 
         sheet.getParent().toast(`✅ ประมวลผล ${reviewId} สำเร็จ`, APP_NAME, 3);
@@ -209,7 +213,7 @@ function onEdit(e) {
 function installSmartNavTrigger() {
   // [FIX S1 v5.5.002] เพิ่ม try-catch ครอบทั้งฟังก์ชัน — Rule 12
   try {
-  // ลบ Smart Nav trigger เก่าก่อน (ถ้ามี)
+    // ลบ Smart Nav trigger เก่าก่อน (ถ้ามี)
     const triggers = ScriptApp.getProjectTriggers();
     let deletedCount = 0;
     for (const t of triggers) {
@@ -224,20 +228,17 @@ function installSmartNavTrigger() {
     //   เพราะ Apps Script ไม่มี .onSelectionChange() ใน Trigger Builder API
     //   onEdit จะถูกเรียกเมื่อ user แก้ไข cell — handleSelectionChange_ จะตรวจ active cell
     //   และดำเนินการนำทางถ้าอยู่ใน Q_REVIEW sheet
-    ScriptApp.newTrigger('handleSelectionChange_')
-      .forSpreadsheet(SpreadsheetApp.getActive())
-      .onEdit()
-      .create();
+    ScriptApp.newTrigger('handleSelectionChange_').forSpreadsheet(SpreadsheetApp.getActive()).onEdit().create();
 
     // [FIX BUG-04 v5.5.001] เปลี่ยน getUi().alert() เป็น safeUiAlert_() — trigger-safe
     safeUiAlert_(
       '✅ ติดตั้ง Smart Navigation สำเร็จ!\n\n' +
-    (deletedCount > 0 ? `(ลบ Trigger เก่า ${deletedCount} ตัว)\n\n` : '') +
-    'วิธีใช้: ไปที่ชีต Q_REVIEW แล้วคลิก (หรือกด Enter) ที่:\n' +
-    '  • คอลัมน์ Candidate ID (L-O) — นำทางไป Master/FACT ของ candidate นั้น\n' +
-    '  • คอลัมน์ recommended_action (P) — นำทางตามที่ระบบแนะนำ [V5.5.011]\n\n' +
-    'หมายเหตุ: ใช้ onEdit trigger (ต้องแก้ไข cell หรือกด Enter บน cell ที่ต้องการ)' +
-    'เพราะ Apps Script ไม่รองรับ installable onSelectionChange trigger'
+        (deletedCount > 0 ? `(ลบ Trigger เก่า ${deletedCount} ตัว)\n\n` : '') +
+        'วิธีใช้: ไปที่ชีต Q_REVIEW แล้วคลิก (หรือกด Enter) ที่:\n' +
+        '  • คอลัมน์ Candidate ID (L-O) — นำทางไป Master/FACT ของ candidate นั้น\n' +
+        '  • คอลัมน์ recommended_action (P) — นำทางตามที่ระบบแนะนำ [V5.5.011]\n\n' +
+        'หมายเหตุ: ใช้ onEdit trigger (ต้องแก้ไข cell หรือกด Enter บน cell ที่ต้องการ)' +
+        'เพราะ Apps Script ไม่รองรับ installable onSelectionChange trigger'
     );
   } catch (err) {
     logError('App', 'installSmartNavTrigger: ' + err.message, err);
@@ -263,10 +264,7 @@ function autoInstallSmartNav_() {
   }
   if (hasSmartNav === false) {
     // [FIX BUG-SMARTNAV V5.5.022] ใช้ onEdit() แทน onSelectionChange() (ไม่มีใน API)
-    ScriptApp.newTrigger('handleSelectionChange_')
-      .forSpreadsheet(SpreadsheetApp.getActive())
-      .onEdit()
-      .create();
+    ScriptApp.newTrigger('handleSelectionChange_').forSpreadsheet(SpreadsheetApp.getActive()).onEdit().create();
   }
 }
 
@@ -324,12 +322,16 @@ function handleSelectionChange_(e) {
 
     const factSheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
     const factColIdx = resolveFactColIdx_(prefix);
-    const factRowIndex = (factSheet && factSheet.getLastRow() >= 2 && factColIdx !== -1)
-      ? findRowByIdInSheetByCol_(factSheet, targetId, factColIdx) : -1;
+    const factRowIndex =
+      factSheet && factSheet.getLastRow() >= 2 && factColIdx !== -1
+        ? findRowByIdInSheetByCol_(factSheet, targetId, factColIdx)
+        : -1;
 
     navigateToMasterOrFact_(ss, targetId, targetSheet, targetRowIndex, factSheet, factRowIndex, targetSheetName);
   } catch (err) {
-    try { logError('SmartNav', err.message, err); } catch (_) {}
+    try {
+      logError('SmartNav', err.message, err);
+    } catch (_) {}
   }
 }
 
@@ -362,13 +364,19 @@ function handleRecommendClick_(sheet, row, cell) {
     const ui = SpreadsheetApp.getUi();
     ui.alert(
       '📋 คำแนะนำจากระบบ',
-      'Review ID: ' + reviewId + '\n' +
-      'ชื่อปลายทาง: ' + rawPerson + '\n\n' +
-      'ระบบแนะนำ: ' + cellValue + '\n\n' +
-      'การกระทำที่เหมาะสม:\n' +
-      (cellValue === 'CREATE_NEW'
-        ? '→ สร้างระเบียนใหม่ใน M_PERSON/M_PLACE (ไม่มี candidate ให้ merge)'
-        : '→ ตรวจสอบด้วยตนเองและเลือก Decision ในคอลัมน์ V'),
+      'Review ID: ' +
+        reviewId +
+        '\n' +
+        'ชื่อปลายทาง: ' +
+        rawPerson +
+        '\n\n' +
+        'ระบบแนะนำ: ' +
+        cellValue +
+        '\n\n' +
+        'การกระทำที่เหมาะสม:\n' +
+        (cellValue === 'CREATE_NEW'
+          ? '→ สร้างระเบียนใหม่ใน M_PERSON/M_PLACE (ไม่มี candidate ให้ merge)'
+          : '→ ตรวจสอบด้วยตนเองและเลือก Decision ในคอลัมน์ V'),
       ui.ButtonSet.OK
     );
     return;
@@ -402,12 +410,22 @@ function handleRecommendClick_(sheet, row, cell) {
 
   const factSheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
   const factColIdx = resolveFactColIdx_(prefix);
-  const factRowIndex = (factSheet && factSheet.getLastRow() >= 2 && factColIdx !== -1)
-    ? findRowByIdInSheetByCol_(factSheet, targetId, factColIdx) : -1;
+  const factRowIndex =
+    factSheet && factSheet.getLastRow() >= 2 && factColIdx !== -1
+      ? findRowByIdInSheetByCol_(factSheet, targetId, factColIdx)
+      : -1;
 
   // [V5.5.011] แสดงหน้ายืนยันพร้อมบอกว่าเป็นการกระทำที่ระบบแนะนำ
-  navigateFromRecommend_(ss, cellValue, targetId, targetSheet, targetRowIndex,
-    factSheet, factRowIndex, targetSheetName);
+  navigateFromRecommend_(
+    ss,
+    cellValue,
+    targetId,
+    targetSheet,
+    targetRowIndex,
+    factSheet,
+    factRowIndex,
+    targetSheetName
+  );
 }
 
 /**
@@ -423,33 +441,49 @@ function handleRecommendClick_(sheet, row, cell) {
  * @param {number} factRowIndex - 1-based row index ใน FACT_DELIVERY (-1 ถ้าไม่พบ)
  * @param {string} targetSheetName - ชื่อชีต Master
  */
-function navigateFromRecommend_(ss, recommendAction, targetId, targetSheet, targetRowIndex,
-  factSheet, factRowIndex, targetSheetName) {
+function navigateFromRecommend_(
+  ss,
+  recommendAction,
+  targetId,
+  targetSheet,
+  targetRowIndex,
+  factSheet,
+  factRowIndex,
+  targetSheetName
+) {
   const ui = SpreadsheetApp.getUi();
 
   // แยก action ออกจาก ID เช่น "MERGE_TO_CANDIDATE:PS-XXXX" → "MERGE_TO_CANDIDATE"
   const actionOnly = recommendAction.split(':')[0];
 
-  const msg = '🎯 ระบบแนะนำ: ' + actionOnly + '\n' +
-    'สำหรับ ID: ' + targetId + '\n\n' +
+  const msg =
+    '🎯 ระบบแนะนำ: ' +
+    actionOnly +
+    '\n' +
+    'สำหรับ ID: ' +
+    targetId +
+    '\n\n' +
     'ต้องการให้ระบบนำทางไปยังส่วนใด?\n\n' +
-    '👉 [YES] ไปยังหน้าข้อมูลหลัก Master (' + targetSheetName + ' แถวที่ ' + targetRowIndex + ')\n' +
+    '👉 [YES] ไปยังหน้าข้อมูลหลัก Master (' +
+    targetSheetName +
+    ' แถวที่ ' +
+    targetRowIndex +
+    ')\n' +
     '👉 [NO] ไปยังหน้าประวัติการส่งสินค้าจริง (FACT_DELIVERY ' +
-    (factRowIndex !== -1 ? 'แถวที่ ' + factRowIndex : '- ไม่พบประวัติ') + ')\n' +
+    (factRowIndex !== -1 ? 'แถวที่ ' + factRowIndex : '- ไม่พบประวัติ') +
+    ')\n' +
     '👉 [CANCEL] ยกเลิกการนำทาง';
 
   const response = ui.alert('🚀 Smart Navigation (จากคำแนะนำระบบ)', msg, ui.ButtonSet.YES_NO_CANCEL);
   if (response === ui.Button.YES) {
     targetSheet.activate();
     targetSheet.getRange(targetRowIndex, 1, 1, targetSheet.getLastColumn()).activate();
-    ss.toast('🎯 นำทางไปยังตารางหลัก ' + targetSheetName + ' แถว ' + targetRowIndex + ' สำเร็จ',
-      'LMDS Navigation');
+    ss.toast('🎯 นำทางไปยังตารางหลัก ' + targetSheetName + ' แถว ' + targetRowIndex + ' สำเร็จ', 'LMDS Navigation');
   } else if (response === ui.Button.NO) {
     if (factRowIndex !== -1) {
       factSheet.activate();
       factSheet.getRange(factRowIndex, 1, 1, factSheet.getLastColumn()).activate();
-      ss.toast('🎯 นำทางไปยังประวัติขนส่ง FACT_DELIVERY แถว ' + factRowIndex + ' สำเร็จ',
-        'LMDS Navigation');
+      ss.toast('🎯 นำทางไปยังประวัติขนส่ง FACT_DELIVERY แถว ' + factRowIndex + ' สำเร็จ', 'LMDS Navigation');
     } else {
       safeUiAlert_('❌ ไม่พบประวัติของ ' + targetId + ' ในชีต FACT_DELIVERY');
     }
@@ -519,9 +553,7 @@ function findRowByIdInSheet_(sheet, targetId) {
   //   matchEntireCell(true) → ต้อง match ทั้ง cell ไม่ใช่ substring (เหมือน === )
   //   matchCase(false) → case-insensitive (เหมือน .toUpperCase() compare)
   // [FIX BUG-M02 V5.5.022] var → const/let — Rule 1 (Clean Code)
-  const textFinder = sheet.createTextFinder(targetId)
-    .matchCase(false)
-    .matchEntireCell(true);
+  const textFinder = sheet.createTextFinder(targetId).matchCase(false).matchEntireCell(true);
 
   const matches = textFinder.findAll();
   if (matches.length === 0) return -1;
@@ -548,12 +580,10 @@ function findRowByIdInSheetByCol_(sheet, targetId, colIdx) {
   if (!targetId) return -1;
 
   // [FIX BUG-M02 V5.5.022] var → const/let — Rule 1 (Clean Code)
-  const textFinder = sheet.createTextFinder(targetId)
-    .matchCase(false)
-    .matchEntireCell(true);
+  const textFinder = sheet.createTextFinder(targetId).matchCase(false).matchEntireCell(true);
 
   const matches = textFinder.findAll();
-  const targetCol = colIdx + 1;  // convert 0-based to 1-based
+  const targetCol = colIdx + 1; // convert 0-based to 1-based
 
   for (let i = 0; i < matches.length; i++) {
     if (matches[i].getColumn() === targetCol) {
@@ -569,7 +599,8 @@ function findRowByIdInSheetByCol_(sheet, targetId, colIdx) {
  */
 function navigateToMasterOrFact_(ss, targetId, targetSheet, targetRowIndex, factSheet, factRowIndex, targetSheetName) {
   const ui = SpreadsheetApp.getUi();
-  const msg = `ต้องการให้ระบบนำทางไปยังส่วนใดสำหรับ ID: ${targetId} ?\n\n` +
+  const msg =
+    `ต้องการให้ระบบนำทางไปยังส่วนใดสำหรับ ID: ${targetId} ?\n\n` +
     `👉 [YES] ไปยังหน้าข้อมูลหลัก Master (${targetSheetName} แถวที่ ${targetRowIndex})\n` +
     `👉 [NO] ไปยังหน้าประวัติการส่งสินค้าจริง (FACT_DELIVERY ${factRowIndex !== -1 ? 'แถวที่ ' + factRowIndex : '- ไม่พบประวัติ'})\n` +
     '👉 [CANCEL] ยกเลิกการนำทาง';
@@ -609,9 +640,7 @@ function safeRun(funcName, fn) {
   } catch (err) {
     logError(funcName, err.message || String(err), err);
     // [FIX BUG-04 v5.5.001] เปลี่ยน getUi().alert() เป็น safeUiAlert_()
-    safeUiAlert_(
-      `❌ ${funcName} ล้มเหลว:\n${err.message}`
-    );
+    safeUiAlert_(`❌ ${funcName} ล้มเหลว:\n${err.message}`);
   }
 }
 
@@ -631,7 +660,7 @@ function runFullPipeline() {
   }
 
   try {
-    const ss        = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
     const startTime = new Date();
 
     logInfo('App', `Full Pipeline เริ่มต้น — v${APP_VERSION}`);
@@ -662,7 +691,6 @@ function runFullPipeline() {
       // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
       safeUiAlert_(alertMsg);
     });
-
   } finally {
     lock.releaseLock();
     // [PERF-012] Flush log buffer ก่อน execution จบ — ป้องกัน log entries สูญหาย
@@ -678,20 +706,20 @@ function runFullPipeline() {
 function getPipelineDiagnosticSummary_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const checks = [
-    { name: SHEET.M_PERSON,       label: 'M_PERSON' },
+    { name: SHEET.M_PERSON, label: 'M_PERSON' },
     { name: SHEET.M_PERSON_ALIAS, label: 'M_PERSON_ALIAS' },
-    { name: SHEET.M_PLACE,        label: 'M_PLACE' },
-    { name: SHEET.M_PLACE_ALIAS,  label: 'M_PLACE_ALIAS' },
-    { name: SHEET.M_GEO_POINT,    label: 'M_GEO_POINT' },
-    { name: SHEET.M_ALIAS,        label: 'M_ALIAS' },
-    { name: SHEET.FACT_DELIVERY,  label: 'FACT_DELIVERY' },
-    { name: SHEET.Q_REVIEW,       label: 'Q_REVIEW' },
+    { name: SHEET.M_PLACE, label: 'M_PLACE' },
+    { name: SHEET.M_PLACE_ALIAS, label: 'M_PLACE_ALIAS' },
+    { name: SHEET.M_GEO_POINT, label: 'M_GEO_POINT' },
+    { name: SHEET.M_ALIAS, label: 'M_ALIAS' },
+    { name: SHEET.FACT_DELIVERY, label: 'FACT_DELIVERY' },
+    { name: SHEET.Q_REVIEW, label: 'Q_REVIEW' }
   ];
 
   const warnings = [];
   const lines = [];
 
-  checks.forEach(c => {
+  checks.forEach((c) => {
     const sheet = ss.getSheetByName(c.name);
     const dataRows = sheet ? Math.max(0, sheet.getLastRow() - 1) : -1;
     if (dataRows === -1) {
@@ -711,24 +739,28 @@ function getPipelineDiagnosticSummary_() {
     // นับแถวที่ SYNC_STATUS = 'SUCCESS'
     const syncCol = SRC_IDX.SYNC_STATUS + 1;
     const syncData = srcSheet.getRange(2, syncCol, srcTotal, 1).getValues();
-    const doneCount = syncData.filter(r => String(r[0]).trim() === SCG_CONFIG.SYNC_DONE_VALUE).length;
+    const doneCount = syncData.filter((r) => String(r[0]).trim() === SCG_CONFIG.SYNC_DONE_VALUE).length;
     const pendingCount = srcTotal - doneCount;
     lines.push(`\n  📊 Source: ${srcTotal} แถว (ประมวลผลแล้ว: ${doneCount}, ค้างอยู่: ${pendingCount})`);
     if (pendingCount === 0 && srcTotal > 0) {
-      warnings.push('Source ทั้งหมดถูกประมวลผลแล้ว (SYNC_STATUS=SUCCESS) — ถ้าต้องการรันใหม่ กดเมนู "รีเซ็ตสถานะ SYNC"');
+      warnings.push(
+        'Source ทั้งหมดถูกประมวลผลแล้ว (SYNC_STATUS=SUCCESS) — ถ้าต้องการรันใหม่ กดเมนู "รีเซ็ตสถานะ SYNC"'
+      );
     }
   } else {
     warnings.push('ไม่พบข้อมูลในชีต Source — ตรวจสอบชื่อชีต: ' + SHEET.SOURCE);
   }
 
   // ตรวจสอบ column mismatch
-  [SHEET.M_PERSON, SHEET.M_PLACE].forEach(sn => {
+  [SHEET.M_PERSON, SHEET.M_PLACE].forEach((sn) => {
     const sheet = ss.getSheetByName(sn);
     if (sheet) {
       const actualCols = sheet.getLastColumn();
       const schemaCols = SCHEMA[sn] ? SCHEMA[sn].length : 0;
       if (schemaCols > 0 && actualCols < schemaCols) {
-        warnings.push(`${sn}: ชีตมี ${actualCols} คอลัมน์ แต่ SCHEMA ต้องการ ${schemaCols} — รัน "สร้างชีตทั้งหมด" เพื่อเพิ่มคอลัมน์ที่ขาด`);
+        warnings.push(
+          `${sn}: ชีตมี ${actualCols} คอลัมน์ แต่ SCHEMA ต้องการ ${schemaCols} — รัน "สร้างชีตทั้งหมด" เพื่อเพิ่มคอลัมน์ที่ขาด`
+        );
       }
     }
   });
@@ -743,13 +775,13 @@ function getPipelineDiagnosticSummary_() {
 function openReviewQueue() {
   // [FIX S1 v5.5.002] เพิ่ม try-catch ครอบทั้งฟังก์ชัน — Rule 12
   try {
-    const ss    = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(SHEET.Q_REVIEW);
     if (sheet) {
       ss.setActiveSheet(sheet);
       ss.toast('กำลังแสดง Review Queue', APP_NAME, 3);
     } else {
-    // [FIX BUG-04 v5.5.001] เปลี่ยน getUi().alert() เป็น safeUiAlert_()
+      // [FIX BUG-04 v5.5.001] เปลี่ยน getUi().alert() เป็น safeUiAlert_()
       safeUiAlert_('❌ ไม่พบชีต Q_REVIEW\nกรุณารัน "สร้างชีตทั้งหมด" ก่อน');
     }
   } catch (err) {
@@ -765,25 +797,37 @@ function openReviewQueue() {
 // [FIX BUG-A2] v5.4.003: เพิ่ม try-catch outer
 function checkSystemIntegrity() {
   try {
-    const ss     = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
     const errors = [];
-    const warns  = [];
+    const warns = [];
 
     const requiredSheets = [
-      SHEET.M_PERSON, SHEET.M_PERSON_ALIAS, SHEET.M_PLACE, SHEET.M_PLACE_ALIAS,
-      SHEET.M_ALIAS, SHEET.M_GEO_POINT, SHEET.M_DESTINATION,
-      SHEET.FACT_DELIVERY, SHEET.Q_REVIEW, SHEET.SYS_LOG, SHEET.SYS_CONFIG,
-      SHEET.SYS_TH_GEO, SHEET.RPT_QUALITY,
-      SHEET.DAILY_JOB, SHEET.INPUT, SHEET.EMPLOYEE, SHEET.SOURCE,
+      SHEET.M_PERSON,
+      SHEET.M_PERSON_ALIAS,
+      SHEET.M_PLACE,
+      SHEET.M_PLACE_ALIAS,
+      SHEET.M_ALIAS,
+      SHEET.M_GEO_POINT,
+      SHEET.M_DESTINATION,
+      SHEET.FACT_DELIVERY,
+      SHEET.Q_REVIEW,
+      SHEET.SYS_LOG,
+      SHEET.SYS_CONFIG,
+      SHEET.SYS_TH_GEO,
+      SHEET.RPT_QUALITY,
+      SHEET.DAILY_JOB,
+      SHEET.INPUT,
+      SHEET.EMPLOYEE,
+      SHEET.SOURCE
     ];
 
-    requiredSheets.forEach(name => {
+    requiredSheets.forEach((name) => {
       if (!ss.getSheetByName(name)) errors.push('ไม่พบชีต: ' + name);
     });
 
     try {
       const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
-      if (!apiKey)            warns.push('GEMINI_API_KEY ยังไม่ได้ตั้งค่า');
+      if (!apiKey) warns.push('GEMINI_API_KEY ยังไม่ได้ตั้งค่า');
       else if (apiKey.length < 20) warns.push('GEMINI_API_KEY อาจไม่ถูกต้อง');
     } catch (e) {
       warns.push('ไม่สามารถอ่าน GEMINI_API_KEY: ' + e.message);
@@ -798,15 +842,14 @@ function checkSystemIntegrity() {
     let msg = '';
     if (errors.length > 0) {
       msg += '❌ พบ Error ' + errors.length + ' รายการ:\n';
-      msg += errors.map(e => '  • ' + e).join('\n') + '\n\n💡 รัน สร้างชีตทั้งหมด\n\n';
+      msg += errors.map((e) => '  • ' + e).join('\n') + '\n\n💡 รัน สร้างชีตทั้งหมด\n\n';
     }
     if (warns.length > 0) {
       msg += '⚠️ พบ Warning ' + warns.length + ' รายการ:\n';
-      msg += warns.map(w => '  • ' + w).join('\n');
+      msg += warns.map((w) => '  • ' + w).join('\n');
     }
     // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
     safeUiAlert_(msg);
-
   } catch (err) {
     logError('App', 'checkSystemIntegrity: ' + err.message, err);
     safeUiAlert_('❌ checkSystemIntegrity ล้มเหลว: ' + err.message);
@@ -826,7 +869,7 @@ function setupEnvironment() {
     const result = ui.prompt(
       '⚙️ ตั้งค่า Gemini API Key',
       'กรุณาใส่ Gemini API Key:\n(ได้จาก https://aistudio.google.com/app/apikey)\n\n' +
-      'รองรับทั้งรูปแบบเก่า (AIza...) และรูปแบบใหม่ (AQ...)',
+        'รองรับทั้งรูปแบบเก่า (AIza...) และรูปแบบใหม่ (AQ...)',
       ui.ButtonSet.OK_CANCEL
     );
 
@@ -839,24 +882,23 @@ function setupEnvironment() {
     // - New (v2):    ขึ้นต้นด้วย "AQ."   + Base64URL chars (40-80 ตัว)
     // Charset ที่อนุญาต: A-Z, a-z, 0-9, -, _ (Base64 URL-safe)
     const legacyPattern = /^AIza[0-9A-Za-z\-_]{35}$/;
-    const newPattern    = /^AQ\.[0-9A-Za-z\-_]{30,80}$/;
-    const isValidKey    = legacyPattern.test(inputKey) || newPattern.test(inputKey);
+    const newPattern = /^AQ\.[0-9A-Za-z\-_]{30,80}$/;
+    const isValidKey = legacyPattern.test(inputKey) || newPattern.test(inputKey);
 
     if (!inputKey || !isValidKey) {
       // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
       safeUiAlert_(
         '❌ API Key ไม่ถูกต้อง\n\n' +
-        'รูปแบบที่รองรับ:\n' +
-        '• รูปแบบเก่า: ขึ้นต้นด้วย "AIza" ยาว 39 ตัวอักษร\n' +
-        '• รูปแบบใหม่: ขึ้นต้นด้วย "AQ."   ยาว 33-83 ตัวอักษร\n\n' +
-        'กรุณาตรวจสอบคีย์อีกครั้ง หรือขอคีย์ใหม่จาก\n' +
-        'https://aistudio.google.com/app/apikey'
+          'รูปแบบที่รองรับ:\n' +
+          '• รูปแบบเก่า: ขึ้นต้นด้วย "AIza" ยาว 39 ตัวอักษร\n' +
+          '• รูปแบบใหม่: ขึ้นต้นด้วย "AQ."   ยาว 33-83 ตัวอักษร\n\n' +
+          'กรุณาตรวจสอบคีย์อีกครั้ง หรือขอคีย์ใหม่จาก\n' +
+          'https://aistudio.google.com/app/apikey'
       );
       return;
     }
 
-    PropertiesService.getScriptProperties()
-      .setProperty('GEMINI_API_KEY', inputKey);
+    PropertiesService.getScriptProperties().setProperty('GEMINI_API_KEY', inputKey);
     logInfo('App', 'ตั้งค่า GEMINI_API_KEY สำเร็จ (รูปแบบ: ' + (inputKey.startsWith('AQ.') ? 'v2' : 'v1') + ')');
     // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
     safeUiAlert_('✅ บันทึก API Key เรียบร้อยแล้วครับ!');
@@ -944,7 +986,9 @@ function diagnoseSystemState() {
     if (fixes.length > 0) {
       lines.push('');
       lines.push('🔧 วิธีแก้ปัญหา:');
-      fixes.forEach((f, i) => { lines.push(`  ${i + 1}. ${f}`); });
+      fixes.forEach((f, i) => {
+        lines.push(`  ${i + 1}. ${f}`);
+      });
     } else {
       lines.push('');
       lines.push('✅ ไม่พบปัญหาที่ชัดเจน — ระบบน่าจะทำงานปกติ');
@@ -966,12 +1010,20 @@ function diagnoseRequiredSheets_(ss, lines, fixes) {
   lines.push('');
   lines.push('📋 ชีตที่จำเป็น:');
   const requiredSheets = [
-    SHEET.SOURCE, SHEET.M_PERSON, SHEET.M_PERSON_ALIAS,
-    SHEET.M_PLACE, SHEET.M_PLACE_ALIAS, SHEET.M_ALIAS,
-    SHEET.M_GEO_POINT, SHEET.M_DESTINATION, SHEET.FACT_DELIVERY,
-    SHEET.Q_REVIEW, SHEET.SYS_LOG, SHEET.SYS_TH_GEO
+    SHEET.SOURCE,
+    SHEET.M_PERSON,
+    SHEET.M_PERSON_ALIAS,
+    SHEET.M_PLACE,
+    SHEET.M_PLACE_ALIAS,
+    SHEET.M_ALIAS,
+    SHEET.M_GEO_POINT,
+    SHEET.M_DESTINATION,
+    SHEET.FACT_DELIVERY,
+    SHEET.Q_REVIEW,
+    SHEET.SYS_LOG,
+    SHEET.SYS_TH_GEO
   ];
-  requiredSheets.forEach(name => {
+  requiredSheets.forEach((name) => {
     const sheet = ss.getSheetByName(name);
     if (!sheet) {
       lines.push(`  ❌ ${name}: ไม่พบชีต`);
@@ -989,13 +1041,13 @@ function diagnoseColumnMismatch_(ss, lines, fixes) {
   lines.push('');
   lines.push('📐 ตรวจสอบคอลัมน์ (SCHEMA vs ชีตจริง):');
   const schemaChecks = [
-    { name: SHEET.M_PERSON,       label: 'M_PERSON' },
-    { name: SHEET.M_PLACE,        label: 'M_PLACE' },
-    { name: SHEET.M_GEO_POINT,    label: 'M_GEO_POINT' },
-    { name: SHEET.M_ALIAS,        label: 'M_ALIAS' },
-    { name: SHEET.FACT_DELIVERY,  label: 'FACT_DELIVERY' },
+    { name: SHEET.M_PERSON, label: 'M_PERSON' },
+    { name: SHEET.M_PLACE, label: 'M_PLACE' },
+    { name: SHEET.M_GEO_POINT, label: 'M_GEO_POINT' },
+    { name: SHEET.M_ALIAS, label: 'M_ALIAS' },
+    { name: SHEET.FACT_DELIVERY, label: 'FACT_DELIVERY' }
   ];
-  schemaChecks.forEach(c => {
+  schemaChecks.forEach((c) => {
     const sheet = ss.getSheetByName(c.name);
     const schema = SCHEMA[c.name];
     if (!sheet || !schema) return;
@@ -1032,7 +1084,7 @@ function diagnoseSourceData_(ss, lines, fixes) {
   const syncCol = SRC_IDX.SYNC_STATUS + 1;
   if (srcCols >= syncCol) {
     const syncData = srcSheet.getRange(2, syncCol, sampleMax, 1).getValues();
-    const doneCount = syncData.filter(r => String(r[0]).trim() === SCG_CONFIG.SYNC_DONE_VALUE).length;
+    const doneCount = syncData.filter((r) => String(r[0]).trim() === SCG_CONFIG.SYNC_DONE_VALUE).length;
     const pendingCount = srcTotal - doneCount;
     lines.push(`  SYNC_STATUS: ประมวลผลแล้ว=${doneCount} ค้างอยู่=${pendingCount}`);
     if (pendingCount === 0) {
@@ -1047,7 +1099,7 @@ function diagnoseSourceData_(ss, lines, fixes) {
   const invCol = SRC_IDX.INVOICE_NO + 1;
   if (srcCols >= invCol) {
     const invData = srcSheet.getRange(2, invCol, sampleMax, 1).getValues();
-    const hasInvCount = invData.filter(r => String(r[0]).trim()).length;
+    const hasInvCount = invData.filter((r) => String(r[0]).trim()).length;
     lines.push(`  INVOICE_NO: ${hasInvCount}/${sampleMax} แถวมีค่า`);
     if (hasInvCount === 0) fixes.push('ชีต Source ไม่มี Invoice No — ตรวจสอบโครงสร้างชีต');
   }
@@ -1057,7 +1109,9 @@ function diagnoseSourceData_(ss, lines, fixes) {
   const lngCol = SRC_IDX.LNG + 1;
   if (srcCols >= lngCol) {
     const latLngData = srcSheet.getRange(2, latCol, sampleMax, 2).getValues();
-    const hasGeoCount = latLngData.filter(r => Number(r[0]) !== 0 && Number(r[1]) !== 0 && !isNaN(Number(r[0])) && !isNaN(Number(r[1]))).length;
+    const hasGeoCount = latLngData.filter(
+      (r) => Number(r[0]) !== 0 && Number(r[1]) !== 0 && !isNaN(Number(r[0])) && !isNaN(Number(r[1]))
+    ).length;
     lines.push(`  LAT/LNG: ${hasGeoCount}/${sampleMax} แถวมีพิกัด`);
     if (hasGeoCount === 0) {
       lines.push('  ⚠️ ไม่มีพิกัดเลย — ทุกแถวจะเข้า REVIEW (INVALID_LATLNG)');
@@ -1077,11 +1131,11 @@ function diagnoseRecentErrors_(ss, lines, fixes) {
 
   const logRows = Math.min(20, logSheet.getLastRow() - 1);
   const logData = logSheet.getRange(logSheet.getLastRow() - logRows + 1, 1, logRows, 6).getValues();
-  const errors = logData.filter(r => String(r[SYS_LOG_IDX.LEVEL]).trim() === 'ERROR').slice(-5);
+  const errors = logData.filter((r) => String(r[SYS_LOG_IDX.LEVEL]).trim() === 'ERROR').slice(-5);
   if (errors.length === 0) {
     lines.push('  ✅ ไม่มี Error ใน 20 แถวล่าสุด');
   } else {
-    errors.forEach(e => {
+    errors.forEach((e) => {
       const mod = String(e[SYS_LOG_IDX.MODULE] || '').substring(0, 20);
       const msg = String(e[SYS_LOG_IDX.MESSAGE] || '').substring(0, 80);
       lines.push(`  ❌ [${mod}] ${msg}`);

@@ -62,77 +62,171 @@
 // ============================================================
 
 const PERSON_PREFIX_LIST = [
-  'พลเอก','พลโท','พลตรี','พันเอก','พันโท','พันตรี',
-  'ร้อยเอก','ร้อยโท','ร้อยตรี',
-  'จ่าสิบเอก','จ่าสิบโท','จ่าสิบตรี',
-  'สิบเอก','สิบโท','สิบตรี','พลทหาร',
-  'พลเรือเอก','พลเรือโท','พลเรือตรี',
-  'นาวาเอก','นาวาโท','นาวาตรี',
-  'เรือเอก','เรือโท','เรือตรี',
-  'พลอากาศเอก','พลอากาศโท','พลอากาศตรี',
-  'นาวาอากาศเอก','นาวาอากาศโท','นาวาอากาศตรี',
-  'เรืออากาศเอก','เรืออากาศโท','เรืออากาศตรี',
-  'พลตำรวจเอก','พลตำรวจโท','พลตำรวจตรี',
-  'พันตำรวจเอก','พันตำรวจโท','พันตำรวจตรี',
-  'ร้อยตำรวจเอก','ร้อยตำรวจโท','ร้อยตำรวจตรี',
-  'สิบตำรวจเอก','สิบตำรวจโท','สิบตำรวจตรี',
-  'พลตำรวจ','ผู้กำกับ','รองผู้กำกับ',
-  'ศาสตราจารย์','รองศาสตราจารย์','ผู้ช่วยศาสตราจารย์',
-  'นายแพทย์','แพทย์หญิง','ทันตแพทย์','เภสัชกร',
-  'วิศวกร','สถาปนิก',
-  'นาย','นาง','นางสาว','น.ส.',
-  'คุณ','ครู','อาจารย์',
-  'ดร.','ดร',
-  'พ.อ.','พ.ต.','ร.อ.','ร.ต.','ส.อ.',
-  'พ.ต.อ.','พ.ต.ท.','พ.ต.ต.',
-  'ร.ต.อ.','ร.ต.ท.','ร.ต.ต.',
+  'พลเอก',
+  'พลโท',
+  'พลตรี',
+  'พันเอก',
+  'พันโท',
+  'พันตรี',
+  'ร้อยเอก',
+  'ร้อยโท',
+  'ร้อยตรี',
+  'จ่าสิบเอก',
+  'จ่าสิบโท',
+  'จ่าสิบตรี',
+  'สิบเอก',
+  'สิบโท',
+  'สิบตรี',
+  'พลทหาร',
+  'พลเรือเอก',
+  'พลเรือโท',
+  'พลเรือตรี',
+  'นาวาเอก',
+  'นาวาโท',
+  'นาวาตรี',
+  'เรือเอก',
+  'เรือโท',
+  'เรือตรี',
+  'พลอากาศเอก',
+  'พลอากาศโท',
+  'พลอากาศตรี',
+  'นาวาอากาศเอก',
+  'นาวาอากาศโท',
+  'นาวาอากาศตรี',
+  'เรืออากาศเอก',
+  'เรืออากาศโท',
+  'เรืออากาศตรี',
+  'พลตำรวจเอก',
+  'พลตำรวจโท',
+  'พลตำรวจตรี',
+  'พันตำรวจเอก',
+  'พันตำรวจโท',
+  'พันตำรวจตรี',
+  'ร้อยตำรวจเอก',
+  'ร้อยตำรวจโท',
+  'ร้อยตำรวจตรี',
+  'สิบตำรวจเอก',
+  'สิบตำรวจโท',
+  'สิบตำรวจตรี',
+  'พลตำรวจ',
+  'ผู้กำกับ',
+  'รองผู้กำกับ',
+  'ศาสตราจารย์',
+  'รองศาสตราจารย์',
+  'ผู้ช่วยศาสตราจารย์',
+  'นายแพทย์',
+  'แพทย์หญิง',
+  'ทันตแพทย์',
+  'เภสัชกร',
+  'วิศวกร',
+  'สถาปนิก',
+  'นาย',
+  'นาง',
+  'นางสาว',
+  'น.ส.',
+  'คุณ',
+  'ครู',
+  'อาจารย์',
+  'ดร.',
+  'ดร',
+  'พ.อ.',
+  'พ.ต.',
+  'ร.อ.',
+  'ร.ต.',
+  'ส.อ.',
+  'พ.ต.อ.',
+  'พ.ต.ท.',
+  'พ.ต.ต.',
+  'ร.ต.อ.',
+  'ร.ต.ท.',
+  'ร.ต.ต.'
 ];
 
 /**
  * SORTED_PREFIX_LIST — [ADD v003] Pre-sort ครั้งเดียว
  * แทนการ sort ทุกครั้งที่เรียก normalizePersonNameFull
  */
-const SORTED_PREFIX_LIST = PERSON_PREFIX_LIST
-  .slice()
-  .sort((a, b) => b.length - a.length);
+const SORTED_PREFIX_LIST = PERSON_PREFIX_LIST.slice().sort((a, b) => b.length - a.length);
 
 /**
  * COMPANY_SUFFIX_LIST — [FIX v003] เรียงยาวไปสั้น (longest-first)
  * ป้องกัน "จำกัด" ตัดก่อน "ห้างหุ้นส่วนจำกัด"
  */
 const COMPANY_SUFFIX_LIST = [
-  'จำกัด(มหาชน)', 'จำกัด (มหาชน)',
-  'ห้างหุ้นส่วนจำกัด', 'ห้างหุ้นส่วนสามัญ',
-  'มหาชน', 'บริษัท', 'บมจ.', 'บจก.', 'หจก.', 'หสน.',
-  'บจ.', 'หจ.', 'บมจ', 'บจก', 'หจก',
-  'จำกัด', '(จำกัด)', 'จก.',
-  'ร้านค้า', 'กิจการ', 'ร้าน',
+  'จำกัด(มหาชน)',
+  'จำกัด (มหาชน)',
+  'ห้างหุ้นส่วนจำกัด',
+  'ห้างหุ้นส่วนสามัญ',
+  'มหาชน',
+  'บริษัท',
+  'บมจ.',
+  'บจก.',
+  'หจก.',
+  'หสน.',
+  'บจ.',
+  'หจ.',
+  'บมจ',
+  'บจก',
+  'หจก',
+  'จำกัด',
+  '(จำกัด)',
+  'จก.',
+  'ร้านค้า',
+  'กิจการ',
+  'ร้าน'
 ].sort((a, b) => b.length - a.length); // sort ทันทีตอน declare
 
 const CHAIN_STORE_LIST = [
-  'ไทวัสดุ','โฮมโปร','โกลบอลเฮ้าส์','สยามโกลบอล',
-  'แพลนท์ปูน','ปูนซีเมนต์','ศูนย์บริการ',
-  'ไซต์งาน','โครงการ','หน่วยงาน',
-  'วัสดุภัณฑ์','วัสดุก่อสร้าง',
+  'ไทวัสดุ',
+  'โฮมโปร',
+  'โกลบอลเฮ้าส์',
+  'สยามโกลบอล',
+  'แพลนท์ปูน',
+  'ปูนซีเมนต์',
+  'ศูนย์บริการ',
+  'ไซต์งาน',
+  'โครงการ',
+  'หน่วยงาน',
+  'วัสดุภัณฑ์',
+  'วัสดุก่อสร้าง'
 ];
 
 const DELIVERY_NOTE_LIST = [
-  'ฝากป้อม','ฝากรปภ','ฝากยาม','ฝากรักษาความปลอดภัย',
-  'COD','เก็บเงินปลายทาง',
-  'ห้ามโยน','ระวังแตก','ระวังหัก','บอบบาง',
-  'แช่เย็น','เก็บในที่เย็น',
-  'ส่งด่วน','ด่วนมาก','ด่วนพิเศษ',
-  'ส่งก่อน','ส่งหลัง',
-  'นัดส่ง','โทรก่อนส่ง','โทรนัด','โทร.','โทร','ติดต่อ','เบอร์โทร','เบอร์','เบอร์ติดต่อ',
+  'ฝากป้อม',
+  'ฝากรปภ',
+  'ฝากยาม',
+  'ฝากรักษาความปลอดภัย',
+  'COD',
+  'เก็บเงินปลายทาง',
+  'ห้ามโยน',
+  'ระวังแตก',
+  'ระวังหัก',
+  'บอบบาง',
+  'แช่เย็น',
+  'เก็บในที่เย็น',
+  'ส่งด่วน',
+  'ด่วนมาก',
+  'ด่วนพิเศษ',
+  'ส่งก่อน',
+  'ส่งหลัง',
+  'นัดส่ง',
+  'โทรก่อนส่ง',
+  'โทรนัด',
+  'โทร.',
+  'โทร',
+  'ติดต่อ',
+  'เบอร์โทร',
+  'เบอร์',
+  'เบอร์ติดต่อ'
 ].sort((a, b) => b.length - a.length); // [FIX v008] เรียงยาวไปสั้น
 
 // ============================================================
 // SECTION 2: Regex Patterns
 // ============================================================
 
-const PHONE_PATTERN   = /(?:\+66|0)[0-9]{1,2}[-.\s]?[0-9]{3,4}[-.\s]?[0-9]{4}/g;
-const DOC_NO_PATTERN  = /\b[0-9]{13}\b/g;  // [Fix #5] จำกัดเป็น 13 หลัก (บัตรประชาชน) ป้องกันตัดเลขที่บ้าน
-const REF_NO_PATTERN  = /#[0-9]+|No\.?\s*[0-9]+/gi;
+const PHONE_PATTERN = /(?:\+66|0)[0-9]{1,2}[-.\s]?[0-9]{3,4}[-.\s]?[0-9]{4}/g;
+const DOC_NO_PATTERN = /\b[0-9]{13}\b/g; // [Fix #5] จำกัดเป็น 13 หลัก (บัตรประชาชน) ป้องกันตัดเลขที่บ้าน
+const REF_NO_PATTERN = /#[0-9]+|No\.?\s*[0-9]+/gi;
 
 // ============================================================
 // SECTION 3: normalizePersonNameFull
@@ -155,8 +249,8 @@ function runNormalize() {
  */
 function normalizePersonNameFull(rawName) {
   const original = String(rawName || '').trim();
-  let working    = original;
-  const notes    = [];
+  let working = original;
+  const notes = [];
 
   if (!working) {
     return buildNormResult_(original, '', false, '', '', []);
@@ -174,7 +268,7 @@ function normalizePersonNameFull(rawName) {
   if (docResult.notes.length > 0) notes.push(...docResult.notes);
 
   // --- Step 3: ดึง Delivery Notes ออก (global replace) ---
-  DELIVERY_NOTE_LIST.forEach(noteWord => {
+  DELIVERY_NOTE_LIST.forEach((noteWord) => {
     if (working.includes(noteWord)) {
       notes.push(noteWord);
       const safeNote = escapeRegex_(noteWord);
@@ -184,7 +278,7 @@ function normalizePersonNameFull(rawName) {
 
   // --- Step 4: ตรวจสอบนิติบุคคล ---
   const companyResult = normNormalizeCompany_(working);
-  working    = companyResult.working;
+  working = companyResult.working;
   const isCompany = companyResult.isCompany;
   if (companyResult.notes.length > 0) notes.push(...companyResult.notes);
 
@@ -196,14 +290,12 @@ function normalizePersonNameFull(rawName) {
   }
 
   // --- Step 6: ล้างช่องว่างและอักขระพิเศษ ---
-  working = working.replace(/\s+/g, ' ')
+  working = working
+    .replace(/\s+/g, ' ')
     .replace(/[^\u0E00-\u0E7Fa-zA-Z0-9\s]/g, '')
     .trim();
 
-  return buildNormResult_(
-    original, working, isCompany,
-    extractedPhone, extractedDoc, notes
-  );
+  return buildNormResult_(original, working, isCompany, extractedPhone, extractedDoc, notes);
 }
 
 /**
@@ -211,12 +303,12 @@ function normalizePersonNameFull(rawName) {
  */
 function buildNormResult_(original, cleanName, isCompany, phone, docNo, notes) {
   return {
-    cleanName:      cleanName,
-    isCompany:      isCompany,
+    cleanName: cleanName,
+    isCompany: isCompany,
     extractedPhone: phone,
     extractedDocNo: docNo,
-    deliveryNotes:  notes,
-    originalName:   original,
+    deliveryNotes: notes,
+    originalName: original
   };
 }
 
@@ -253,7 +345,7 @@ function normExtractDocNo_(working) {
   if (docMatches) {
     docNo = docMatches.join(',');
     // [FIX v5.2.002] เก็บลง Note ห้ามทิ้ง
-    docMatches.forEach(d => notes.push(d));
+    docMatches.forEach((d) => notes.push(d));
     working = working.replace(DOC_NO_PATTERN, '').trim();
   }
   const refMatches = working.match(REF_NO_PATTERN);
@@ -261,7 +353,7 @@ function normExtractDocNo_(working) {
     const refStr = refMatches.join(',');
     docNo = docNo ? `${docNo},${refStr}` : refStr;
     // [FIX v5.2.002] เก็บลง Note ห้ามทิ้ง
-    refMatches.forEach(r => notes.push(r));
+    refMatches.forEach((r) => notes.push(r));
     working = working.replace(REF_NO_PATTERN, '').trim();
   }
   return { working: working, docNo: docNo, notes: notes };
@@ -276,20 +368,20 @@ function normNormalizeCompany_(working) {
   let isCompany = false;
   const notes = [];
 
-  const hasCompanySuffix = COMPANY_SUFFIX_LIST.some(s => {
+  const hasCompanySuffix = COMPANY_SUFFIX_LIST.some((s) => {
     const idx = working.indexOf(s);
     if (idx === -1) return false;
     const before = idx > 0 ? working[idx - 1] : ' ';
     return /[\s\(ก-๙a-zA-Z]/.test(before) || idx === 0;
   });
-  const hasChainStore = CHAIN_STORE_LIST.some(s => working.includes(s));
+  const hasChainStore = CHAIN_STORE_LIST.some((s) => working.includes(s));
 
   if (hasCompanySuffix || hasChainStore) {
     isCompany = true;
     // [FIX v5.2.002] เก็บ Suffix ลง Note ก่อนตัดออก
     // [FIX BUG-AUDIT-014A V5.5.042] ใช้ stripCompanySuffixWithBoundary_ แทน raw regex
     //   เพื่อไม่ให้ตัด suffix ที่อยู่กลางคำอื่นแบบเงียบ (เช่น 'ร้าn จำกัดสินค้า' → 'ร้าn สินค้า')
-    COMPANY_SUFFIX_LIST.forEach(suffix => {
+    COMPANY_SUFFIX_LIST.forEach((suffix) => {
       if (working.includes(suffix)) {
         notes.push(suffix);
         working = stripCompanySuffixWithBoundary_(working, suffix);
@@ -300,7 +392,7 @@ function normNormalizeCompany_(working) {
     //   จะเหลือ cleanName สั้นเกินไป ทำให้ match ผิดพลาด/false positive
     //   แค่ push ลง notes เพื่อ audit trail ได้ แต่ไม่ตัดออกจาก working
     if (hasChainStore) {
-      CHAIN_STORE_LIST.forEach(chain => {
+      CHAIN_STORE_LIST.forEach((chain) => {
         if (working.includes(chain)) {
           notes.push(chain);
         }
@@ -335,7 +427,7 @@ function normCleanHonorific_(working) {
 
   // --- Step 5.1: หักหัวเขา (Thai Acronyms) ---
   const tailPatterns = [/^\s*ว่าน\s+/, /^\s*โอ๊ะ\s+/, /^\s*ชาย\s+/, /^\s*หญิง\s+/];
-  tailPatterns.forEach(pattern => {
+  tailPatterns.forEach((pattern) => {
     const match = working.match(pattern);
     if (match) {
       notes.push(match[0].trim()); // [FIX v5.2.002] เก็บลง Note
@@ -355,8 +447,8 @@ function normCleanHonorific_(working) {
  * [FIX v003] Regex บ้าน → กัน false positive "บ้านโป่ง" "บ้านนา"
  */
 function normalizePlaceName(rawPlace) {
-  let working   = String(rawPlace || '').trim();
-  const notes   = [];
+  let working = String(rawPlace || '').trim();
+  const notes = [];
   let placeType = 'other';
 
   if (!working) {
@@ -366,12 +458,12 @@ function normalizePlaceName(rawPlace) {
   // --- Step 1: ดึงเบอร์โทรและเลขเอกสารออก (เก็บลง Note) ---
   const phoneMatches = working.match(PHONE_PATTERN);
   if (phoneMatches) {
-    phoneMatches.forEach(p => notes.push(p));
+    phoneMatches.forEach((p) => notes.push(p));
     working = working.replace(PHONE_PATTERN, '').trim();
   }
   const docMatches = working.match(DOC_NO_PATTERN);
   if (docMatches) {
-    docMatches.forEach(d => notes.push(d));
+    docMatches.forEach((d) => notes.push(d));
     working = working.replace(DOC_NO_PATTERN, '').trim();
   }
 
@@ -380,16 +472,14 @@ function normalizePlaceName(rawPlace) {
     placeType = 'condo';
   } else if (/ห้างสรรพสินค้า|เซ็นทรัล|เทสโก้|โลตัส|มอลล์|Mall|Plaza|Center|Centre/i.test(working)) {
     placeType = 'mall';
-  } else if (
-    /หมู่บ้าน|บ้านเลขที่|^บ้าน\s|Village|Moo\s*[0-9]/i.test(working)
-  ) {
+  } else if (/หมู่บ้าน|บ้านเลขที่|^บ้าน\s|Village|Moo\s*[0-9]/i.test(working)) {
     placeType = 'house';
   } else if (/ไซต์งาน|โครงการ|ก่อสร้าง|Site/i.test(working)) {
     placeType = 'site';
   }
 
   // --- Step 3: ดึง Delivery Notes ออก ---
-  DELIVERY_NOTE_LIST.forEach(noteWord => {
+  DELIVERY_NOTE_LIST.forEach((noteWord) => {
     if (working.includes(noteWord)) {
       notes.push(noteWord);
       const safeNote = escapeRegex_(noteWord);
@@ -399,7 +489,7 @@ function normalizePlaceName(rawPlace) {
 
   // --- Step 4: ดึงพวก บจก./จำกัด ออก ---
   // [FIX BUG-AUDIT-014A V5.5.042] ใช้ stripCompanySuffixWithBoundary_ แทน raw regex
-  COMPANY_SUFFIX_LIST.forEach(suffix => {
+  COMPANY_SUFFIX_LIST.forEach((suffix) => {
     if (working.includes(suffix)) {
       notes.push(suffix);
       working = stripCompanySuffixWithBoundary_(working, suffix);
@@ -481,9 +571,7 @@ function stripCompanySuffixWithBoundary_(working, suffix) {
   //   - ถ้า suffix ไม่ลงท้ายด้วย '.' (เช่น 'จำกัด') ให้รับเฉพาะ punctuation/whitespace/end
   //     → 'ไม่จำกัดจำนวน' จะไม่ถูกตัด (เพราะ 'จำกัด' อยู่กลางคำ ไม่ใช่ suffix จริง)
   const endsWithDot = /\.$/.test(suffix);
-  const lookAhead = endsWithDot
-    ? '(?=$|[\\s\\)\\.,;:\\u0E00-\\u0E7Fa-zA-Z])'
-    : '(?=$|[\\s\\)\\.,;:])';
+  const lookAhead = endsWithDot ? '(?=$|[\\s\\)\\.,;:\\u0E00-\\u0E7Fa-zA-Z])' : '(?=$|[\\s\\)\\.,;:])';
   const pattern = '(?<=^|[\\s\\(\\u0E00-\\u0E7Fa-zA-Z])' + safeSuffix + lookAhead;
   return working.replace(new RegExp(pattern, 'gi'), '').replace(/\s+/g, ' ').trim();
 }

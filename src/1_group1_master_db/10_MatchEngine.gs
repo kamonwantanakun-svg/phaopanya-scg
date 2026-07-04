@@ -90,13 +90,13 @@ function addEntityToEnrichmentContext_(entityType, entityId, masterUuid, canonic
   if (!_ALIAS_ENRICHMENT_CONTEXT) return;
   if (entityType === 'PERSON' && entityId) {
     _ALIAS_ENRICHMENT_CONTEXT.personMap[entityId] = {
-      canonical:  canonical,
+      canonical: canonical,
       normalized: normalized,
       masterUuid: masterUuid
     };
   } else if (entityType === 'PLACE' && entityId) {
     _ALIAS_ENRICHMENT_CONTEXT.placeMap[entityId] = {
-      canonical:  canonical,
+      canonical: canonical,
       normalized: normalized,
       masterUuid: masterUuid
     };
@@ -177,13 +177,13 @@ function prepareMatchEngineContext_(startTime) {
   // [FIX v5.2.007] ลบ Checkpoint Index — เริ่มจาก 0 เสมอ
   // เหตุผล: getAllSourceRows() กรอง SUCCESS ออกอยู่แล้ว ดังนั้น Array ที่ได้จะมีเฉพาะแถวที่ยังไม่ได้ทำ
   //   Checkpoint เดิมเก็บ "ตำแหน่ง" ใน Array แต่ Array หดเล็กลงทุกรอบ ทำให้ตำแหน่งชี้ผิด → ข้อมูลถูกข้ามไป (BUG)
-  resetProcessingState_();  // [REF-018] renamed from clearCheckpoint_ — ล้าง stale processing state
+  resetProcessingState_(); // [REF-018] renamed from clearCheckpoint_ — ล้าง stale processing state
   const startIndex = 0;
   const pendingRows = loadSourceBatch_(); // [REF-002] Abstraction layer
 
   if (pendingRows.length === 0) {
     logInfo('MatchEngine', 'ไม่มีแถวที่ต้องประมวลผล');
-    removeAutoResume_();  // ลบ trigger ที่ค้างอยู่ด้วย
+    removeAutoResume_(); // ลบ trigger ที่ค้างอยู่ด้วย
     return null;
   }
 
@@ -216,7 +216,7 @@ function prepareMatchEngineContext_(startTime) {
  * @private
  */
 function runMatchEngineLoop_(ctx, startTime) {
-  const timeLimit = AI_CONFIG.TIME_LIMIT_MS || (5 * 60 * 1000);
+  const timeLimit = AI_CONFIG.TIME_LIMIT_MS || 5 * 60 * 1000;
 
   for (let i = ctx.startIndex; i < ctx.pendingRows.length; i++) {
     if (new Date() - startTime > timeLimit) {
@@ -231,38 +231,60 @@ function runMatchEngineLoop_(ctx, startTime) {
       const result = processOneRow(srcObj);
       ctx.processed++;
 
-      if (result.action === 'AUTO_MATCH')  ctx.autoMatched++;
-      if (result.action === 'CREATE_NEW')  ctx.created++;
-      if (result.action === 'REVIEW')      ctx.queued++;
+      if (result.action === 'AUTO_MATCH') ctx.autoMatched++;
+      if (result.action === 'CREATE_NEW') ctx.created++;
+      if (result.action === 'REVIEW') ctx.queued++;
 
-      if (result.factData)   ctx.factBatch.push(result.factData);
+      if (result.factData) ctx.factBatch.push(result.factData);
       if (result.reviewData) ctx.reviewBatch.push(result.reviewData);
 
       // [PERF-001] เก็บ stats IDs ไว้อัปเดตเป็น batch ใน flushBatches_
       if (result.statsToDefer) {
-        result.statsToDefer.personIds.forEach(function(id) { ctx.personIdsToStats.add(id); });
-        result.statsToDefer.placeIds.forEach(function(id) { ctx.placeIdsToStats.add(id); });
-        result.statsToDefer.geoIds.forEach(function(id) { ctx.geoIdsToStats.add(id); });
-        result.statsToDefer.destStats.forEach(function(item) { ctx.destStatsQueue.push(item); });
+        result.statsToDefer.personIds.forEach(function (id) {
+          ctx.personIdsToStats.add(id);
+        });
+        result.statsToDefer.placeIds.forEach(function (id) {
+          ctx.placeIdsToStats.add(id);
+        });
+        result.statsToDefer.geoIds.forEach(function (id) {
+          ctx.geoIdsToStats.add(id);
+        });
+        result.statsToDefer.destStats.forEach(function (item) {
+          ctx.destStatsQueue.push(item);
+        });
       }
 
       ctx.successRows.push(srcObj);
-
     } catch (rowErr) {
       ctx.errorCount++;
       ctx.failedRows.push(srcObj);
-      logError('MatchEngine', `แถว ${srcObj.sourceRow} (Invoice hash: ${generateMd5Hash(String(srcObj.invoiceNo || '')).substring(0, 8)}): ${rowErr.message}`, rowErr);
+      logError(
+        'MatchEngine',
+        `แถว ${srcObj.sourceRow} (Invoice hash: ${generateMd5Hash(String(srcObj.invoiceNo || '')).substring(0, 8)}): ${rowErr.message}`,
+        rowErr
+      );
     }
 
     // Batch Write & Sync Status every BATCH_SIZE
     if (ctx.processed % AI_CONFIG.BATCH_SIZE === 0 && ctx.processed > 0) {
-      flushBatches_(ctx.factBatch, ctx.reviewBatch, ctx.successRows, ctx.failedRows,
-        ctx.personIdsToStats, ctx.placeIdsToStats, ctx.geoIdsToStats, ctx.destStatsQueue);
-      ctx.factBatch = []; ctx.reviewBatch = []; ctx.successRows = []; ctx.failedRows = [];
+      flushBatches_(
+        ctx.factBatch,
+        ctx.reviewBatch,
+        ctx.successRows,
+        ctx.failedRows,
+        ctx.personIdsToStats,
+        ctx.placeIdsToStats,
+        ctx.geoIdsToStats,
+        ctx.destStatsQueue
+      );
+      ctx.factBatch = [];
+      ctx.reviewBatch = [];
+      ctx.successRows = [];
+      ctx.failedRows = [];
       ctx.personIdsToStats = new Set();
-      ctx.placeIdsToStats  = new Set();
-      ctx.geoIdsToStats    = new Set();
-      ctx.destStatsQueue   = [];
+      ctx.placeIdsToStats = new Set();
+      ctx.geoIdsToStats = new Set();
+      ctx.destStatsQueue = [];
     }
   }
 }
@@ -277,8 +299,16 @@ function runMatchEngineLoop_(ctx, startTime) {
  */
 function finalizeMatchEngine_(ctx, startTime, lock) {
   // Final Flush
-  flushBatches_(ctx.factBatch, ctx.reviewBatch, ctx.successRows, ctx.failedRows,
-    ctx.personIdsToStats, ctx.placeIdsToStats, ctx.geoIdsToStats, ctx.destStatsQueue);
+  flushBatches_(
+    ctx.factBatch,
+    ctx.reviewBatch,
+    ctx.successRows,
+    ctx.failedRows,
+    ctx.personIdsToStats,
+    ctx.placeIdsToStats,
+    ctx.geoIdsToStats,
+    ctx.destStatsQueue
+  );
 
   // [FIX v5.2.007] ถ้าประมวลผลครบทุกแถว → ลบ Auto-Trigger
   if (ctx.processed + ctx.errorCount >= ctx.pendingRows.length) {
@@ -286,9 +316,11 @@ function finalizeMatchEngine_(ctx, startTime, lock) {
   }
 
   const elapsedSec = Math.round((new Date() - startTime) / 1000);
-  logInfo('MatchEngine',
+  logInfo(
+    'MatchEngine',
     `เสร็จสิ้น — รัน:${ctx.processed} Match:${ctx.autoMatched} ` +
-    `สร้างใหม่:${ctx.created} Review:${ctx.queued} Error:${ctx.errorCount} (${elapsedSec}s)`);
+      `สร้างใหม่:${ctx.created} Review:${ctx.queued} Error:${ctx.errorCount} (${elapsedSec}s)`
+  );
 }
 
 /**
@@ -299,9 +331,16 @@ function finalizeMatchEngine_(ctx, startTime, lock) {
  *   ที่สะสมไว้จาก createGeoPoint ในระหว่าง batch — ลด API calls จาก N (N = createGeoPoint count)
  *   เหลือ 1 ต่อ batch
  */
-function flushBatches_(factBatch, reviewBatch, successRows, failedRows,
-  personIdsToStats, placeIdsToStats, geoIdsToStats, destStatsQueue) {
-
+function flushBatches_(
+  factBatch,
+  reviewBatch,
+  successRows,
+  failedRows,
+  personIdsToStats,
+  placeIdsToStats,
+  geoIdsToStats,
+  destStatsQueue
+) {
   // [REF-002] Persist fact + review data via abstraction layer
   persistResult_(factBatch, reviewBatch);
 
@@ -371,11 +410,15 @@ function autoEnrichAliasesFromFactBatch_(factBatch) {
     const totalPlace = results.placeAliasRows.length;
 
     if (totalGlobal > 0 || totalPerson > 0 || totalPlace > 0) {
-      logInfo('MatchEngine',
+      logInfo(
+        'MatchEngine',
         'Auto-Enrich (Single Writer v5.4.001): ' +
-        'M_ALIAS=' + totalGlobal +
-        ' M_PERSON_ALIAS=' + totalPerson +
-        ' M_PLACE_ALIAS=' + totalPlace
+          'M_ALIAS=' +
+          totalGlobal +
+          ' M_PERSON_ALIAS=' +
+          totalPerson +
+          ' M_PLACE_ALIAS=' +
+          totalPlace
       );
     }
   } catch (err) {
@@ -397,10 +440,10 @@ function prepareAliasEnrichmentData_() {
   // Person map: personId → { canonical, normalized, masterUuid }
   const allPersons = loadAllPersons_();
   const personMap = {};
-  allPersons.forEach(function(p) {
+  allPersons.forEach(function (p) {
     if (p.personId && p.masterUuid) {
       personMap[p.personId] = {
-        canonical:  p.canonical,
+        canonical: p.canonical,
         normalized: p.normalized,
         masterUuid: p.masterUuid
       };
@@ -410,10 +453,10 @@ function prepareAliasEnrichmentData_() {
   // Place map: placeId → { canonical, normalized, masterUuid }
   const allPlaces = loadAllPlaces_();
   const placeMap = {};
-  allPlaces.forEach(function(p) {
+  allPlaces.forEach(function (p) {
     if (p.placeId && p.masterUuid) {
       placeMap[p.placeId] = {
-        canonical:  p.canonical,
+        canonical: p.canonical,
         normalized: p.normalized,
         masterUuid: p.masterUuid
       };
@@ -423,7 +466,7 @@ function prepareAliasEnrichmentData_() {
   // === 2. โหลด Alias ที่มีอยู่แล้ว เพื่อ Dedup ===
   const dedupSets = matchBuildDedupSets_();
   const existingPersonAliasSet = dedupSets.existingPersonAliasSet;
-  const existingPlaceAliasSet  = dedupSets.existingPlaceAliasSet;
+  const existingPlaceAliasSet = dedupSets.existingPlaceAliasSet;
   const existingGlobalAliasSet = dedupSets.existingGlobalAliasSet;
   const mAliasSheet = ss.getSheetByName(SHEET.M_ALIAS);
 
@@ -452,9 +495,9 @@ function matchBuildDedupSets_() {
   // M_PERSON_ALIAS dedup: "personId::normalized"
   const existingPersonAliasSet = new Set();
   const existingPersonAliasData = loadAllAliases_();
-  existingPersonAliasData.forEach(function(r) {
+  existingPersonAliasData.forEach(function (r) {
     if (!r[PERSON_ALIAS_IDX.ACTIVE_FLAG]) return;
-    const pId  = String(r[PERSON_ALIAS_IDX.PERSON_ID] || '').trim();
+    const pId = String(r[PERSON_ALIAS_IDX.PERSON_ID] || '').trim();
     const aNorm = normalizeForCompare(r[PERSON_ALIAS_IDX.ALIAS_NAME]);
     if (pId && aNorm) existingPersonAliasSet.add(pId + '::' + aNorm);
   });
@@ -462,9 +505,9 @@ function matchBuildDedupSets_() {
   // M_PLACE_ALIAS dedup: "placeId::normalized"
   const existingPlaceAliasSet = new Set();
   const existingPlaceAliasData = loadAllPlaceAliases_();
-  existingPlaceAliasData.forEach(function(r) {
+  existingPlaceAliasData.forEach(function (r) {
     if (!r[PLACE_ALIAS_IDX.ACTIVE_FLAG]) return;
-    const plId  = String(r[PLACE_ALIAS_IDX.PLACE_ID] || '').trim();
+    const plId = String(r[PLACE_ALIAS_IDX.PLACE_ID] || '').trim();
     const aNorm = normalizeForCompare(r[PLACE_ALIAS_IDX.ALIAS_NAME]);
     if (plId && aNorm) existingPlaceAliasSet.add(plId + '::' + aNorm);
   });
@@ -490,15 +533,15 @@ function processFactRowsForAliases_(factBatch, context) {
   const personMap = context.personMap;
   const placeMap = context.placeMap;
 
-  const newGlobalAliasRows  = [];  // M_ALIAS
-  const newPersonAliasRows  = [];  // M_PERSON_ALIAS
-  const newPlaceAliasRows   = [];  // M_PLACE_ALIAS
+  const newGlobalAliasRows = []; // M_ALIAS
+  const newPersonAliasRows = []; // M_PERSON_ALIAS
+  const newPlaceAliasRows = []; // M_PLACE_ALIAS
   const now = new Date();
 
-  factBatch.forEach(function(r) {
-    const pId   = String(r[FACT_IDX.PERSON_ID]   || '').trim();
-    const plId  = String(r[FACT_IDX.PLACE_ID]     || '').trim();
-    const pInfo = pId  ? personMap[pId]  : null;
+  factBatch.forEach(function (r) {
+    const pId = String(r[FACT_IDX.PERSON_ID] || '').trim();
+    const plId = String(r[FACT_IDX.PLACE_ID] || '').trim();
+    const pInfo = pId ? personMap[pId] : null;
     const plInfo = plId ? placeMap[plId] : null;
 
     // ─── PERSON: Canonical + Variant ───
@@ -520,20 +563,42 @@ function processFactRowsForAliases_(factBatch, context) {
     if (driverVerifiedName && pInfo) {
       // สร้าง alias สำหรับ "ชื่อจริง" → Person master_uuid
       matchEnrichEntityAliases_(
-        'PERSON', pId, pInfo.masterUuid, pInfo.canonical, pInfo.normalized,
-        driverVerifiedName, 100,  // confidence=100 เพราะคนขับยืนยันเอง
-        { existingGlobalAliasSet: context.existingGlobalAliasSet, entityAliasSet: context.existingPersonAliasSet, source: 'DRIVER_VERIFIED' },
-        newGlobalAliasRows, newPersonAliasRows, now
+        'PERSON',
+        pId,
+        pInfo.masterUuid,
+        pInfo.canonical,
+        pInfo.normalized,
+        driverVerifiedName,
+        100, // confidence=100 เพราะคนขับยืนยันเอง
+        {
+          existingGlobalAliasSet: context.existingGlobalAliasSet,
+          entityAliasSet: context.existingPersonAliasSet,
+          source: 'DRIVER_VERIFIED'
+        },
+        newGlobalAliasRows,
+        newPersonAliasRows,
+        now
       );
     }
 
     if (driverVerifiedAddr && plInfo) {
       // สร้าง alias สำหรับ "ที่อยู่จริง" → Place master_uuid
       matchEnrichEntityAliases_(
-        'PLACE', plId, plInfo.masterUuid, plInfo.canonical, plInfo.normalized,
-        driverVerifiedAddr, 100,  // confidence=100 เพราะคนขับยืนยันเอง
-        { existingGlobalAliasSet: context.existingGlobalAliasSet, entityAliasSet: context.existingPlaceAliasSet, source: 'DRIVER_VERIFIED' },
-        newGlobalAliasRows, newPlaceAliasRows, now
+        'PLACE',
+        plId,
+        plInfo.masterUuid,
+        plInfo.canonical,
+        plInfo.normalized,
+        driverVerifiedAddr,
+        100, // confidence=100 เพราะคนขับยืนยันเอง
+        {
+          existingGlobalAliasSet: context.existingGlobalAliasSet,
+          entityAliasSet: context.existingPlaceAliasSet,
+          source: 'DRIVER_VERIFIED'
+        },
+        newGlobalAliasRows,
+        newPlaceAliasRows,
+        now
       );
     }
   });
@@ -560,7 +625,19 @@ function processFactRowsForAliases_(factBatch, context) {
  * @param {Array} entityRows - M_PERSON_ALIAS or M_PLACE_ALIAS accumulator
  * @param {Date} now - timestamp
  */
-function matchEnrichEntityAliases_(entityType, entityId, masterUuid, canonical, canonicalNorm, rawVariant, variantConfidence, context, globalRows, entityRows, now) {
+function matchEnrichEntityAliases_(
+  entityType,
+  entityId,
+  masterUuid,
+  canonical,
+  canonicalNorm,
+  rawVariant,
+  variantConfidence,
+  context,
+  globalRows,
+  entityRows,
+  now
+) {
   const entityAliasSet = context.entityAliasSet;
 
   // 3a/3c. Canonical Name → M_ALIAS (confidence 100)
@@ -585,7 +662,6 @@ function matchEnrichEntityAliases_(entityType, entityId, masterUuid, canonical, 
   if (rawVariant && rawVariant.length >= 2) {
     const rawNorm = normalizeForCompare(rawVariant);
     if (rawNorm && rawNorm.length >= 2) {
-
       // M_ALIAS variant
       const variantKey = entityType + '::' + masterUuid + '::' + rawNorm;
       if (!context.existingGlobalAliasSet.has(variantKey)) {
@@ -608,14 +684,7 @@ function matchEnrichEntityAliases_(entityType, entityId, masterUuid, canonical, 
         if (!entityAliasSet.has(eaKey)) {
           entityAliasSet.add(eaKey);
           const entityPrefix = entityType === 'PERSON' ? 'PA' : 'PLA';
-          entityRows.push([
-            generateShortId(entityPrefix),
-            entityId,
-            rawVariant,
-            variantConfidence,
-            now,
-            true
-          ]);
+          entityRows.push([generateShortId(entityPrefix), entityId, rawVariant, variantConfidence, now, true]);
         }
       }
     }
@@ -633,13 +702,24 @@ function matchEnrichEntityAliases_(entityType, entityId, masterUuid, canonical, 
  * @param {Date} now - timestamp
  */
 function matchEnrichPersonAliases_(factRow, pInfo, context, globalRows, personRows, now) {
-  const pId           = String(factRow[FACT_IDX.PERSON_ID]    || '').trim();
+  const pId = String(factRow[FACT_IDX.PERSON_ID] || '').trim();
   const rawPersonName = String(factRow[FACT_IDX.SHIP_TO_NAME] || '').trim();
   matchEnrichEntityAliases_(
-    'PERSON', pId, pInfo.masterUuid, pInfo.canonical, pInfo.normalized,
-    rawPersonName, 95,
-    { existingGlobalAliasSet: context.existingGlobalAliasSet, entityAliasSet: context.existingPersonAliasSet, source: 'AUTO_ENRICH_FACT' },
-    globalRows, personRows, now
+    'PERSON',
+    pId,
+    pInfo.masterUuid,
+    pInfo.canonical,
+    pInfo.normalized,
+    rawPersonName,
+    95,
+    {
+      existingGlobalAliasSet: context.existingGlobalAliasSet,
+      entityAliasSet: context.existingPersonAliasSet,
+      source: 'AUTO_ENRICH_FACT'
+    },
+    globalRows,
+    personRows,
+    now
   );
 }
 
@@ -654,13 +734,24 @@ function matchEnrichPersonAliases_(factRow, pInfo, context, globalRows, personRo
  * @param {Date} now - timestamp
  */
 function matchEnrichPlaceAliases_(factRow, plInfo, context, globalRows, placeRows, now) {
-  const plId          = String(factRow[FACT_IDX.PLACE_ID]    || '').trim();
-  const rawPlaceAddr  = String(factRow[FACT_IDX.SHIP_TO_ADDR] || '').trim();
+  const plId = String(factRow[FACT_IDX.PLACE_ID] || '').trim();
+  const rawPlaceAddr = String(factRow[FACT_IDX.SHIP_TO_ADDR] || '').trim();
   matchEnrichEntityAliases_(
-    'PLACE', plId, plInfo.masterUuid, plInfo.canonical, plInfo.normalized,
-    rawPlaceAddr, 90,
-    { existingGlobalAliasSet: context.existingGlobalAliasSet, entityAliasSet: context.existingPlaceAliasSet, source: 'AUTO_ENRICH_FACT' },
-    globalRows, placeRows, now
+    'PLACE',
+    plId,
+    plInfo.masterUuid,
+    plInfo.canonical,
+    plInfo.normalized,
+    rawPlaceAddr,
+    90,
+    {
+      existingGlobalAliasSet: context.existingGlobalAliasSet,
+      entityAliasSet: context.existingPlaceAliasSet,
+      source: 'AUTO_ENRICH_FACT'
+    },
+    globalRows,
+    placeRows,
+    now
   );
 }
 
@@ -699,17 +790,17 @@ function commitAliasChanges_(results, context) {
 function cleanupStaleCanonicalAliases_(newGlobalAliasRows, context) {
   try {
     if (!newGlobalAliasRows || newGlobalAliasRows.length === 0) return;
-    if (typeof loadGlobalAliasAll_ !== 'function') return;  // guard — AliasService must be loaded
+    if (typeof loadGlobalAliasAll_ !== 'function') return; // guard — AliasService must be loaded
 
     // 1. Collect canonical aliases being written this batch
     //    globalRow format: [aliasId, masterUuid, variantName, entityType, confidence, source, createdAt, activeFlag]
-    const canonicalMap = {};  // key: "entityType::masterUuid" → canonicalNorm (current canonical)
-    newGlobalAliasRows.forEach(function(row) {
+    const canonicalMap = {}; // key: "entityType::masterUuid" → canonicalNorm (current canonical)
+    newGlobalAliasRows.forEach(function (row) {
       const confidence = Number(row[4] || 0);
-      if (confidence !== 100) return;  // only canonical aliases
-      const masterUuid   = String(row[1] || '').trim();
-      const entityType   = String(row[3] || '').trim();
-      const variantName  = String(row[2] || '').trim();
+      if (confidence !== 100) return; // only canonical aliases
+      const masterUuid = String(row[1] || '').trim();
+      const entityType = String(row[3] || '').trim();
+      const variantName = String(row[2] || '').trim();
       const canonicalNorm = normalizeForCompare(variantName);
       if (!masterUuid || !entityType || !canonicalNorm) return;
       const key = entityType + '::' + masterUuid;
@@ -726,19 +817,19 @@ function cleanupStaleCanonicalAliases_(newGlobalAliasRows, context) {
 
     // 3. Find rows to deactivate
     const rowsToDeactivate = [];
-    allAliases.forEach(function(alias) {
-      if (!alias.activeFlag) return;            // already inactive — skip
-      if (Number(alias.confidence) !== 100) return;  // only canonical aliases
+    allAliases.forEach(function (alias) {
+      if (!alias.activeFlag) return; // already inactive — skip
+      if (Number(alias.confidence) !== 100) return; // only canonical aliases
       const source = String(alias.source || '');
       // Only deactivate AUTO_ENRICH aliases — preserve DRIVER_VERIFIED / MANUAL / MIGRATION
       if (source.indexOf('AUTO_ENRICH') !== 0) return;
 
       const key = alias.entityType + '::' + alias.masterUuid;
       const currentCanonicalNorm = canonicalMap[key];
-      if (!currentCanonicalNorm) return;        // not in this batch — skip
+      if (!currentCanonicalNorm) return; // not in this batch — skip
 
       const existingNorm = normalizeForCompare(alias.variantName);
-      if (existingNorm === currentCanonicalNorm) return;  // matches current canonical — keep
+      if (existingNorm === currentCanonicalNorm) return; // matches current canonical — keep
 
       // Stale canonical — mark for deactivation
       rowsToDeactivate.push(alias._rowNum);
@@ -750,8 +841,8 @@ function cleanupStaleCanonicalAliases_(newGlobalAliasRows, context) {
     const mAliasSheet = context.mAliasSheet;
     if (!mAliasSheet) return;
 
-    const activeFlagCol = ALIAS_IDX.ACTIVE_FLAG + 1;  // 1-indexed column number
-    const a1Notations = rowsToDeactivate.map(function(rn) {
+    const activeFlagCol = ALIAS_IDX.ACTIVE_FLAG + 1; // 1-indexed column number
+    const a1Notations = rowsToDeactivate.map(function (rn) {
       // Convert column number to letter (inline — avoid cross-module dependency)
       let col = activeFlagCol;
       let letter = '';
@@ -774,9 +865,13 @@ function cleanupStaleCanonicalAliases_(newGlobalAliasRows, context) {
       CacheService.getScriptCache().removeAll([CACHE_KEY.GLOBAL_ALIAS_ALL, CACHE_KEY.GLOBAL_ALIAS_REVERSE]);
     }
 
-    logInfo('MatchEngine',
-      'cleanupStaleCanonicalAliases_: deactivated ' + rowsToDeactivate.length +
-      ' stale canonical aliases across ' + keysToCheck.length + ' entities'
+    logInfo(
+      'MatchEngine',
+      'cleanupStaleCanonicalAliases_: deactivated ' +
+        rowsToDeactivate.length +
+        ' stale canonical aliases across ' +
+        keysToCheck.length +
+        ' entities'
     );
   } catch (err) {
     // Non-fatal — don't break the pipeline just because cleanup failed
@@ -791,10 +886,7 @@ function cleanupStaleCanonicalAliases_(newGlobalAliasRows, context) {
  */
 function matchCommitGlobalAlias_(mAliasSheet, rows) {
   if (rows.length > 0 && mAliasSheet) {
-    mAliasSheet.getRange(
-      mAliasSheet.getLastRow() + 1, 1,
-      rows.length, SCHEMA[SHEET.M_ALIAS].length
-    ).setValues(rows);
+    mAliasSheet.getRange(mAliasSheet.getLastRow() + 1, 1, rows.length, SCHEMA[SHEET.M_ALIAS].length).setValues(rows);
     // [FIX BUG-C01 V5.5.022] Use invalidateChunkedCache_ instead of removeAll
     //   เดิมใช้ removeAll เฉพาะ base keys ทำให้ chunk keys (_CHUNKS, _0, _1, ...) ตกค้าง
     //   loadGlobalAliasesMap_/loadGlobalAliasReverseIndex_ อ่านจาก chunk keys เก่า → stale alias data
@@ -818,15 +910,12 @@ function matchCommitPersonAlias_(ss, rows, context) {
   if (rows.length > 0) {
     const paSheet = ss.getSheetByName(SHEET.M_PERSON_ALIAS);
     if (paSheet) {
-      paSheet.getRange(
-        paSheet.getLastRow() + 1, 1,
-        rows.length, SCHEMA[SHEET.M_PERSON_ALIAS].length
-      ).setValues(rows);
+      paSheet.getRange(paSheet.getLastRow() + 1, 1, rows.length, SCHEMA[SHEET.M_PERSON_ALIAS].length).setValues(rows);
       invalidateAliasCache_();
       // [FIX CRIT-018] Update in-memory dedup sets incrementally
       if (_ALIAS_ENRICHMENT_CONTEXT) {
-        rows.forEach(function(paRow) {
-          const pId = String(paRow[PERSON_ALIAS_IDX.PERSON_ID]  || '').trim();
+        rows.forEach(function (paRow) {
+          const pId = String(paRow[PERSON_ALIAS_IDX.PERSON_ID] || '').trim();
           const aNorm = normalizeForCompare(paRow[PERSON_ALIAS_IDX.ALIAS_NAME]);
           if (pId && aNorm) _ALIAS_ENRICHMENT_CONTEXT.existingPersonAliasSet.add(pId + '::' + aNorm);
         });
@@ -845,15 +934,12 @@ function matchCommitPlaceAlias_(ss, rows, context) {
   if (rows.length > 0) {
     const plaSheet = ss.getSheetByName(SHEET.M_PLACE_ALIAS);
     if (plaSheet) {
-      plaSheet.getRange(
-        plaSheet.getLastRow() + 1, 1,
-        rows.length, SCHEMA[SHEET.M_PLACE_ALIAS].length
-      ).setValues(rows);
+      plaSheet.getRange(plaSheet.getLastRow() + 1, 1, rows.length, SCHEMA[SHEET.M_PLACE_ALIAS].length).setValues(rows);
       invalidatePlaceAliasCache_();
       // [FIX CRIT-018] Update in-memory dedup sets incrementally
       if (_ALIAS_ENRICHMENT_CONTEXT) {
-        rows.forEach(function(plaRow) {
-          const plId = String(plaRow[PLACE_ALIAS_IDX.PLACE_ID]   || '').trim();
+        rows.forEach(function (plaRow) {
+          const plId = String(plaRow[PLACE_ALIAS_IDX.PLACE_ID] || '').trim();
           const aNorm = normalizeForCompare(plaRow[PLACE_ALIAS_IDX.ALIAS_NAME]);
           if (plId && aNorm) _ALIAS_ENRICHMENT_CONTEXT.existingPlaceAliasSet.add(plId + '::' + aNorm);
         });
@@ -877,23 +963,20 @@ function processOneRow(srcObj) {
 
   // [FIX P1] ส่ง rawAddress (ที่อยู่เต็ม) เข้า arg ที่ 2 เพื่อให้ tryMatchBranch
   //   สามารถใช้ extractProvince_ หาจังหวัด + รหัสไปรษณีย์ได้ครบ
-  const placeResult  = resolvePlace(
-    srcObj.rawPlaceName || srcObj.rawAddress,
-    srcObj.rawAddress || ''
-  );
+  const placeResult = resolvePlace(srcObj.rawPlaceName || srcObj.rawAddress, srcObj.rawAddress || '');
 
-  const geoResult    = resolveGeo(srcObj.rawLat, srcObj.rawLng);
+  const geoResult = resolveGeo(srcObj.rawLat, srcObj.rawLng);
 
   const decision = makeMatchDecision(srcObj, personResult, placeResult, geoResult);
-  const result   = executeDecision(srcObj, decision, personResult, placeResult, geoResult);
+  const result = executeDecision(srcObj, decision, personResult, placeResult, geoResult);
 
   // [PERF-001] ส่ง statsToDefer กลับให้ runMatchEngine เก็บรวมใน Set
   return {
-    action:       decision.action,
-    txId:         result.txId,
-    factData:     result.factData,
-    reviewData:   result.reviewData,
-    statsToDefer: result.statsToDefer || null  // [PERF-001]
+    action: decision.action,
+    txId: result.txId,
+    factData: result.factData,
+    reviewData: result.reviewData,
+    statsToDefer: result.statsToDefer || null // [PERF-001]
   };
 }
 
@@ -909,10 +992,9 @@ function processOneRow(srcObj) {
  * [FIX v003] Rule 7: !isPersonOk && !isPlaceOk (เดิม hasPerson ผิด)
  */
 function makeMatchDecision(srcObj, personResult, placeResult, geoResult) {
-  const isGeoInMaster   = geoResult.status === 'FOUND';
+  const isGeoInMaster = geoResult.status === 'FOUND';
   const isPersonInMaster = personResult.status === 'FOUND';
-  const isPlaceInMaster  = placeResult.status  === 'FOUND' ||
-                          placeResult.status  === 'BRANCH_MATCH';
+  const isPlaceInMaster = placeResult.status === 'FOUND' || placeResult.status === 'BRANCH_MATCH';
 
   // [FIX v003] เรียก getGeoProvince_ ครั้งเดียวก่อนเข้า Rule
   const geoProvince = isGeoInMaster ? getGeoProvince_(geoResult.geoId) : '';
@@ -923,16 +1005,20 @@ function makeMatchDecision(srcObj, personResult, placeResult, geoResult) {
   // Rule 1: ไม่มีพิกัดใน Source Sheet เลย (พิกัดเป็น 0,0 หรือว่าง)
   if (!hasGeoInSource) {
     return {
-      action: 'REVIEW', reason: 'INVALID_LATLNG',
-      confidence: 0, priority: 1,
+      action: 'REVIEW',
+      reason: 'INVALID_LATLNG',
+      confidence: 0,
+      priority: 1
     };
   }
 
   // Rule 2: ชื่อคุณภาพต่ำ (สั้นเกินไปหรือมั่ว)
   if (personResult.status === 'LOW_QUALITY' || placeResult.status === 'LOW_QUALITY') {
     return {
-      action: 'REVIEW', reason: 'LOW_QUALITY_DATA',
-      confidence: 0, priority: 2,
+      action: 'REVIEW',
+      reason: 'LOW_QUALITY_DATA',
+      confidence: 0,
+      priority: 2
     };
   }
 
@@ -942,16 +1028,18 @@ function makeMatchDecision(srcObj, personResult, placeResult, geoResult) {
   //   ตอนนี้: normalize ทั้งสองค่าผ่าน TH_PROVINCES aliases แล้วค่อยเทียบ
   //   เก็บ original values ไว้ใน evidence เพื่อ debug
   if (isGeoInMaster && geoProvince && srcObj.province) {
-    const normalizedGeoProvince = (typeof normalizeProvinceForCompare_ === 'function')
-      ? normalizeProvinceForCompare_(geoProvince)
-      : geoProvince;
-    const normalizedSrcProvince = (typeof normalizeProvinceForCompare_ === 'function')
-      ? normalizeProvinceForCompare_(srcObj.province)
-      : srcObj.province;
+    const normalizedGeoProvince =
+      typeof normalizeProvinceForCompare_ === 'function' ? normalizeProvinceForCompare_(geoProvince) : geoProvince;
+    const normalizedSrcProvince =
+      typeof normalizeProvinceForCompare_ === 'function'
+        ? normalizeProvinceForCompare_(srcObj.province)
+        : srcObj.province;
     if (normalizedGeoProvince !== normalizedSrcProvince) {
       return {
-        action: 'REVIEW', reason: 'GEO_PROVINCE_CONFLICT',
-        confidence: 50, priority: 2,
+        action: 'REVIEW',
+        reason: 'GEO_PROVINCE_CONFLICT',
+        confidence: 50,
+        priority: 2,
         // [FIX Phase-B #14] เก็บ original values ไว้ใน evidence เพื่อ debug
         evidence: `geoProvince="${geoProvince}"|srcProvince="${srcObj.province}"|normalizedGeo="${normalizedGeoProvince}"|normalizedSrc="${normalizedSrcProvince}"`
       };
@@ -964,18 +1052,18 @@ function makeMatchDecision(srcObj, personResult, placeResult, geoResult) {
       action: 'REVIEW',
       reason: geoResult.issue_type, // 'GEO_NEARBY_YELLOW' or 'GEO_NEARBY_ORANGE'
       confidence: 50,
-      priority: 1, // สำคัญระดับ 1 เพราะต้องให้คนตัดสินใจว่าพิกัดเดียวกันไหม
+      priority: 1 // สำคัญระดับ 1 เพราะต้องให้คนตัดสินใจว่าพิกัดเดียวกันไหม
     };
   }
 
   // Rule 4: พบครบทั้ง 3 อย่างใน Master -> AUTO_MATCH (Full)
   if (isGeoInMaster && isPersonInMaster && isPlaceInMaster) {
-    const confidence = matchCalcFullScore_(
-      geoResult.confidence, personResult.confidence, placeResult.confidence
-    );
+    const confidence = matchCalcFullScore_(geoResult.confidence, personResult.confidence, placeResult.confidence);
     return {
-      action: 'AUTO_MATCH', reason: APP_CONST.MATCH_FULL,
-      confidence, priority: 0,
+      action: 'AUTO_MATCH',
+      reason: APP_CONST.MATCH_FULL,
+      confidence,
+      priority: 0,
       evidence: 'name|place|geo' // [NEW v5.2.008]
     };
   }
@@ -983,40 +1071,48 @@ function makeMatchDecision(srcObj, personResult, placeResult, geoResult) {
   // Rule 5: พบพิกัดใน Master + อย่างใดอย่างหนึ่ง (คน หรือ สถานที่) -> AUTO_MATCH (Partial)
   if (isGeoInMaster && (isPersonInMaster || isPlaceInMaster)) {
     const confidence = matchCalcGeoAnchorScore_(
-      geoResult.confidence, personResult.confidence, placeResult.confidence, isPersonInMaster
+      geoResult.confidence,
+      personResult.confidence,
+      placeResult.confidence,
+      isPersonInMaster
     );
     const evidence = isPersonInMaster ? 'name|geo' : 'place|geo';
     return {
-      action: 'AUTO_MATCH', reason: APP_CONST.MATCH_GEO,
-      confidence, priority: 0,
+      action: 'AUTO_MATCH',
+      reason: APP_CONST.MATCH_GEO,
+      confidence,
+      priority: 0,
       evidence: evidence // [NEW v5.2.008]
     };
   }
 
   // Rule 6: มีความกำกวม (Fuzzy Match / Needs Review)
   if (personResult.status === 'NEEDS_REVIEW' || placeResult.status === 'NEEDS_REVIEW') {
-    const confidence = Math.max(
-      personResult.confidence, placeResult.confidence
-    );
+    const confidence = Math.max(personResult.confidence, placeResult.confidence);
     return {
-      action: 'REVIEW', reason: APP_CONST.MATCH_FUZZY,
-      confidence, priority: 2,
+      action: 'REVIEW',
+      reason: APP_CONST.MATCH_FUZZY,
+      confidence,
+      priority: 2
     };
   }
 
   // Rule 7: ทุกอย่างใหม่หมด แต่ Driver ส่งพิกัดมาให้ -> CREATE_NEW
   if (hasGeoInSource && !isGeoInMaster && !isPersonInMaster && !isPlaceInMaster) {
     return {
-      action: 'CREATE_NEW', reason: 'ALL_NEW_WITH_GEO',
+      action: 'CREATE_NEW',
+      reason: 'ALL_NEW_WITH_GEO',
       confidence: geoResult.confidence || 100,
-      priority: 0,
+      priority: 0
     };
   }
 
   // Rule 8: Default
   return {
-    action: 'REVIEW', reason: 'NEW_RECORD_PENDING',
-    confidence: 0, priority: 3,
+    action: 'REVIEW',
+    reason: 'NEW_RECORD_PENDING',
+    confidence: 0,
+    priority: 3
   };
 }
 
@@ -1029,11 +1125,7 @@ function makeMatchDecision(srcObj, personResult, placeResult, geoResult) {
  * @returns {number} confidence (0-100)
  */
 function matchCalcFullScore_(geoConf, personConf, placeConf) {
-  return Math.round(
-    geoConf    * 0.5 +
-    personConf * 0.3 +
-    placeConf  * 0.2
-  );
+  return Math.round(geoConf * 0.5 + personConf * 0.3 + placeConf * 0.2);
 }
 
 /**
@@ -1046,11 +1138,10 @@ function matchCalcFullScore_(geoConf, personConf, placeConf) {
  * @returns {number} confidence (0-95)
  */
 function matchCalcGeoAnchorScore_(geoConf, personConf, placeConf, hasPerson) {
-  return Math.min(95, Math.round(
-    geoConf                                      * 0.60 +
-    (hasPerson ? personConf : 0)                 * 0.25 +
-    (hasPerson ? 0           : placeConf)        * 0.15
-  ));
+  return Math.min(
+    95,
+    Math.round(geoConf * 0.6 + (hasPerson ? personConf : 0) * 0.25 + (hasPerson ? 0 : placeConf) * 0.15)
+  );
 }
 
 // ============================================================
@@ -1064,13 +1155,13 @@ function matchCalcGeoAnchorScore_(geoConf, personConf, placeConf, hasPerson) {
  */
 function executeDecision(srcObj, decision, personResult, placeResult, geoResult) {
   const personId = personResult ? personResult.personId : null;
-  const placeId  = placeResult  ? placeResult.placeId  : null;
-  let geoId    = geoResult    ? geoResult.geoId    : null;
+  const placeId = placeResult ? placeResult.placeId : null;
+  let geoId = geoResult ? geoResult.geoId : null;
 
   // [FIX v5.5.001] Only call getEnrichedGeoData() for AUTO_MATCH and CREATE_NEW
   // REVIEW rows don't need expensive geo enrichment
   let geoEnrich = null;
-  const needsGeoEnrich = (decision.action === 'AUTO_MATCH' || decision.action === 'CREATE_NEW');
+  const needsGeoEnrich = decision.action === 'AUTO_MATCH' || decision.action === 'CREATE_NEW';
 
   if (needsGeoEnrich) {
     geoEnrich = getEnrichedGeoData(srcObj.rawAddress, srcObj.rawPlaceName);
@@ -1083,8 +1174,8 @@ function executeDecision(srcObj, decision, personResult, placeResult, geoResult)
         srcObj.rawLng,
         'driver',
         geoEnrich.fullAddress || srcObj.rawAddress,
-        geoEnrich.province    || srcObj.province,
-        geoEnrich.district    || srcObj.district,
+        geoEnrich.province || srcObj.province,
+        geoEnrich.district || srcObj.district,
         placeId
       );
       // [FIX CodeQL js/trivial-conditional V5.5.035] outer if บนบรรทัด 1080 ตรวจ geoResult แล้ว จึงไม่จำเป็นต้องเช็คซ้ำ
@@ -1094,15 +1185,19 @@ function executeDecision(srcObj, decision, personResult, placeResult, geoResult)
 
   // ─── Dispatch to handler ───────────────────────────────────
   switch (decision.action) {
-  case 'AUTO_MATCH':
-    return handleAutoMatch_(srcObj, decision, personId, placeId, geoId);
-  case 'CREATE_NEW':
-    return handleCreateNew_(srcObj, decision, personResult, placeResult, geoId, geoEnrich);
-  case 'REVIEW':
-    return handleReview_(srcObj, decision, personResult, placeResult, geoResult);
-  default:
-    logError('MatchEngine', `executeDecision: Unknown action: ${decision.action}`, new Error('UNKNOWN_ACTION:' + decision.action));
-    return { txId: null, factData: null, reviewData: null };
+    case 'AUTO_MATCH':
+      return handleAutoMatch_(srcObj, decision, personId, placeId, geoId);
+    case 'CREATE_NEW':
+      return handleCreateNew_(srcObj, decision, personResult, placeResult, geoId, geoEnrich);
+    case 'REVIEW':
+      return handleReview_(srcObj, decision, personResult, placeResult, geoResult);
+    default:
+      logError(
+        'MatchEngine',
+        `executeDecision: Unknown action: ${decision.action}`,
+        new Error('UNKNOWN_ACTION:' + decision.action)
+      );
+      return { txId: null, factData: null, reviewData: null };
   }
 }
 
@@ -1120,14 +1215,14 @@ function handleAutoMatch_(srcObj, decision, personId, placeId, geoId) {
   // Stats updates will be done in flushBatches_() via processOneRow() return values
   const statsToDefer = {
     personIds: [],
-    placeIds:  [],
-    geoIds:    [],
+    placeIds: [],
+    geoIds: [],
     destStats: []
   };
 
   if (personId) statsToDefer.personIds.push(personId);
-  if (placeId)  statsToDefer.placeIds.push(placeId);
-  if (geoId)    statsToDefer.geoIds.push(geoId);
+  if (placeId) statsToDefer.placeIds.push(placeId);
+  if (geoId) statsToDefer.geoIds.push(geoId);
 
   // [FIX Phase-B #13] Flag incomplete destination for Rule 5 (geo + one of person/place)
   //   Rule 5 (geo+person only OR geo+place only) สร้าง destination ที่ placeId='' หรือ personId='' (by design)
@@ -1136,11 +1231,12 @@ function handleAutoMatch_(srcObj, decision, personId, placeId, geoId) {
   //   ไม่เปลี่ยน logic การทำงาน — แค่เพิ่ม flag ใน MATCH_REASON column ของ FACT_DELIVERY เพื่อ audit
   let enrichedDecision = decision;
   const hasPerson = !!personId;
-  const hasPlace  = !!placeId;
-  if (hasPerson !== hasPlace) {  // XOR — only one of person/place present (Rule 5 partial)
+  const hasPlace = !!placeId;
+  if (hasPerson !== hasPlace) {
+    // XOR — only one of person/place present (Rule 5 partial)
     enrichedDecision = Object.assign({}, decision);
     const flagStr = hasPerson ? 'PARTIAL_MATCH_NO_PLACE' : 'PARTIAL_MATCH_NO_PERSON';
-    enrichedDecision.reason   = (decision.reason   || '') + '|' + flagStr;
+    enrichedDecision.reason = (decision.reason || '') + '|' + flagStr;
     enrichedDecision.evidence = (decision.evidence || '') + '|' + flagStr;
   }
 
@@ -1150,19 +1246,15 @@ function handleAutoMatch_(srcObj, decision, personId, placeId, geoId) {
     destId = destResult.destId;
     if (destId) statsToDefer.destStats.push({ destId: destId, deliveryDate: srcObj.deliveryDate });
   } else {
-    destId = createDestination(
-      personId, placeId, geoId,
-      srcObj.rawLat, srcObj.rawLng,
-      srcObj.deliveryDate
-    );
+    destId = createDestination(personId, placeId, geoId, srcObj.rawLat, srcObj.rawLng, srcObj.deliveryDate);
   }
 
   const txRes = upsertFactDelivery(srcObj, personId, placeId, geoId, destId, enrichedDecision);
   return {
-    txId:       txRes ? txRes.txId : null,
-    factData:   txRes && txRes.isNew ? txRes.rowData : null,
+    txId: txRes ? txRes.txId : null,
+    factData: txRes && txRes.isNew ? txRes.rowData : null,
     reviewData: null,
-    statsToDefer: statsToDefer  // [PERF-001] ส่งกลับให้ caller
+    statsToDefer: statsToDefer // [PERF-001] ส่งกลับให้ caller
   };
 }
 
@@ -1176,47 +1268,43 @@ function handleAutoMatch_(srcObj, decision, personId, placeId, geoId) {
  */
 function handleCreateNew_(srcObj, decision, personResult, placeResult, geoId, geoEnrich) {
   let personId = personResult ? personResult.personId : null;
-  let placeId  = placeResult  ? placeResult.placeId  : null;
-  let destId   = null;
+  let placeId = placeResult ? placeResult.placeId : null;
+  let destId = null;
 
   if (!personId && personResult.normResult) {
     personId = createPerson(personResult.normResult);
     // [FIX CRIT-005] เพิ่ม Person ใหม่เข้า alias enrichment context — ป้องกัน stale cache
     if (personId) {
-      const pUuid = (typeof convertPersonIdToUuid === 'function') ? convertPersonIdToUuid(personId) : null;
-      addEntityToEnrichmentContext_('PERSON', personId, pUuid, personResult.canonical || '', personResult.normalized || '');
+      const pUuid = typeof convertPersonIdToUuid === 'function' ? convertPersonIdToUuid(personId) : null;
+      addEntityToEnrichmentContext_(
+        'PERSON',
+        personId,
+        pUuid,
+        personResult.canonical || '',
+        personResult.normalized || ''
+      );
     }
   }
   if (!placeId && placeResult.normResult) {
     const placeNorm = placeResult.normResult || {};
     placeNorm.fullAddress = srcObj.rawAddress || srcObj.rawPlaceName || geoEnrich.fullAddress;
-    placeId = createPlace(
-      placeNorm,
-      geoEnrich.province,
-      geoEnrich.district,
-      geoEnrich.subDistrict,
-      geoEnrich.postcode
-    );
+    placeId = createPlace(placeNorm, geoEnrich.province, geoEnrich.district, geoEnrich.subDistrict, geoEnrich.postcode);
     // [FIX CRIT-005] เพิ่ม Place ใหม่เข้า alias enrichment context — ป้องกัน stale cache
     if (placeId) {
-      const plUuid = (typeof convertPlaceIdToUuid === 'function') ? convertPlaceIdToUuid(placeId) : null;
+      const plUuid = typeof convertPlaceIdToUuid === 'function' ? convertPlaceIdToUuid(placeId) : null;
       addEntityToEnrichmentContext_('PLACE', placeId, plUuid, placeNorm.canonical || '', placeNorm.normalized || '');
     }
   }
   // geoId created before switch (v5.2.003)
 
   if (geoId && (personId || placeId)) {
-    destId = createDestination(
-      personId, placeId, geoId,
-      srcObj.rawLat, srcObj.rawLng,
-      srcObj.deliveryDate
-    );
+    destId = createDestination(personId, placeId, geoId, srcObj.rawLat, srcObj.rawLng, srcObj.deliveryDate);
   }
 
   const txRes = upsertFactDelivery(srcObj, personId, placeId, geoId, destId, decision);
   return {
-    txId:       txRes ? txRes.txId : null,
-    factData:   txRes && txRes.isNew ? txRes.rowData : null,
+    txId: txRes ? txRes.txId : null,
+    factData: txRes && txRes.isNew ? txRes.rowData : null,
     reviewData: null
   };
 }
@@ -1233,14 +1321,11 @@ function handleReview_(srcObj, decision, personResult, placeResult, geoResult) {
     updateSyncStatus_([srcObj], 'REVIEW');
   }
   return {
-    txId:       null,
-    factData:   null,
+    txId: null,
+    factData: null,
     reviewData: qRes ? qRes.rowData : null
   };
 }
-
-
-
 
 // ============================================================
 // SECTION 5: Helper Functions
@@ -1281,23 +1366,23 @@ function detectSameGeoMultiPerson(geoId, currentPersonId) {
   // [AUDIT-002 V5.5.042] Log warning ถ้าถูกเรียก เพื่อให้ผู้ดูแลสังเกตเห็นว่า
   //   ฟังก์ชันนี้ยังไม่ได้ wire เข้า production pipeline
   if (typeof logWarn === 'function') {
-    logWarn('MatchEngine',
+    logWarn(
+      'MatchEngine',
       'detectSameGeoMultiPerson() ถูกเรียก — หมายเหตุ: ฟังก์ชันนี้ไม่ได้ wire เข้า makeMatchDecision ' +
-      '(dead code ตั้งแต่ v5.4) ตรวจสอบ BLUEPRINT.md §6 สำหรับการ wire ที่ถูกต้อง');
+        '(dead code ตั้งแต่ v5.4) ตรวจสอบ BLUEPRINT.md §6 สำหรับการ wire ที่ถูกต้อง'
+    );
   }
   const allDests = loadAllDestinations_();
-  return allDests.some(d =>
-    d.geoId    === geoId &&
-    d.personId !== currentPersonId &&
-    d.status   === APP_CONST.STATUS_ACTIVE
+  return allDests.some(
+    (d) => d.geoId === geoId && d.personId !== currentPersonId && d.status === APP_CONST.STATUS_ACTIVE
   );
 }
 
 function getGeoProvince_(geoId) {
   if (!geoId) return '';
   const allGeos = loadAllGeos_();
-  const geo     = allGeos.find(g => g.geoId === geoId);
-  return geo ? (geo.province || '') : '';
+  const geo = allGeos.find((g) => g.geoId === geoId);
+  return geo ? geo.province || '' : '';
 }
 
 // ============================================================
@@ -1316,7 +1401,9 @@ function resetProcessingState_() {
     const props = PropertiesService.getScriptProperties();
     props.deleteProperty('MATCH_CHECKPOINT_INDEX');
     props.deleteProperty('MATCH_CHECKPOINT_ROW');
-  } catch (e) { /* ignore — cleanup only */ }
+  } catch (e) {
+    /* ignore — cleanup only */
+  }
   logInfo('MatchEngine', 'ล้าง Processing State เรียบร้อย');
 }
 
@@ -1395,12 +1482,24 @@ function persistResult_(factData, reviewData) {
       autoEnrichAliasesFromFactBatch_(factData);
     } catch (aliasErr) {
       // [SEC-006 FIX] Mask invoice numbers — log เฉพาะจำนวน + ตัวอย่างแรก (3 ตัวแรก + ***)
-      const failedInvoices = factData.map(function(r) { return normalizeInvoiceNo(r[FACT_IDX.INVOICE_NO]); }).filter(Boolean);
-      const sampleMasked = failedInvoices[0] ? (String(failedInvoices[0]).substring(0, 3) + '***') : 'n/a';
-      logError('MatchEngine',
-        'autoEnrichAliases ล้มเหลว — M_ALIAS ขาดสำหรับ ' + failedInvoices.length + ' invoices ' +
-        '(ตัวอย่างแรก: ' + sampleMasked + '). ' +
-        'กรุณารัน generatePersonAliasesFromHistory เพื่อซ่อมแซม: ' + aliasErr.message, aliasErr);
+      const failedInvoices = factData
+        .map(function (r) {
+          return normalizeInvoiceNo(r[FACT_IDX.INVOICE_NO]);
+        })
+        .filter(Boolean);
+      const sampleMasked = failedInvoices[0] ? String(failedInvoices[0]).substring(0, 3) + '***' : 'n/a';
+      logError(
+        'MatchEngine',
+        'autoEnrichAliases ล้มเหลว — M_ALIAS ขาดสำหรับ ' +
+          failedInvoices.length +
+          ' invoices ' +
+          '(ตัวอย่างแรก: ' +
+          sampleMasked +
+          '). ' +
+          'กรุณารัน generatePersonAliasesFromHistory เพื่อซ่อมแซม: ' +
+          aliasErr.message,
+        aliasErr
+      );
     }
   }
 
@@ -1411,7 +1510,7 @@ function persistResult_(factData, reviewData) {
     reviewSheet.getRange(startRow, 1, reviewData.length, numCols).setValues(reviewData);
 
     // [UPGRADE v5.2.005] ระบายสีแถว Q_REVIEW ตาม issue_type
-    const backgrounds = reviewData.map(row => {
+    const backgrounds = reviewData.map((row) => {
       const issueType = String(row[REVIEW_IDX.ISSUE_TYPE] || '').trim();
       let color = null;
       if (issueType === 'GEO_NEARBY_YELLOW') color = '#fff2cc';
@@ -1474,8 +1573,8 @@ function resolveAndPersistMerge_(srcObj, candidates) {
     targetPersonId = candidates.candPersonIds[0];
   }
 
-  const targetPlaceId = (candidates && candidates.candPlaceIds && candidates.candPlaceIds.length > 0)
-    ? candidates.candPlaceIds[0] : null;
+  const targetPlaceId =
+    candidates && candidates.candPlaceIds && candidates.candPlaceIds.length > 0 ? candidates.candPlaceIds[0] : null;
 
   // Geo + Dest resolution
   let targetGeoId = null;
@@ -1491,8 +1590,12 @@ function resolveAndPersistMerge_(srcObj, candidates) {
     }
   }
 
-  const factResult = upsertFactDelivery(srcObj, targetPersonId, targetPlaceId, targetGeoId, targetDestId,
-    { action: 'MERGE_TO_CANDIDATE', reason: 'REVIEW_MERGE_APPROVED', confidence: 90, priority: 0 });
+  const factResult = upsertFactDelivery(srcObj, targetPersonId, targetPlaceId, targetGeoId, targetDestId, {
+    action: 'MERGE_TO_CANDIDATE',
+    reason: 'REVIEW_MERGE_APPROVED',
+    confidence: 90,
+    priority: 0
+  });
 
   if (factResult && factResult.isNew && factResult.rowData) {
     return { factRowData: factResult.rowData };
@@ -1507,8 +1610,8 @@ function resolveAndPersistMerge_(srcObj, candidates) {
  */
 function resolveAndPersistCreate_(srcObj) {
   const rawPerson = srcObj.rawPersonName || '';
-  const rawPlace  = srcObj.rawPlaceName || '';
-  const rawAddr   = srcObj.rawAddress || '';
+  const rawPlace = srcObj.rawPlaceName || '';
+  const rawAddr = srcObj.rawAddress || '';
 
   // Geo enrichment
   let geoEnrich = null;
@@ -1530,8 +1633,13 @@ function resolveAndPersistCreate_(srcObj) {
   if (!placeId) {
     const placeNorm = placeResult.normResult || {};
     if (safeGeoEnrich.fullAddress) placeNorm.fullAddress = safeGeoEnrich.fullAddress;
-    placeId = createPlace(placeNorm, safeGeoEnrich.province, safeGeoEnrich.district,
-      safeGeoEnrich.subDistrict, safeGeoEnrich.postcode);
+    placeId = createPlace(
+      placeNorm,
+      safeGeoEnrich.province,
+      safeGeoEnrich.district,
+      safeGeoEnrich.subDistrict,
+      safeGeoEnrich.postcode
+    );
   }
 
   // Geo
@@ -1540,10 +1648,15 @@ function resolveAndPersistCreate_(srcObj) {
     const geoRes = resolveGeo(srcObj.rawLat, srcObj.rawLng);
     geoId = geoRes.geoId;
     if (!geoId) {
-      geoId = createGeoPoint(srcObj.rawLat, srcObj.rawLng, 'manual',
+      geoId = createGeoPoint(
+        srcObj.rawLat,
+        srcObj.rawLng,
+        'manual',
         safeGeoEnrich.fullAddress || rawAddr,
         safeGeoEnrich.province,
-        safeGeoEnrich.district, placeId);
+        safeGeoEnrich.district,
+        placeId
+      );
     }
   }
 
@@ -1553,8 +1666,12 @@ function resolveAndPersistCreate_(srcObj) {
     destId = createDestination(personId, placeId, geoId, srcObj.rawLat, srcObj.rawLng, null);
   }
 
-  const factResult = upsertFactDelivery(srcObj, personId, placeId, geoId, destId,
-    { action: 'CREATE_NEW', reason: 'REVIEW_APPROVED', confidence: 95, priority: 0 });
+  const factResult = upsertFactDelivery(srcObj, personId, placeId, geoId, destId, {
+    action: 'CREATE_NEW',
+    reason: 'REVIEW_APPROVED',
+    confidence: 95,
+    priority: 0
+  });
 
   if (factResult && factResult.isNew && factResult.rowData) {
     return { factRowData: factResult.rowData };

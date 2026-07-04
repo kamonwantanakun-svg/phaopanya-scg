@@ -89,11 +89,7 @@ function levenshteinDistance(strA, strB) {
   for (let i = 1; i <= lenA; i++) {
     for (let j = 1; j <= lenB; j++) {
       const cost = strA[i - 1] === strB[j - 1] ? 0 : 1;
-      matrix[i][j] = Math.min(
-        matrix[i - 1][j]     + 1,
-        matrix[i][j - 1]     + 1,
-        matrix[i - 1][j - 1] + cost
-      );
+      matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
     }
   }
   return matrix[lenA][lenB];
@@ -110,11 +106,11 @@ function diceCoefficient(strA, strB) {
   if (strA === strB) return 1;
   if (strA.length < 2 || strB.length < 2) return 0;
 
-  const bigramsA    = buildBigramSet_(strA);
-  const bigramsB    = buildBigramSet_(strB);
-  let intersection  = 0;
+  const bigramsA = buildBigramSet_(strA);
+  const bigramsB = buildBigramSet_(strB);
+  let intersection = 0;
 
-  bigramsA.forEach(bg => {
+  bigramsA.forEach((bg) => {
     if (bigramsB.has(bg)) intersection++;
   });
 
@@ -148,8 +144,8 @@ function resetSourceSyncStatus() {
     const resp = ui.alert(
       '🔄 ยืนยันการรีเซ็ตสถานะ?',
       'ระบบจะล้างค่าในคอลัมน์ SYNC_STATUS ของชีตต้นทางทั้งหมด\n' +
-    'เพื่อให้ระบบกลับมาประมวลผลแถวเหล่านั้นใหม่อีกครั้งเมื่อกด Run Pipeline\n\n' +
-    'ยืนยันการดำเนินการหรือไม่?',
+        'เพื่อให้ระบบกลับมาประมวลผลแถวเหล่านั้นใหม่อีกครั้งเมื่อกด Run Pipeline\n\n' +
+        'ยืนยันการดำเนินการหรือไม่?',
       ui.ButtonSet.YES_NO
     );
 
@@ -158,14 +154,14 @@ function resetSourceSyncStatus() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(SHEET.SOURCE);
     if (!sheet) {
-    // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+      // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
       safeUiAlert_('❌ ไม่พบชีตต้นทาง: ' + SHEET.SOURCE);
       return;
     }
 
     const lastRow = sheet.getLastRow();
     if (lastRow < 2) {
-    // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+      // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
       safeUiAlert_('ℹ️ ไม่มีข้อมูลให้รีเซ็ต');
       return;
     }
@@ -196,22 +192,19 @@ function resetSourceSyncStatus() {
  */
 function haversineDistanceM(lat1, lng1, lat2, lng2) {
   const earthRadius = 6371000;
-  const toRad       = Math.PI / 180;
+  const toRad = Math.PI / 180;
 
-  const diffLat    = (lat2 - lat1) * toRad;
-  const diffLng    = (lng2 - lng1) * toRad;
+  const diffLat = (lat2 - lat1) * toRad;
+  const diffLng = (lng2 - lng1) * toRad;
 
   const sinHalfLat = Math.sin(diffLat / 2);
   const sinHalfLng = Math.sin(diffLng / 2);
 
-  const aVal = sinHalfLat * sinHalfLat +
-    Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) *
-    sinHalfLng * sinHalfLng;
+  const aVal = sinHalfLat * sinHalfLat + Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * sinHalfLng * sinHalfLng;
 
   // [FIX v003] clamp aVal ให้อยู่ใน [0,1] ป้องกัน Floating Point error
-  const safeAVal    = Math.min(1, Math.max(0, aVal));
-  const centralAngle = 2 * Math.atan2(Math.sqrt(safeAVal),
-    Math.sqrt(1 - safeAVal));
+  const safeAVal = Math.min(1, Math.max(0, aVal));
+  const centralAngle = 2 * Math.atan2(Math.sqrt(safeAVal), Math.sqrt(1 - safeAVal));
   return earthRadius * centralAngle;
 }
 
@@ -238,14 +231,13 @@ function generateShortId(prefix) {
  * generateMd5Hash — สร้าง MD5 Hex สำหรับ Cache Key
  */
 function generateMd5Hash(input) {
-  const rawBytes = Utilities.computeDigest(
-    Utilities.DigestAlgorithm.MD5,
-    String(input)
-  );
-  return rawBytes.map(b => {
-    const hex = (b < 0 ? b + 256 : b).toString(16);
-    return hex.length === 1 ? '0' + hex : hex;
-  }).join('');
+  const rawBytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, String(input));
+  return rawBytes
+    .map((b) => {
+      const hex = (b < 0 ? b + 256 : b).toString(16);
+      return hex.length === 1 ? '0' + hex : hex;
+    })
+    .join('');
 }
 
 // ============================================================
@@ -263,9 +255,9 @@ function toThaiDateStr(date) {
   // [FIX v003] ป้องกัน Invalid Date → คืน '' แทน 'NaN/NaN/NaN'
   if (isNaN(parsedDate.getTime())) return '';
 
-  const day   = String(parsedDate.getDate()).padStart(2, '0');
+  const day = String(parsedDate.getDate()).padStart(2, '0');
   const month = String(parsedDate.getMonth() + 1).padStart(2, '0');
-  const year  = parsedDate.getFullYear() + 543;
+  const year = parsedDate.getFullYear() + 543;
   return `${day}/${month}/${year}`;
 }
 
@@ -282,8 +274,7 @@ function isValidLatLng(lat, lng) {
   if (numLat === 0 || numLng === 0) return false;
 
   // กรอบประเทศไทย
-  return numLat >= 5.5  && numLat <= 20.5 &&
-         numLng >= 97.5 && numLng <= 105.7;
+  return numLat >= 5.5 && numLat <= 20.5 && numLng >= 97.5 && numLng <= 105.7;
 }
 
 /**
@@ -336,7 +327,7 @@ function callGeminiAPI(prompt, modelName = AI_CONFIG.MODEL) {
       temperature: 0.1,
       topP: 1,
       topK: 1,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 2048
     }
   };
 
@@ -345,7 +336,7 @@ function callGeminiAPI(prompt, modelName = AI_CONFIG.MODEL) {
     contentType: 'application/json',
     payload: JSON.stringify(payload),
     muteHttpExceptions: true,
-    headers: { 'x-goog-api-key': apiKey }  // [SEC-006] ส่งผ่าน Header แทน URL
+    headers: { 'x-goog-api-key': apiKey } // [SEC-006] ส่งผ่าน Header แทน URL
   };
 
   // [FIX BUG-AUDIT-009 V5.5.042] Retry 3 ครั้งสำหรับ 429/503 (transient errors)
@@ -356,8 +347,8 @@ function callGeminiAPI(prompt, modelName = AI_CONFIG.MODEL) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const response = UrlFetchApp.fetch(url, options);
-      const resCode  = response.getResponseCode();
-      const resText  = response.getContentText();
+      const resCode = response.getResponseCode();
+      const resText = response.getContentText();
 
       if (resCode === 200) {
         const json = JSON.parse(resText);
@@ -378,10 +369,12 @@ function callGeminiAPI(prompt, modelName = AI_CONFIG.MODEL) {
       // 4xx อื่นๆ (ยกเว้น 429) หรือ retry หมดแล้ว → log + return null
       // [SEC-012] ไม่แสดง resText ทั้งหมด เพื่อกัน API key/cookie รั่วผ่าน log
       const preview = resText ? resText.substring(0, 200) : '';
-      logError('Utils', `Gemini API Error (${resCode}) [attempt ${attempt}/${maxRetries}]: ${preview}`,
-        new Error(`GEMINI_API_${resCode}`));
+      logError(
+        'Utils',
+        `Gemini API Error (${resCode}) [attempt ${attempt}/${maxRetries}]: ${preview}`,
+        new Error(`GEMINI_API_${resCode}`)
+      );
       return null;
-
     } catch (err) {
       lastError = err;
       if (attempt < maxRetries) {
@@ -407,7 +400,8 @@ function callGeminiAPI(prompt, modelName = AI_CONFIG.MODEL) {
  */
 function cleanAIResponse_(text) {
   if (!text) return '';
-  return text.replace(/```json/g, '')
+  return text
+    .replace(/```json/g, '')
     .replace(/```/g, '')
     .trim();
 }
@@ -436,7 +430,10 @@ function callSpreadsheetWithRetry(apiFunc, maxRetries = 3, baseDelayMs = 500) {
         errMsg.indexOf('failed while accessing') !== -1 ||
         errMsg.indexOf('หยุดทำงานขณะเข้าถึงเอกสาร') !== -1
       ) {
-        logWarn('Utils', `Spreadsheet Service Crash (Attempt ${attempt}/${maxRetries}): ${errMsg}. กำลังรอเพื่อลองใหม่...`);
+        logWarn(
+          'Utils',
+          `Spreadsheet Service Crash (Attempt ${attempt}/${maxRetries}): ${errMsg}. กำลังรอเพื่อลองใหม่...`
+        );
         if (attempt < maxRetries) {
           Utilities.sleep(baseDelayMs * attempt * (1 + Math.random())); // Exponential backoff + jitter
           continue;
@@ -476,7 +473,9 @@ function normalizeInvoiceNo(inv) {
       } else {
         str = numStr + '0'.repeat(exp);
       }
-    } catch (e) { logDebug('Utils', 'normalizeInvoiceNo e-notation parse error: ' + e.message); }
+    } catch (e) {
+      logDebug('Utils', 'normalizeInvoiceNo e-notation parse error: ' + e.message);
+    }
   }
   if (str.endsWith('.0')) str = str.slice(0, -2);
   return str;
@@ -498,7 +497,9 @@ function safeUiAlert_(message, title) {
     }
   } catch (e) {
     // รันจาก Trigger ไม่มี UI context → log เงียบๆ
-    try { logInfo('System', `[UI Message] ${String(message).substring(0, 200)}`); } catch (_) {}
+    try {
+      logInfo('System', `[UI Message] ${String(message).substring(0, 200)}`);
+    } catch (_) {}
   }
 }
 
@@ -547,15 +548,25 @@ function withEntryPointGuard_(moduleName, fnName, fn, options) {
     if (showAlert) {
       try {
         safeUiAlert_('❌ ' + fnName + ' ' + errorPrefix + e.message);
-      } catch (alertErr) { /* ignore — trigger context */ }
+      } catch (alertErr) {
+        /* ignore — trigger context */
+      }
     }
     return undefined;
   } finally {
     if (lock && lock.hasLock()) {
-      try { lock.releaseLock(); } catch (e) { /* ignore */ }
+      try {
+        lock.releaseLock();
+      } catch (e) {
+        /* ignore */
+      }
     }
     if (typeof flushLogBuffer_ === 'function') {
-      try { flushLogBuffer_(); } catch (e) { /* ignore */ }
+      try {
+        flushLogBuffer_();
+      } catch (e) {
+        /* ignore */
+      }
     }
   }
 }
@@ -576,8 +587,8 @@ function withEntryPointGuard_(moduleName, fnName, fn, options) {
 function hasTimePassed_(startTime, limitMs, bufferMs) {
   if (!startTime) return false;
   const effectiveLimit = limitMs || (typeof AI_CONFIG !== 'undefined' ? AI_CONFIG.TIME_LIMIT_MS : 300000);
-  const effectiveBuffer = (typeof bufferMs === 'number') ? bufferMs : 30000;
-  return (new Date() - startTime) > (effectiveLimit - effectiveBuffer);
+  const effectiveBuffer = typeof bufferMs === 'number' ? bufferMs : 30000;
+  return new Date() - startTime > effectiveLimit - effectiveBuffer;
 }
 
 // ============================================================
@@ -594,7 +605,9 @@ function hasTimePassed_(startTime, limitMs, bufferMs) {
 function convertUuidToPersonId(masterUuid) {
   if (!masterUuid) return null;
   const allPersons = loadAllPersons_();
-  const hit = allPersons.find(function(p) { return p.masterUuid === masterUuid; });
+  const hit = allPersons.find(function (p) {
+    return p.masterUuid === masterUuid;
+  });
   return hit ? hit.personId : null;
 }
 
@@ -605,7 +618,9 @@ function convertUuidToPersonId(masterUuid) {
 function convertUuidToPlaceId(masterUuid) {
   if (!masterUuid) return null;
   const allPlaces = loadAllPlaces_();
-  const hit = allPlaces.find(function(p) { return p.masterUuid === masterUuid; });
+  const hit = allPlaces.find(function (p) {
+    return p.masterUuid === masterUuid;
+  });
   return hit ? hit.placeId : null;
 }
 
@@ -616,7 +631,9 @@ function convertUuidToPlaceId(masterUuid) {
 function convertPersonIdToUuid(personId) {
   if (!personId) return null;
   const allPersons = loadAllPersons_();
-  const hit = allPersons.find(function(p) { return p.personId === personId; });
+  const hit = allPersons.find(function (p) {
+    return p.personId === personId;
+  });
   return hit ? hit.masterUuid : null;
 }
 
@@ -627,7 +644,9 @@ function convertPersonIdToUuid(personId) {
 function convertPlaceIdToUuid(placeId) {
   if (!placeId) return null;
   const allPlaces = loadAllPlaces_();
-  const hit = allPlaces.find(function(p) { return p.placeId === placeId; });
+  const hit = allPlaces.find(function (p) {
+    return p.placeId === placeId;
+  });
   return hit ? hit.masterUuid : null;
 }
 
@@ -644,43 +663,50 @@ function convertPlaceIdToUuid(placeId) {
  */
 function isAuthorizedUser_() {
   try {
-    const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+    const email = String(Session.getActiveUser().getEmail() || '')
+      .trim()
+      .toLowerCase();
     if (!email) {
       logWarn('Security', '[SEC-002] ไม่สามารถอ่าน Email ผู้ใช้ได้ — ปฏิเสธการเข้าถึง');
       return false;
     }
 
-    const adminsStr = String(
-      PropertiesService.getScriptProperties().getProperty('LMDS_ADMINS') || ''
-    ).trim();
+    const adminsStr = String(PropertiesService.getScriptProperties().getProperty('LMDS_ADMINS') || '').trim();
 
     if (!adminsStr) {
       // [SEC-001 FIX] Deny-by-default: ปล่อยผ่านเฉพาะ Script Owner เท่านั้น
-      const ownerEmail = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+      const ownerEmail = String(Session.getEffectiveUser().getEmail() || '')
+        .trim()
+        .toLowerCase();
       if (email === ownerEmail) {
         logWarn('Security', '[SEC-001] LMDS_ADMINS ยังไม่ได้ตั้ง — Script Owner ผ่าน (ควรตั้ง Admin List โดยเร็ว)');
         return true;
       }
       // [SEC-007 FIX] Mask email ก่อน log
-      const maskedNoAdmin = (typeof maskReviewerEmail_ === 'function')
-        ? maskReviewerEmail_(email)
-        : (email.length > 2
-          ? email[0] + '***' + email[email.length - 1] + '@' + (email.split('@')[1] || 'unknown')
-          : email[0] + '***@' + (email.split('@')[1] || 'unknown'));
+      const maskedNoAdmin =
+        typeof maskReviewerEmail_ === 'function'
+          ? maskReviewerEmail_(email)
+          : email.length > 2
+            ? email[0] + '***' + email[email.length - 1] + '@' + (email.split('@')[1] || 'unknown')
+            : email[0] + '***@' + (email.split('@')[1] || 'unknown');
       logWarn('Security', `[SEC-001] LMDS_ADMINS ยังไม่ได้ตั้ง — ปฏิเสธ: ${maskedNoAdmin}`);
       return false;
     }
 
-    const admins = adminsStr.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+    const admins = adminsStr
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
     const isAuthorized = admins.includes(email);
 
     if (!isAuthorized) {
       // [SEC-007 FIX] Mask email ก่อน log
-      const masked = (typeof maskReviewerEmail_ === 'function')
-        ? maskReviewerEmail_(email)
-        : (email.length > 2
-          ? email[0] + '***' + email[email.length - 1] + '@' + (email.split('@')[1] || 'unknown')
-          : email[0] + '***@' + (email.split('@')[1] || 'unknown'));
+      const masked =
+        typeof maskReviewerEmail_ === 'function'
+          ? maskReviewerEmail_(email)
+          : email.length > 2
+            ? email[0] + '***' + email[email.length - 1] + '@' + (email.split('@')[1] || 'unknown')
+            : email[0] + '***@' + (email.split('@')[1] || 'unknown');
       logWarn('Security', `[SEC-002] ปฏิเสธการเข้าถึง: ${masked} ไม่อยู่ในรายชื่อ Admin`);
     }
 
@@ -705,21 +731,19 @@ function setupAdminList_UI() {
   }
   try {
     const ui = SpreadsheetApp.getUi();
-    const currentAdmins = String(
-      PropertiesService.getScriptProperties().getProperty('LMDS_ADMINS') || ''
-    ).trim();
+    const currentAdmins = String(PropertiesService.getScriptProperties().getProperty('LMDS_ADMINS') || '').trim();
 
     // [SEC-008 FIX] แสดงเฉพาะจำนวน admin ไม่แสดงรายชื่อ email เต็ม
     const currentCount = currentAdmins ? currentAdmins.split(',').filter(Boolean).length : 0;
     const result = ui.prompt(
       '👥 ตั้งค่ารายชื่อ Admin',
       'ใส่ Email ของ Admin คั่นด้วยจุลภาค (,):\n\n' +
-      'ตัวอย่าง: admin@company.com, manager@company.com\n\n' +
-      'Admin เท่านั้นที่สามารถรัน Operation ขั้นสูง\n' +
-      '(Migration, Hardening, Clear Data, Reset Sync)\n\n' +
-      (currentCount > 0
-        ? `ค่าปัจจุบัน: ${currentCount} admin(s) ตั้งอยู่ (ไม่แสดงรายชื่อเพื่อความปลอดภัย)`
-        : '⚠️ ยังไม่ได้ตั้งค่า'),
+        'ตัวอย่าง: admin@company.com, manager@company.com\n\n' +
+        'Admin เท่านั้นที่สามารถรัน Operation ขั้นสูง\n' +
+        '(Migration, Hardening, Clear Data, Reset Sync)\n\n' +
+        (currentCount > 0
+          ? `ค่าปัจจุบัน: ${currentCount} admin(s) ตั้งอยู่ (ไม่แสดงรายชื่อเพื่อความปลอดภัย)`
+          : '⚠️ ยังไม่ได้ตั้งค่า'),
       ui.ButtonSet.OK_CANCEL
     );
 
@@ -728,8 +752,11 @@ function setupAdminList_UI() {
     const newAdmins = String(result.getResponseText() || '').trim();
     if (newAdmins) {
       // Validate format
-      const emails = newAdmins.split(',').map(e => e.trim()).filter(Boolean);
-      const invalidEmails = emails.filter(e => !e.includes('@'));
+      const emails = newAdmins
+        .split(',')
+        .map((e) => e.trim())
+        .filter(Boolean);
+      const invalidEmails = emails.filter((e) => !e.includes('@'));
       if (invalidEmails.length > 0) {
         safeUiAlert_('❌ Email ไม่ถูกต้อง: ' + invalidEmails.join(', '));
         return;
@@ -743,8 +770,8 @@ function setupAdminList_UI() {
       const confirm = ui.alert(
         '⚠️ ยืนยันการล้าง Admin List',
         'การล้าง Admin List จะทำให้ระบบอนุญาตเฉพาะ Script Owner เท่านั้น (ตาม SEC-001)\n' +
-        'ผู้ใช้ทั่วไปที่ไม่ใช่ Script Owner จะถูกปฏิเสธ\n\n' +
-        'ดำเนินการต่อ?',
+          'ผู้ใช้ทั่วไปที่ไม่ใช่ Script Owner จะถูกปฏิเสธ\n\n' +
+          'ดำเนินการต่อ?',
         ui.ButtonSet.YES_NO
       );
       if (confirm !== ui.Button.YES) {
@@ -777,14 +804,25 @@ function setupAdminList_UI() {
  * @param {Function} cacheFn - Cache invalidation function to call after update
  * @param {Function} [extraUpdatesFn] - Optional callback(row, id) for extra field updates
  */
-function batchUpdateEntityStats_(sheetName, idxObj, idColIdx, usageCountIdx, lastSeenIdx, idSet, cacheFn, extraUpdatesFn) {
-  const ids = (idSet instanceof Set) ? Array.from(idSet) : (Array.isArray(idSet) ? idSet : [idSet]);
+function batchUpdateEntityStats_(
+  sheetName,
+  idxObj,
+  idColIdx,
+  usageCountIdx,
+  lastSeenIdx,
+  idSet,
+  cacheFn,
+  extraUpdatesFn
+) {
+  const ids = idSet instanceof Set ? Array.from(idSet) : Array.isArray(idSet) ? idSet : [idSet];
   if (ids.length === 0) return;
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   if (!sheet) return;
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
-  const allIdx = Object.keys(idxObj).map(function(k) { return idxObj[k]; });
+  const allIdx = Object.keys(idxObj).map(function (k) {
+    return idxObj[k];
+  });
   const minCol = Math.min.apply(null, allIdx) + 1;
   const maxCol = Math.max.apply(null, allIdx) + 1;
   const numCols = maxCol - minCol + 1;
@@ -794,7 +832,7 @@ function batchUpdateEntityStats_(sheetName, idxObj, idColIdx, usageCountIdx, las
   const seenOffset = lastSeenIdx - (minCol - 1);
   const now = new Date();
   let updated = 0;
-  ids.forEach(function(id) {
+  ids.forEach(function (id) {
     for (let i = 0; i < allData.length; i++) {
       if (String(allData[i][idOffset]) === String(id)) {
         allData[i][usageOffset] = (Number(allData[i][usageOffset]) || 0) + 1;
@@ -835,7 +873,7 @@ function batchUpdateEntityStats_(sheetName, idxObj, idColIdx, usageCountIdx, las
 function saveChunkedCache_(cache, keyPrefix, data, optChunkSizeKB) {
   // [FIX v5.5.010] ลด chunk size จาก 90KB → 80KB (safety margin สำหรับ JSON overhead)
   const CHUNK_SIZE_BYTES = (optChunkSizeKB || 80) * 1000; // 80 KB = 80,000 chars
-  const ttl = (typeof AI_CONFIG !== 'undefined' && AI_CONFIG.CACHE_TTL_SEC) ? AI_CONFIG.CACHE_TTL_SEC : 21600;
+  const ttl = typeof AI_CONFIG !== 'undefined' && AI_CONFIG.CACHE_TTL_SEC ? AI_CONFIG.CACHE_TTL_SEC : 21600;
 
   // [FIX v5.5.010] จำนวน chunks ต่อ putAll batch — 5 chunks × 80KB = 400KB ต่อ call
   // GAS putAll limit ~1MB total payload, ใช้ 400KB เผื่อ safety margin
@@ -844,7 +882,7 @@ function saveChunkedCache_(cache, keyPrefix, data, optChunkSizeKB) {
   const json = JSON.stringify(data);
 
   // [FIX v5.5.008 P2 #13] Helper: ล้าง orphaned chunks จาก previous large-cache write
-  const cleanupOrphanedChunks_ = function(currentNumChunks) {
+  const cleanupOrphanedChunks_ = function (currentNumChunks) {
     try {
       const prevChunksStr = cache.get(keyPrefix + '_CHUNKS');
       if (!prevChunksStr) return;
@@ -860,9 +898,18 @@ function saveChunkedCache_(cache, keyPrefix, data, optChunkSizeKB) {
       }
       if (orphanKeys.length > 0) {
         cache.removeAll(orphanKeys);
-        logDebug('Utils', 'saveChunkedCache_: cleaned up ' + orphanKeys.length +
-                  ' orphaned chunks for ' + keyPrefix + ' (prev=' + prevNumChunks +
-                  ', current=' + currentNumChunks + ')');
+        logDebug(
+          'Utils',
+          'saveChunkedCache_: cleaned up ' +
+            orphanKeys.length +
+            ' orphaned chunks for ' +
+            keyPrefix +
+            ' (prev=' +
+            prevNumChunks +
+            ', current=' +
+            currentNumChunks +
+            ')'
+        );
       }
     } catch (e) {
       logWarn('Utils', 'saveChunkedCache_ orphan cleanup error: ' + e.message);
@@ -928,8 +975,16 @@ function saveChunkedCache_(cache, keyPrefix, data, optChunkSizeKB) {
       successBatches++;
     } catch (batchErr) {
       // putAll batch ล้มเหลว → ลองเขียนทีละ chunk ใน batch นี้
-      logWarn('Utils', 'saveChunkedCache_ putAll batch ' + (batchIdx + 1) + '/' + totalBatches +
-              ' ล้มเหลว: ' + batchErr.message + ' — ลองเขียนทีละ chunk');
+      logWarn(
+        'Utils',
+        'saveChunkedCache_ putAll batch ' +
+          (batchIdx + 1) +
+          '/' +
+          totalBatches +
+          ' ล้มเหลว: ' +
+          batchErr.message +
+          ' — ลองเขียนทีละ chunk'
+      );
 
       for (const k in batchEntries) {
         try {
@@ -946,11 +1001,33 @@ function saveChunkedCache_(cache, keyPrefix, data, optChunkSizeKB) {
   cleanupOrphanedChunks_(numChunks);
 
   if (failedChunks.length === 0) {
-    logDebug('Utils', 'saveChunkedCache_: ' + keyPrefix + ' — ' + numChunks + ' chunks, ' +
-             json.length + ' chars (' + totalBatches + ' batches, all succeeded)');
+    logDebug(
+      'Utils',
+      'saveChunkedCache_: ' +
+        keyPrefix +
+        ' — ' +
+        numChunks +
+        ' chunks, ' +
+        json.length +
+        ' chars (' +
+        totalBatches +
+        ' batches, all succeeded)'
+    );
   } else {
-    logWarn('Utils', 'saveChunkedCache_: ' + keyPrefix + ' — ' + numChunks + ' chunks, ' +
-            failedChunks.length + ' failed (batches: ' + successBatches + '/' + totalBatches + ' succeeded)');
+    logWarn(
+      'Utils',
+      'saveChunkedCache_: ' +
+        keyPrefix +
+        ' — ' +
+        numChunks +
+        ' chunks, ' +
+        failedChunks.length +
+        ' failed (batches: ' +
+        successBatches +
+        '/' +
+        totalBatches +
+        ' succeeded)'
+    );
   }
 }
 
@@ -1016,7 +1093,10 @@ function loadChunkedCache_(cache, keyPrefix) {
 
   try {
     const parsed = JSON.parse(jsonStr);
-    logDebug('Utils', 'loadChunkedCache_: ' + keyPrefix + ' — ' + totalChunks + ' chunks, ' + jsonStr.length + ' chars');
+    logDebug(
+      'Utils',
+      'loadChunkedCache_: ' + keyPrefix + ' — ' + totalChunks + ' chunks, ' + jsonStr.length + ' chars'
+    );
     return parsed;
   } catch (e) {
     logError('Utils', 'loadChunkedCache_ JSON parse ล้มเหลว: ' + e.message, e);
@@ -1049,7 +1129,11 @@ function invalidateChunkedCache_(cacheKeyPrefix, ramVarResetFn, extraKeys) {
   if (extraKeys && extraKeys.length > 0) {
     keysToRemove = keysToRemove.concat(extraKeys);
   }
-  try { cache.removeAll(keysToRemove); } catch (e) { /* ignore */ }
+  try {
+    cache.removeAll(keysToRemove);
+  } catch (e) {
+    /* ignore */
+  }
 }
 
 // ============================================================
@@ -1067,19 +1151,17 @@ function invalidateChunkedCache_(cacheKeyPrefix, ramVarResetFn, extraKeys) {
 function buildGlobalAliasDedupSet_() {
   const dedupSet = new Set();
   try {
-    const ss         = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
     const mAliasSheet = ss.getSheetByName(SHEET.M_ALIAS);
     if (!mAliasSheet || mAliasSheet.getLastRow() < 2) return dedupSet;
 
-    const data = mAliasSheet.getRange(
-      2, 1, mAliasSheet.getLastRow() - 1, SCHEMA[SHEET.M_ALIAS].length
-    ).getValues();
+    const data = mAliasSheet.getRange(2, 1, mAliasSheet.getLastRow() - 1, SCHEMA[SHEET.M_ALIAS].length).getValues();
 
-    data.forEach(function(row) {
+    data.forEach(function (row) {
       if (row[ALIAS_IDX.ACTIVE_FLAG] !== true && String(row[ALIAS_IDX.ACTIVE_FLAG]).toUpperCase() !== 'TRUE') return;
       const eType = String(row[ALIAS_IDX.ENTITY_TYPE] || '');
-      const mUuid = String(row[ALIAS_IDX.MASTER_UUID]  || '');
-      const norm  = normalizeForCompare(row[ALIAS_IDX.VARIANT_NAME]);
+      const mUuid = String(row[ALIAS_IDX.MASTER_UUID] || '');
+      const norm = normalizeForCompare(row[ALIAS_IDX.VARIANT_NAME]);
       if (eType && mUuid && norm) {
         dedupSet.add(eType + '::' + mUuid + '::' + norm);
       }

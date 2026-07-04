@@ -108,22 +108,24 @@ function doGet(e) {
     template.appVersion = APP_VERSION;
     template.appName = APP_NAME;
     template.currentUser = getCurrentDashboardUser_();
-    template.initialData = null;  // บังคับให้ frontend โหลดเอง
+    template.initialData = null; // บังคับให้ frontend โหลดเอง
     template.deployedAt = new Date().toISOString();
 
-    return template.evaluate()
+    return template
+      .evaluate()
       .setTitle('LMDS V5.5 Dashboard')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1')
       .setFaviconUrl('https://www.gstatic.com/images/branding/product/1x/sheets_64dp.png')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-
   } catch (err) {
     logError('WebApp', 'doGet ล้มเหลว: ' + err.message, err);
     return HtmlService.createHtmlOutput(
       '<h1>⚠️ เกิดข้อผิดพลาด</h1>' +
-      '<p>ไม่สามารถโหลด LMDS Dashboard ได้</p>' +
-      '<p>รายละเอียด: ' + (err.message || 'Unknown error') + '</p>' +
-      '<p>กรุณาติดต่อผู้ดูแลระบบ</p>'
+        '<p>ไม่สามารถโหลด LMDS Dashboard ได้</p>' +
+        '<p>รายละเอียด: ' +
+        (err.message || 'Unknown error') +
+        '</p>' +
+        '<p>กรุณาติดต่อผู้ดูแลระบบ</p>'
     ).setTitle('LMDS — Error');
   }
 }
@@ -159,7 +161,9 @@ function isAuthorizedDashboardUser_() {
     //   สาเหตุ: Session.getActiveUser() ใน Web App context (access=ANYONE)
     //   มักจะคืนค่าว่าง เพราะผู้ใช้อาจไม่ได้ login ด้วย Google Account
     //   แต่ effectiveUser จะเป็น email ของเจ้าของ Apps Script เสมอ (เพราะ executeAs=USER_DEPLOYING)
-    const email = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+    const email = String(Session.getEffectiveUser().getEmail() || '')
+      .trim()
+      .toLowerCase();
 
     logInfo('WebApp', '[Auth DEBUG] effectiveUser="' + email + '"');
 
@@ -169,9 +173,11 @@ function isAuthorizedDashboardUser_() {
       //   Web App deploy ผิด config (เช่น access=ANYONE โดยไม่มี executeAs=USER_DEPLOYING)
       //   → ผู้ใช้นิรนามจะเข้าถึง Dashboard ได้โดยไม่ต้อง auth
       //   ปลอดภัยกว่าคือ deny แล้วให้ผู้ดูแลตรวจสอบการ deploy
-      logError('WebApp',
+      logError(
+        'WebApp',
         '[Auth] ไม่สามารถอ่าน Email ได้ — ปฏิเสธการเข้าถึง (ตรวจสอบ Web App config: ' +
-        'access + executeAs=USER_DEPLOYING และ Script Properties DASHBOARD_USERS/LMDS_ADMINS)');
+          'access + executeAs=USER_DEPLOYING และ Script Properties DASHBOARD_USERS/LMDS_ADMINS)'
+      );
       return false;
     }
 
@@ -181,19 +187,23 @@ function isAuthorizedDashboardUser_() {
     ).trim();
 
     if (dashboardUsersStr) {
-      const users = dashboardUsersStr.split(',').map(u => u.trim().toLowerCase()).filter(Boolean);
+      const users = dashboardUsersStr
+        .split(',')
+        .map((u) => u.trim().toLowerCase())
+        .filter(Boolean);
       const authorized = users.includes(email);
       logInfo('WebApp', '[Auth] DASHBOARD_USERS check: ' + (authorized ? 'PASS' : 'FAIL'));
       return authorized;
     }
 
     // Fallback: ถ้า DASHBOARD_USERS ไม่ได้ตั้ง → ใช้ LMDS_ADMINS
-    const adminsStr = String(
-      PropertiesService.getScriptProperties().getProperty('LMDS_ADMINS') || ''
-    ).trim();
+    const adminsStr = String(PropertiesService.getScriptProperties().getProperty('LMDS_ADMINS') || '').trim();
 
     if (adminsStr) {
-      const admins = adminsStr.split(',').map(a => a.trim().toLowerCase()).filter(Boolean);
+      const admins = adminsStr
+        .split(',')
+        .map((a) => a.trim().toLowerCase())
+        .filter(Boolean);
       const authorized = admins.includes(email);
       logInfo('WebApp', '[Auth] LMDS_ADMINS check: ' + (authorized ? 'PASS' : 'FAIL'));
       return authorized;
@@ -202,7 +212,6 @@ function isAuthorizedDashboardUser_() {
     // Last resort: Script Owner เท่านั้น — ปล่อยผ่านเพราะ executeAs=USER_DEPLOYING = เจ้าของเสมอ
     logInfo('WebApp', '[Auth] No whitelist — ปล่อยผ่าน (Script Owner)');
     return true;
-
   } catch (err) {
     logError('WebApp', 'isAuthorizedDashboardUser_ ล้มเหลว: ' + err.message, err);
     return false; // Deny-by-default
@@ -231,7 +240,9 @@ function getCurrentDashboardUser_() {
   if (email && email.indexOf('@') > 0) {
     displayName = email.split('@')[0];
     // แปลงจุด/ขีดล่างเป็นวรรค + ขึ้นตัวแรก
-    displayName = displayName.replace(/[._-]/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+    displayName = displayName.replace(/[._-]/g, ' ').replace(/\b\w/g, function (c) {
+      return c.toUpperCase();
+    });
   }
 
   logInfo('WebApp', '[Auth DEBUG] getCurrentDashboardUser_: email="' + email + '", name="' + displayName + '"');
@@ -240,7 +251,7 @@ function getCurrentDashboardUser_() {
     authorized: true,
     email: email || 'unknown',
     name: displayName,
-    isOwner: true, // executeAs=USER_DEPLOYING = เจ้าของเสมอ
+    isOwner: true // executeAs=USER_DEPLOYING = เจ้าของเสมอ
   };
 }
 
@@ -305,7 +316,7 @@ function getDashboardData() {
   const sheetsExist = {
     fact: factSheet !== null,
     review: reviewSheet !== null,
-    source: sourceSheet !== null,
+    source: sourceSheet !== null
   };
 
   // ─── คำนวณ stats ───
@@ -317,7 +328,7 @@ function getDashboardData() {
     todayDeliveries: 0,
     sourceSheetTotal: 0,
     sourcePending: 0,
-    matchStatusCounts: {},
+    matchStatusCounts: {}
   };
 
   if (sheetsExist.fact) {
@@ -341,11 +352,22 @@ function getDashboardData() {
 
   const elapsedMs = Date.now() - startTime;
   // [FIX] เพิ่ม reviewTotal ใน log เพื่อ debug ปัญหา review=0
-  logInfo('WebApp', 'getDashboardData served — fact=' + stats.factDeliveryTotal +
-    ', reviewPending=' + stats.reviewPending + '/' + stats.reviewTotal +
-    ', source=' + stats.sourceSheetTotal +
-    ', trend7d=' + deliveryTrend.total +
-    ', elapsed=' + elapsedMs + 'ms');
+  logInfo(
+    'WebApp',
+    'getDashboardData served — fact=' +
+      stats.factDeliveryTotal +
+      ', reviewPending=' +
+      stats.reviewPending +
+      '/' +
+      stats.reviewTotal +
+      ', source=' +
+      stats.sourceSheetTotal +
+      ', trend7d=' +
+      deliveryTrend.total +
+      ', elapsed=' +
+      elapsedMs +
+      'ms'
+  );
 
   return {
     stats: stats,
@@ -354,7 +376,7 @@ function getDashboardData() {
     sheetsExist: sheetsExist,
     lastUpdated: new Date().toISOString(),
     appVersion: APP_VERSION,
-    elapsedMs: elapsedMs,
+    elapsedMs: elapsedMs
   };
 }
 
@@ -396,9 +418,8 @@ function computeFactStats_(factSheet, stats) {
   }
 
   stats.matchStatusCounts = statusCounts;
-  stats.autoMatchRate = stats.factDeliveryTotal > 0
-    ? Math.round((autoMatchCount / stats.factDeliveryTotal) * 1000) / 10
-    : 0;
+  stats.autoMatchRate =
+    stats.factDeliveryTotal > 0 ? Math.round((autoMatchCount / stats.factDeliveryTotal) * 1000) / 10 : 0;
   stats.todayDeliveries = todayCount;
 }
 
@@ -409,9 +430,7 @@ function computeFactStats_(factSheet, stats) {
  * @private
  */
 function isAutoMatchStatus_(status) {
-  return status === APP_CONST.MATCH_FULL ||
-         status === APP_CONST.MATCH_GEO ||
-         status === APP_CONST.MATCH_FUZZY;
+  return status === APP_CONST.MATCH_FULL || status === APP_CONST.MATCH_GEO || status === APP_CONST.MATCH_FUZZY;
 }
 
 /**
@@ -440,7 +459,7 @@ function computeDeliveryTrend7Days_(factSheet) {
   // สร้าง map ของ 7 วันย้อนหลัง — key = 'YYYY-MM-DD'
   // เรียงจาก 6 วันก่อน → วันนี้ (รวม 7 วัน)
   const today = new Date();
-  today.setHours(0, 0, 0, 0);  // normalize เป็นเที่ยงคืน
+  today.setHours(0, 0, 0, 0); // normalize เป็นเที่ยงคืน
 
   const labels = [];
   const dateKeys = [];
@@ -487,14 +506,16 @@ function computeDeliveryTrend7Days_(factSheet) {
   }
 
   // สร้าง data array ตามลำดับ labels
-  const data = dateKeys.map(function(key) { return dayCounts[key]; });
+  const data = dateKeys.map(function (key) {
+    return dayCounts[key];
+  });
   const dailyAvg = Math.round((total / 7) * 10) / 10;
 
   return {
     labels: labels,
     data: data,
     total: total,
-    dailyAvg: dailyAvg,
+    dailyAvg: dailyAvg
   };
 }
 
@@ -514,7 +535,9 @@ function computeReviewStats_(reviewSheet, stats) {
     // [FIX] Q_REVIEW STATUS ใช้ค่า 'Pending' (title case) จาก setupReviewDropdowns_
     //   เดิมเช็คแค่ 'PENDING' (uppercase) จึงไม่ match → count เป็น 0
     //   แก้: เปลี่ยนเป็น case-insensitive และรองรับทั้ง 'Pending' และ 'PENDING'
-    const statusUpper = String(status || '').trim().toUpperCase();
+    const statusUpper = String(status || '')
+      .trim()
+      .toUpperCase();
     const isPending = statusUpper === 'PENDING' || status === '' || status === null || status === undefined;
     if (isPending) {
       stats.reviewPending++;
@@ -605,7 +628,7 @@ function ping() {
     ok: true,
     timestamp: new Date().toISOString(),
     appVersion: APP_VERSION,
-    user: getCurrentDashboardUser_().email,
+    user: getCurrentDashboardUser_().email
   };
 }
 
@@ -638,7 +661,7 @@ function getFactDeliveryPage(offset, limit, filter) {
       filter: filter || {},
       statusCounts: {},
       elapsedMs: 0,
-      error: 'ไม่พบ sheet FACT_DELIVERY',
+      error: 'ไม่พบ sheet FACT_DELIVERY'
     };
   }
 
@@ -651,7 +674,7 @@ function getFactDeliveryPage(offset, limit, filter) {
       limit: limit || 50,
       filter: filter || {},
       statusCounts: {},
-      elapsedMs: 0,
+      elapsedMs: 0
     };
   }
 
@@ -660,7 +683,7 @@ function getFactDeliveryPage(offset, limit, filter) {
 
   // นับ match status ทั้งหมด (สำหรับ filter tabs)
   const statusCounts = {};
-  data.forEach(function(row) {
+  data.forEach(function (row) {
     const s = String(row[FACT_IDX.MATCH_STATUS] || 'UNKNOWN').trim();
     statusCounts[s] = (statusCounts[s] || 0) + 1;
   });
@@ -669,11 +692,11 @@ function getFactDeliveryPage(offset, limit, filter) {
   const filterObj = filter || {};
   let filtered = data;
   if (filterObj.status && filterObj.status !== 'all' && filterObj.status !== '') {
-    filtered = data.filter(function(row) {
+    filtered = data.filter(function (row) {
       return String(row[FACT_IDX.MATCH_STATUS] || '').trim() === filterObj.status;
     });
   } else if (Array.isArray(filterObj.statuses) && filterObj.statuses.length > 0) {
-    filtered = data.filter(function(row) {
+    filtered = data.filter(function (row) {
       return filterObj.statuses.indexOf(String(row[FACT_IDX.MATCH_STATUS] || '').trim()) !== -1;
     });
   }
@@ -684,11 +707,13 @@ function getFactDeliveryPage(offset, limit, filter) {
   const pageRows = filtered.slice(safeOffset, safeOffset + safeLimit);
 
   // แปลง rows เป็น objects
-  const rows = pageRows.map(function(row) {
+  const rows = pageRows.map(function (row) {
     return {
       txId: String(row[FACT_IDX.TX_ID] || ''),
-      deliveryDate: row[FACT_IDX.DELIVERY_DATE] instanceof Date
-        ? row[FACT_IDX.DELIVERY_DATE].toISOString() : String(row[FACT_IDX.DELIVERY_DATE] || ''),
+      deliveryDate:
+        row[FACT_IDX.DELIVERY_DATE] instanceof Date
+          ? row[FACT_IDX.DELIVERY_DATE].toISOString()
+          : String(row[FACT_IDX.DELIVERY_DATE] || ''),
       deliveryTime: String(row[FACT_IDX.DELIVERY_TIME] || ''),
       invoiceNo: String(row[FACT_IDX.INVOICE_NO] || ''),
       shipmentNo: String(row[FACT_IDX.SHIPMENT_NO] || ''),
@@ -711,14 +736,27 @@ function getFactDeliveryPage(offset, limit, filter) {
       resolvedLat: Number(row[FACT_IDX.RESOLVED_LAT] || 0),
       resolvedLng: Number(row[FACT_IDX.RESOLVED_LNG] || 0),
       driverVerifiedName: String(row[FACT_IDX.DRIVER_VERIFIED_NAME] || ''),
-      driverVerifiedAddr: String(row[FACT_IDX.DRIVER_VERIFIED_ADDR] || ''),
+      driverVerifiedAddr: String(row[FACT_IDX.DRIVER_VERIFIED_ADDR] || '')
     };
   });
 
   const elapsedMs = Date.now() - startTime;
-  logInfo('WebApp', 'getFactDeliveryPage: status=' + (filterObj.status || 'all') +
-    ' offset=' + safeOffset + ' limit=' + safeLimit +
-    ' → ' + rows.length + '/' + filtered.length + ' rows in ' + elapsedMs + 'ms');
+  logInfo(
+    'WebApp',
+    'getFactDeliveryPage: status=' +
+      (filterObj.status || 'all') +
+      ' offset=' +
+      safeOffset +
+      ' limit=' +
+      safeLimit +
+      ' → ' +
+      rows.length +
+      '/' +
+      filtered.length +
+      ' rows in ' +
+      elapsedMs +
+      'ms'
+  );
 
   return {
     rows: rows,
@@ -727,7 +765,7 @@ function getFactDeliveryPage(offset, limit, filter) {
     limit: safeLimit,
     filter: filterObj,
     statusCounts: statusCounts,
-    elapsedMs: elapsedMs,
+    elapsedMs: elapsedMs
   };
 }
 
@@ -760,7 +798,7 @@ function getQReviewPage(offset, limit, statusFilter) {
       statusFilter: statusFilter || 'Pending',
       statusCounts: {},
       elapsedMs: 0,
-      error: 'ไม่พบ sheet Q_REVIEW',
+      error: 'ไม่พบ sheet Q_REVIEW'
     };
   }
 
@@ -773,7 +811,7 @@ function getQReviewPage(offset, limit, statusFilter) {
       limit: limit || 50,
       statusFilter: statusFilter || 'Pending',
       statusCounts: {},
-      elapsedMs: 0,
+      elapsedMs: 0
     };
   }
 
@@ -781,8 +819,8 @@ function getQReviewPage(offset, limit, statusFilter) {
   const data = sheet.getRange(2, 1, lastRow - 1, SCHEMA[SHEET.Q_REVIEW].length).getValues();
 
   // นับ status ทั้งหมด (สำหรับ filter tabs)
-  const statusCounts = { 'Pending': 0, 'Approved': 0, 'Rejected': 0, 'Escalated': 0, 'Done': 0, 'Other': 0 };
-  data.forEach(function(row) {
+  const statusCounts = { Pending: 0, Approved: 0, Rejected: 0, Escalated: 0, Done: 0, Other: 0 };
+  data.forEach(function (row) {
     const s = String(row[REVIEW_IDX.STATUS] || '').trim();
     if (s === 'Pending' || s === 'PENDING' || s === '') statusCounts['Pending']++;
     else if (s === 'Approved' || s === 'APPROVED') statusCounts['Approved']++;
@@ -794,9 +832,11 @@ function getQReviewPage(offset, limit, statusFilter) {
 
   // Filter
   const wantStatus = (statusFilter || 'Pending').toLowerCase();
-  const filtered = data.filter(function(row) {
+  const filtered = data.filter(function (row) {
     if (wantStatus === 'all') return true;
-    const s = String(row[REVIEW_IDX.STATUS] || '').trim().toLowerCase();
+    const s = String(row[REVIEW_IDX.STATUS] || '')
+      .trim()
+      .toLowerCase();
     if (wantStatus === 'pending') return s === '' || s === 'pending';
     return s === wantStatus;
   });
@@ -807,7 +847,7 @@ function getQReviewPage(offset, limit, statusFilter) {
   const pageRows = filtered.slice(safeOffset, safeOffset + safeLimit);
 
   // แปลง rows เป็น objects (เลือกเฉพาะ field ที่ frontend ใช้)
-  const rows = pageRows.map(function(row, idx) {
+  const rows = pageRows.map(function (row, idx) {
     return {
       reviewId: String(row[REVIEW_IDX.REVIEW_ID] || ''),
       issueType: String(row[REVIEW_IDX.ISSUE_TYPE] || ''),
@@ -828,14 +868,27 @@ function getQReviewPage(offset, limit, statusFilter) {
       candPlaceIds: safeParseJsonArray_(row[REVIEW_IDX.CAND_PLACES]),
       sourceRowNumber: Number(row[REVIEW_IDX.SOURCE_ROW] || 0),
       // ส่ง row index (1-based ใน sheet) กลับไป เพื่อใช้ตอน applyReviewDecision
-      _sheetRow: idx + safeOffset + 2,
+      _sheetRow: idx + safeOffset + 2
     };
   });
 
   const elapsedMs = Date.now() - startTime;
-  logInfo('WebApp', 'getQReviewPage: status=' + (statusFilter || 'Pending') +
-    ' offset=' + safeOffset + ' limit=' + safeLimit +
-    ' → ' + rows.length + '/' + filtered.length + ' rows in ' + elapsedMs + 'ms');
+  logInfo(
+    'WebApp',
+    'getQReviewPage: status=' +
+      (statusFilter || 'Pending') +
+      ' offset=' +
+      safeOffset +
+      ' limit=' +
+      safeLimit +
+      ' → ' +
+      rows.length +
+      '/' +
+      filtered.length +
+      ' rows in ' +
+      elapsedMs +
+      'ms'
+  );
 
   return {
     rows: rows,
@@ -844,7 +897,7 @@ function getQReviewPage(offset, limit, statusFilter) {
     limit: safeLimit,
     statusFilter: statusFilter || 'Pending',
     statusCounts: statusCounts,
-    elapsedMs: elapsedMs,
+    elapsedMs: elapsedMs
   };
 }
 
@@ -920,12 +973,19 @@ function submitReviewDecision(reviewId, decision, note) {
     }
 
     // ตรวจว่ารายการยัง Pending อยู่หรือไม่ (defense-in-depth)
-    const currentStatus = String(rowData[REVIEW_IDX.STATUS] || '').trim().toLowerCase();
-    if (currentStatus === 'approved' || currentStatus === 'rejected' || currentStatus === 'done' || currentStatus === 'escalated') {
+    const currentStatus = String(rowData[REVIEW_IDX.STATUS] || '')
+      .trim()
+      .toLowerCase();
+    if (
+      currentStatus === 'approved' ||
+      currentStatus === 'rejected' ||
+      currentStatus === 'done' ||
+      currentStatus === 'escalated'
+    ) {
       return {
         ok: false,
         message: 'รายการนี้ถูกตัดสินใจแล้ว (status=' + currentStatus + ') ไม่สามารถเปลี่ยนแปลงได้',
-        reviewId: reviewId,
+        reviewId: reviewId
       };
     }
 
@@ -937,15 +997,17 @@ function submitReviewDecision(reviewId, decision, note) {
     // เรียกใช้ฟังก์ชันที่มีอยู่แล้วใน 12_ReviewService.gs
     const result = applyReviewDecision(reviewId, decision, rowData, targetRow);
 
-    logInfo('WebApp', 'submitReviewDecision: ' + reviewId + ' → ' + decision +
-      ' โดย ' + (getCurrentDashboardUser_().email || '?'));
+    logInfo(
+      'WebApp',
+      'submitReviewDecision: ' + reviewId + ' → ' + decision + ' โดย ' + (getCurrentDashboardUser_().email || '?')
+    );
 
     return {
       ok: true,
       reviewId: reviewId,
       decision: decision,
       message: 'บันทึกการตัดสินใจสำเร็จ',
-      result: result ? { factRowWritten: true } : null,
+      result: result ? { factRowWritten: true } : null
     };
   } catch (err) {
     logError('WebApp', 'submitReviewDecision ล้มเหลว: ' + err.message, err);
@@ -983,8 +1045,9 @@ function getReviewDetail(reviewId) {
       return { ok: false, message: 'ไม่พบ sheet Q_REVIEW หรือว่าง' };
     }
 
-    const reviewData = reviewSheet.getRange(2, 1, reviewSheet.getLastRow() - 1,
-      SCHEMA[SHEET.Q_REVIEW].length).getValues();
+    const reviewData = reviewSheet
+      .getRange(2, 1, reviewSheet.getLastRow() - 1, SCHEMA[SHEET.Q_REVIEW].length)
+      .getValues();
     let reviewRow = null;
     let reviewSheetRow = -1;
     for (let i = 0; i < reviewData.length; i++) {
@@ -1016,7 +1079,7 @@ function getReviewDetail(reviewId) {
       reviewer: String(reviewRow[REVIEW_IDX.REVIEWER] || ''),
       decision: String(reviewRow[REVIEW_IDX.DECISION] || ''),
       note: String(reviewRow[REVIEW_IDX.NOTE] || ''),
-      _sheetRow: reviewSheetRow,
+      _sheetRow: reviewSheetRow
     };
 
     // ─── 2. ดึง source row (ถ้ามี sourceRowNumber) ───
@@ -1024,13 +1087,14 @@ function getReviewDetail(reviewId) {
     if (review.sourceRowNumber > 1) {
       const srcSheet = ss.getSheetByName(SHEET.SOURCE);
       if (srcSheet && srcSheet.getLastRow() >= review.sourceRowNumber) {
-        const srcData = srcSheet.getRange(review.sourceRowNumber, 1, 1,
-          srcSheet.getLastColumn()).getValues()[0];
+        const srcData = srcSheet.getRange(review.sourceRowNumber, 1, 1, srcSheet.getLastColumn()).getValues()[0];
         source = {
           rowNumber: review.sourceRowNumber,
           sourceId: String(srcData[SRC_IDX.SOURCE_ID] || ''),
-          deliveryDate: srcData[SRC_IDX.DELIVERY_DATE] instanceof Date
-            ? srcData[SRC_IDX.DELIVERY_DATE].toISOString() : String(srcData[SRC_IDX.DELIVERY_DATE] || ''),
+          deliveryDate:
+            srcData[SRC_IDX.DELIVERY_DATE] instanceof Date
+              ? srcData[SRC_IDX.DELIVERY_DATE].toISOString()
+              : String(srcData[SRC_IDX.DELIVERY_DATE] || ''),
           deliveryTime: String(srcData[SRC_IDX.DELIVERY_TIME] || ''),
           driverName: String(srcData[SRC_IDX.DRIVER_NAME] || ''),
           truckLicense: String(srcData[SRC_IDX.TRUCK_LICENSE] || ''),
@@ -1047,7 +1111,7 @@ function getReviewDetail(reviewId) {
           remark: String(srcData[SRC_IDX.REMARK] || ''),
           distFromWh: Number(srcData[SRC_IDX.DIST_FROM_WH] || 0),
           driverVerifiedName: String(srcData[SRC_IDX.DRIVER_VERIFIED_NAME] || ''),
-          driverVerifiedAddr: String(srcData[SRC_IDX.DRIVER_VERIFIED_ADDR] || ''),
+          driverVerifiedAddr: String(srcData[SRC_IDX.DRIVER_VERIFIED_ADDR] || '')
         };
       }
     }
@@ -1060,16 +1124,17 @@ function getReviewDetail(reviewId) {
     const candidates = {
       persons: [],
       places: [],
-      destinations: [],
+      destinations: []
     };
 
     // 3a. Candidate persons
     if (candPersonIds.length > 0) {
       const personSheet = ss.getSheetByName(SHEET.M_PERSON);
       if (personSheet && personSheet.getLastRow() > 1) {
-        const persons = personSheet.getRange(2, 1, personSheet.getLastRow() - 1,
-          SCHEMA[SHEET.M_PERSON].length).getValues();
-        persons.forEach(function(row) {
+        const persons = personSheet
+          .getRange(2, 1, personSheet.getLastRow() - 1, SCHEMA[SHEET.M_PERSON].length)
+          .getValues();
+        persons.forEach(function (row) {
           const pid = String(row[PERSON_IDX.PERSON_ID] || '');
           if (candPersonIds.indexOf(pid) !== -1) {
             candidates.persons.push({
@@ -1078,8 +1143,7 @@ function getReviewDetail(reviewId) {
               phone: String(row[PERSON_IDX.PHONE] || ''),
               usageCount: Number(row[PERSON_IDX.USAGE_COUNT] || 0),
               status: String(row[PERSON_IDX.STATUS] || ''),
-              lastSeen: row[PERSON_IDX.LAST_SEEN] instanceof Date
-                ? row[PERSON_IDX.LAST_SEEN].toISOString() : '',
+              lastSeen: row[PERSON_IDX.LAST_SEEN] instanceof Date ? row[PERSON_IDX.LAST_SEEN].toISOString() : ''
             });
           }
         });
@@ -1090,9 +1154,8 @@ function getReviewDetail(reviewId) {
     if (candPlaceIds.length > 0) {
       const placeSheet = ss.getSheetByName(SHEET.M_PLACE);
       if (placeSheet && placeSheet.getLastRow() > 1) {
-        const places = placeSheet.getRange(2, 1, placeSheet.getLastRow() - 1,
-          SCHEMA[SHEET.M_PLACE].length).getValues();
-        places.forEach(function(row) {
+        const places = placeSheet.getRange(2, 1, placeSheet.getLastRow() - 1, SCHEMA[SHEET.M_PLACE].length).getValues();
+        places.forEach(function (row) {
           const pid = String(row[PLACE_IDX.PLACE_ID] || '');
           if (candPlaceIds.indexOf(pid) !== -1) {
             candidates.places.push({
@@ -1105,8 +1168,7 @@ function getReviewDetail(reviewId) {
               postcode: String(row[PLACE_IDX.POSTCODE] || ''),
               usageCount: Number(row[PLACE_IDX.USAGE_COUNT] || 0),
               status: String(row[PLACE_IDX.STATUS] || ''),
-              lastSeen: row[PLACE_IDX.LAST_SEEN] instanceof Date
-                ? row[PLACE_IDX.LAST_SEEN].toISOString() : '',
+              lastSeen: row[PLACE_IDX.LAST_SEEN] instanceof Date ? row[PLACE_IDX.LAST_SEEN].toISOString() : ''
             });
           }
         });
@@ -1117,16 +1179,18 @@ function getReviewDetail(reviewId) {
     if (candDestIds.length > 0) {
       const destSheet = ss.getSheetByName(SHEET.M_DESTINATION);
       if (destSheet && destSheet.getLastRow() > 1) {
-        const dests = destSheet.getRange(2, 1, destSheet.getLastRow() - 1,
-          SCHEMA[SHEET.M_DESTINATION].length).getValues();
-        dests.forEach(function(row) {
+        const dests = destSheet
+          .getRange(2, 1, destSheet.getLastRow() - 1, SCHEMA[SHEET.M_DESTINATION].length)
+          .getValues();
+        dests.forEach(function (row) {
           const did = String(row[DEST_IDX.DEST_ID] || '');
           if (candDestIds.indexOf(did) !== -1) {
             const lat = Number(row[DEST_IDX.LAT] || 0);
             const lng = Number(row[DEST_IDX.LNG] || 0);
-            const distance = (review.rawLat && review.rawLng && lat && lng)
-              ? haversineDistanceMeters_(review.rawLat, review.rawLng, lat, lng)
-              : null;
+            const distance =
+              review.rawLat && review.rawLng && lat && lng
+                ? haversineDistanceMeters_(review.rawLat, review.rawLng, lat, lng)
+                : null;
             candidates.destinations.push({
               destId: did,
               personId: String(row[DEST_IDX.PERSON_ID] || ''),
@@ -1136,9 +1200,8 @@ function getReviewDetail(reviewId) {
               routeLabel: String(row[DEST_IDX.ROUTE_LABEL] || ''),
               usageCount: Number(row[DEST_IDX.USAGE_COUNT] || 0),
               status: String(row[DEST_IDX.STATUS] || ''),
-              lastSeen: row[DEST_IDX.LAST_SEEN] instanceof Date
-                ? row[DEST_IDX.LAST_SEEN].toISOString() : '',
-              distanceFromRawMeters: distance,
+              lastSeen: row[DEST_IDX.LAST_SEEN] instanceof Date ? row[DEST_IDX.LAST_SEEN].toISOString() : '',
+              distanceFromRawMeters: distance
             });
           }
         });
@@ -1146,16 +1209,27 @@ function getReviewDetail(reviewId) {
     }
 
     const elapsedMs = Date.now() - startTime;
-    logInfo('WebApp', 'getReviewDetail: ' + reviewId +
-      ' → candidates: ' + candidates.persons.length + 'p/' +
-      candidates.places.length + 'pl/' + candidates.destinations.length + 'd in ' + elapsedMs + 'ms');
+    logInfo(
+      'WebApp',
+      'getReviewDetail: ' +
+        reviewId +
+        ' → candidates: ' +
+        candidates.persons.length +
+        'p/' +
+        candidates.places.length +
+        'pl/' +
+        candidates.destinations.length +
+        'd in ' +
+        elapsedMs +
+        'ms'
+    );
 
     return {
       ok: true,
       review: review,
       source: source,
       candidates: candidates,
-      elapsedMs: elapsedMs,
+      elapsedMs: elapsedMs
     };
   } catch (err) {
     logError('WebApp', 'getReviewDetail ล้มเหลว: ' + err.message, err);
@@ -1180,12 +1254,14 @@ function haversineDistanceMeters_(lat1, lng1, lat2, lng2) {
   }
   // Fallback: re-implement (กรณี 14_Utils.gs ยังไม่ถูกโหลด)
   const R = 6371000;
-  const toRad = function(deg) { return deg * Math.PI / 180; };
+  const toRad = function (deg) {
+    return (deg * Math.PI) / 180;
+  };
   const dLat = toRad(lat2 - lat1);
   const dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return Math.round(R * c);
 }
@@ -1213,20 +1289,28 @@ function getMatchEngineMetrics() {
 
   if (!sheet || sheet.getLastRow() <= 1) {
     return {
-      summary: { total: 0, autoMatchedCount: 0, autoMatchRate: 0, avgScore: 0, maxScore: 0, minScore: 0, withScoreCount: 0 },
+      summary: {
+        total: 0,
+        autoMatchedCount: 0,
+        autoMatchRate: 0,
+        avgScore: 0,
+        maxScore: 0,
+        minScore: 0,
+        withScoreCount: 0
+      },
       statusCounts: {},
       scoreDistribution: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       scoreBins: ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-100'],
       matchReasons: [],
       matchActions: [],
-      elapsedMs: 0,
+      elapsedMs: 0
     };
   }
 
   // อ่านเฉพาะคอลัมน์ที่จำเป็น เพื่อลด payload — match_status, match_confidence, match_reason, match_action
   // ใช้ getRange(row, col, numRows, numCols) เพื่อดึงเฉพาะ 4 คอลัมน์
-  const startCol = FACT_IDX.MATCH_STATUS + 1;  // 1-based
-  const numCols = 4;  // MATCH_STATUS, MATCH_CONF, MATCH_REASON, MATCH_ACTION
+  const startCol = FACT_IDX.MATCH_STATUS + 1; // 1-based
+  const numCols = 4; // MATCH_STATUS, MATCH_CONF, MATCH_REASON, MATCH_ACTION
   const data = sheet.getRange(2, startCol, sheet.getLastRow() - 1, numCols).getValues();
 
   // ─── Summary + Status counts ───
@@ -1235,7 +1319,7 @@ function getMatchEngineMetrics() {
   let withScoreCount = 0;
   let sumScore = 0;
   let maxScore = 0;
-  let minScore = 101;  // start higher than max possible
+  let minScore = 101; // start higher than max possible
   const statusCounts = {};
 
   // ─── Score distribution (10 bins: 0-9, 10-19, ..., 90-100) ───
@@ -1269,7 +1353,7 @@ function getMatchEngineMetrics() {
 
       // Bin index: 0-9 → 0, 10-19 → 1, ..., 90-100 → 9
       let binIdx = Math.floor(score / 10);
-      if (binIdx > 9) binIdx = 9;  // 100 → bin 9
+      if (binIdx > 9) binIdx = 9; // 100 → bin 9
       if (binIdx < 0) binIdx = 0;
       scoreDistribution[binIdx]++;
     }
@@ -1287,13 +1371,21 @@ function getMatchEngineMetrics() {
 
   // ─── Sort reasons + actions ───
   const matchReasons = Object.keys(reasonCounts)
-    .map(function(r) { return { reason: r, count: reasonCounts[r] }; })
-    .sort(function(a, b) { return b.count - a.count; })
-    .slice(0, 15);  // top 15
+    .map(function (r) {
+      return { reason: r, count: reasonCounts[r] };
+    })
+    .sort(function (a, b) {
+      return b.count - a.count;
+    })
+    .slice(0, 15); // top 15
 
   const matchActions = Object.keys(actionCounts)
-    .map(function(a) { return { action: a, count: actionCounts[a] }; })
-    .sort(function(a, b) { return b.count - a.count; });
+    .map(function (a) {
+      return { action: a, count: actionCounts[a] };
+    })
+    .sort(function (a, b) {
+      return b.count - a.count;
+    });
 
   const elapsedMs = Date.now() - startTime;
   logInfo('WebApp', 'getMatchEngineMetrics: ' + total + ' rows analyzed in ' + elapsedMs + 'ms');
@@ -1306,14 +1398,14 @@ function getMatchEngineMetrics() {
       avgScore: withScoreCount > 0 ? Math.round((sumScore / withScoreCount) * 10) / 10 : 0,
       maxScore: maxScore,
       minScore: minScore === 101 ? 0 : minScore,
-      withScoreCount: withScoreCount,
+      withScoreCount: withScoreCount
     },
     statusCounts: statusCounts,
     scoreDistribution: scoreDistribution,
     scoreBins: ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-100'],
     matchReasons: matchReasons,
     matchActions: matchActions,
-    elapsedMs: elapsedMs,
+    elapsedMs: elapsedMs
   };
 }
 
@@ -1342,7 +1434,7 @@ function getSourcePage(offset, limit, filter) {
       filter: filter || {},
       syncStatusCounts: {},
       elapsedMs: 0,
-      error: 'ไม่พบ sheet SOURCE',
+      error: 'ไม่พบ sheet SOURCE'
     };
   }
 
@@ -1355,7 +1447,7 @@ function getSourcePage(offset, limit, filter) {
       limit: limit || 50,
       filter: filter || {},
       syncStatusCounts: {},
-      elapsedMs: 0,
+      elapsedMs: 0
     };
   }
 
@@ -1364,8 +1456,10 @@ function getSourcePage(offset, limit, filter) {
   const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
 
   // คำนวณ sync status — bucket เป็น SUCCESS / PENDING / ERROR / EMPTY
-  const bucketSyncStatus_ = function(rawStatus) {
-    const s = String(rawStatus || '').trim().toUpperCase();
+  const bucketSyncStatus_ = function (rawStatus) {
+    const s = String(rawStatus || '')
+      .trim()
+      .toUpperCase();
     if (s === SCG_CONFIG.SYNC_DONE_VALUE) return 'SUCCESS';
     if (s === '') return 'EMPTY';
     if (s.indexOf('ERROR') !== -1 || s.indexOf('FAIL') !== -1) return 'ERROR';
@@ -1373,8 +1467,8 @@ function getSourcePage(offset, limit, filter) {
   };
 
   // นับ sync status ทั้งหมด
-  const syncStatusCounts = { 'SUCCESS': 0, 'PENDING': 0, 'ERROR': 0, 'EMPTY': 0 };
-  data.forEach(function(row) {
+  const syncStatusCounts = { SUCCESS: 0, PENDING: 0, ERROR: 0, EMPTY: 0 };
+  data.forEach(function (row) {
     const bucket = bucketSyncStatus_(row[SRC_IDX.SYNC_STATUS]);
     syncStatusCounts[bucket] = (syncStatusCounts[bucket] || 0) + 1;
   });
@@ -1384,7 +1478,7 @@ function getSourcePage(offset, limit, filter) {
   const wantSync = (filterObj.syncStatus || 'all').toUpperCase();
   let filtered = data;
   if (wantSync !== 'ALL' && wantSync !== '') {
-    filtered = data.filter(function(row) {
+    filtered = data.filter(function (row) {
       return bucketSyncStatus_(row[SRC_IDX.SYNC_STATUS]) === wantSync;
     });
   }
@@ -1395,13 +1489,15 @@ function getSourcePage(offset, limit, filter) {
   const pageRows = filtered.slice(safeOffset, safeOffset + safeLimit);
 
   // แปลง rows เป็น objects (เลือก field ที่ frontend ใช้)
-  const rows = pageRows.map(function(row, idx) {
+  const rows = pageRows.map(function (row, idx) {
     return {
       _sheetRow: safeOffset + idx + 2,
       rowId: Number(row[SRC_IDX.ROW_ID] || 0),
       sourceId: String(row[SRC_IDX.SOURCE_ID] || ''),
-      deliveryDate: row[SRC_IDX.DELIVERY_DATE] instanceof Date
-        ? row[SRC_IDX.DELIVERY_DATE].toISOString() : String(row[SRC_IDX.DELIVERY_DATE] || ''),
+      deliveryDate:
+        row[SRC_IDX.DELIVERY_DATE] instanceof Date
+          ? row[SRC_IDX.DELIVERY_DATE].toISOString()
+          : String(row[SRC_IDX.DELIVERY_DATE] || ''),
       deliveryTime: String(row[SRC_IDX.DELIVERY_TIME] || ''),
       driverName: String(row[SRC_IDX.DRIVER_NAME] || ''),
       truckLicense: String(row[SRC_IDX.TRUCK_LICENSE] || ''),
@@ -1423,14 +1519,27 @@ function getSourcePage(offset, limit, filter) {
       driverVerifiedName: String(row[SRC_IDX.DRIVER_VERIFIED_NAME] || ''),
       driverVerifiedAddr: String(row[SRC_IDX.DRIVER_VERIFIED_ADDR] || ''),
       qcResult: String(row[SRC_IDX.QC_RESULT] || ''),
-      qcIssue: String(row[SRC_IDX.QC_ISSUE] || ''),
+      qcIssue: String(row[SRC_IDX.QC_ISSUE] || '')
     };
   });
 
   const elapsedMs = Date.now() - startTime;
-  logInfo('WebApp', 'getSourcePage: sync=' + (filterObj.syncStatus || 'all') +
-    ' offset=' + safeOffset + ' limit=' + safeLimit +
-    ' → ' + rows.length + '/' + filtered.length + ' rows in ' + elapsedMs + 'ms');
+  logInfo(
+    'WebApp',
+    'getSourcePage: sync=' +
+      (filterObj.syncStatus || 'all') +
+      ' offset=' +
+      safeOffset +
+      ' limit=' +
+      safeLimit +
+      ' → ' +
+      rows.length +
+      '/' +
+      filtered.length +
+      ' rows in ' +
+      elapsedMs +
+      'ms'
+  );
 
   return {
     rows: rows,
@@ -1439,7 +1548,7 @@ function getSourcePage(offset, limit, filter) {
     limit: safeLimit,
     filter: filterObj,
     syncStatusCounts: syncStatusCounts,
-    elapsedMs: elapsedMs,
+    elapsedMs: elapsedMs
   };
 }
 
@@ -1466,7 +1575,13 @@ function searchLocations(query, limit) {
   const rawQuery = String(query || '').trim();
 
   if (rawQuery.length < 2) {
-    return { results: [], total: 0, query: rawQuery, elapsedMs: 0, message: 'คำค้นหาสั้นเกินไป (อย่างน้อย 2 ตัวอักษร)' };
+    return {
+      results: [],
+      total: 0,
+      query: rawQuery,
+      elapsedMs: 0,
+      message: 'คำค้นหาสั้นเกินไป (อย่างน้อย 2 ตัวอักษร)'
+    };
   }
 
   const normQuery = rawQuery.toLowerCase().replace(/\s+/g, '');
@@ -1482,18 +1597,22 @@ function searchLocations(query, limit) {
     const aliasSheet = ss.getSheetByName(SHEET.M_ALIAS);
     const destSheet = ss.getSheetByName(SHEET.M_DESTINATION);
 
-    const persons = personSheet && personSheet.getLastRow() > 1
-      ? personSheet.getRange(2, 1, personSheet.getLastRow() - 1, SCHEMA[SHEET.M_PERSON].length).getValues()
-      : [];
-    const places = placeSheet && placeSheet.getLastRow() > 1
-      ? placeSheet.getRange(2, 1, placeSheet.getLastRow() - 1, SCHEMA[SHEET.M_PLACE].length).getValues()
-      : [];
-    const aliases = aliasSheet && aliasSheet.getLastRow() > 1
-      ? aliasSheet.getRange(2, 1, aliasSheet.getLastRow() - 1, SCHEMA[SHEET.M_ALIAS].length).getValues()
-      : [];
-    const dests = destSheet && destSheet.getLastRow() > 1
-      ? destSheet.getRange(2, 1, destSheet.getLastRow() - 1, SCHEMA[SHEET.M_DESTINATION].length).getValues()
-      : [];
+    const persons =
+      personSheet && personSheet.getLastRow() > 1
+        ? personSheet.getRange(2, 1, personSheet.getLastRow() - 1, SCHEMA[SHEET.M_PERSON].length).getValues()
+        : [];
+    const places =
+      placeSheet && placeSheet.getLastRow() > 1
+        ? placeSheet.getRange(2, 1, placeSheet.getLastRow() - 1, SCHEMA[SHEET.M_PLACE].length).getValues()
+        : [];
+    const aliases =
+      aliasSheet && aliasSheet.getLastRow() > 1
+        ? aliasSheet.getRange(2, 1, aliasSheet.getLastRow() - 1, SCHEMA[SHEET.M_ALIAS].length).getValues()
+        : [];
+    const dests =
+      destSheet && destSheet.getLastRow() > 1
+        ? destSheet.getRange(2, 1, destSheet.getLastRow() - 1, SCHEMA[SHEET.M_DESTINATION].length).getValues()
+        : [];
 
     // สร้าง index maps
     const personMap = buildPersonMap_(persons);
@@ -1506,9 +1625,11 @@ function searchLocations(query, limit) {
     const matchedPlaceIds = new Set();
 
     // 1. ค้นจาก M_PERSON
-    persons.forEach(function(row) {
+    persons.forEach(function (row) {
       const name = String(row[PERSON_IDX.CANONICAL] || '').toLowerCase();
-      const phone = String(row[PERSON_IDX.PHONE] || '').toLowerCase().replace(/[-\s]/g, '');
+      const phone = String(row[PERSON_IDX.PHONE] || '')
+        .toLowerCase()
+        .replace(/[-\s]/g, '');
       const status = String(row[PERSON_IDX.STATUS] || '');
       if (status === APP_CONST.STATUS_ARCHIVED || status === APP_CONST.STATUS_MERGED) return;
 
@@ -1518,7 +1639,7 @@ function searchLocations(query, limit) {
     });
 
     // 2. ค้นจาก M_PLACE
-    places.forEach(function(row) {
+    places.forEach(function (row) {
       const name = String(row[PLACE_IDX.CANONICAL] || '').toLowerCase();
       const subDistrict = String(row[PLACE_IDX.SUB_DISTRICT] || '').toLowerCase();
       const district = String(row[PLACE_IDX.DISTRICT] || '').toLowerCase();
@@ -1534,7 +1655,7 @@ function searchLocations(query, limit) {
     });
 
     // 3. ค้นจาก M_ALIAS → map กลับไป person/place
-    aliases.forEach(function(row) {
+    aliases.forEach(function (row) {
       const variant = String(row[ALIAS_IDX.VARIANT_NAME] || '').toLowerCase();
       const masterUuid = String(row[ALIAS_IDX.MASTER_UUID] || '');
       const entityType = String(row[ALIAS_IDX.ENTITY_TYPE] || '');
@@ -1554,7 +1675,7 @@ function searchLocations(query, limit) {
 
     // 4. สร้างผลลัพธ์
     const results = [];
-    matchedPersonIds.forEach(function(personId) {
+    matchedPersonIds.forEach(function (personId) {
       const person = personMap[personId];
       if (!person) return;
       const dest = destByPerson[personId];
@@ -1567,12 +1688,12 @@ function searchLocations(query, limit) {
           lng: dest.lng,
           destId: dest.destId,
           source: 'PERSON',
-          usageCount: dest.usageCount || person.usageCount || 0,
+          usageCount: dest.usageCount || person.usageCount || 0
         });
       }
     });
 
-    matchedPlaceIds.forEach(function(placeId) {
+    matchedPlaceIds.forEach(function (placeId) {
       const place = placeMap[placeId];
       if (!place) return;
       const dest = destByPlace[placeId];
@@ -1585,13 +1706,15 @@ function searchLocations(query, limit) {
           lng: dest.lng,
           destId: dest.destId,
           source: 'PLACE',
-          usageCount: dest.usageCount || place.usageCount || 0,
+          usageCount: dest.usageCount || place.usageCount || 0
         });
       }
     });
 
     // เรียงตาม usageCount  descending + จำกัดจำนวน
-    results.sort(function(a, b) { return (b.usageCount || 0) - (a.usageCount || 0); });
+    results.sort(function (a, b) {
+      return (b.usageCount || 0) - (a.usageCount || 0);
+    });
     const trimmed = results.slice(0, maxResults);
 
     const elapsedMs = Date.now() - startTime;
@@ -1601,7 +1724,7 @@ function searchLocations(query, limit) {
       results: trimmed,
       total: results.length,
       query: rawQuery,
-      elapsedMs: elapsedMs,
+      elapsedMs: elapsedMs
     };
   } catch (err) {
     logError('WebApp', 'searchLocations ล้มเหลว: ' + err.message, err);
@@ -1613,14 +1736,14 @@ function searchLocations(query, limit) {
 
 function buildPersonMap_(persons) {
   const map = {};
-  persons.forEach(function(row) {
+  persons.forEach(function (row) {
     const id = String(row[PERSON_IDX.PERSON_ID] || '');
     if (id) {
       map[id] = {
         personId: id,
         canonicalName: String(row[PERSON_IDX.CANONICAL] || ''),
         phone: String(row[PERSON_IDX.PHONE] || ''),
-        usageCount: Number(row[PERSON_IDX.USAGE_COUNT] || 0),
+        usageCount: Number(row[PERSON_IDX.USAGE_COUNT] || 0)
       };
     }
   });
@@ -1629,7 +1752,7 @@ function buildPersonMap_(persons) {
 
 function buildPlaceMap_(places) {
   const map = {};
-  places.forEach(function(row) {
+  places.forEach(function (row) {
     const id = String(row[PLACE_IDX.PLACE_ID] || '');
     if (id) {
       map[id] = {
@@ -1639,7 +1762,7 @@ function buildPlaceMap_(places) {
         district: String(row[PLACE_IDX.DISTRICT] || ''),
         province: String(row[PLACE_IDX.PROVINCE] || ''),
         postcode: String(row[PLACE_IDX.POSTCODE] || ''),
-        usageCount: Number(row[PLACE_IDX.USAGE_COUNT] || 0),
+        usageCount: Number(row[PLACE_IDX.USAGE_COUNT] || 0)
       };
     }
   });
@@ -1648,7 +1771,7 @@ function buildPlaceMap_(places) {
 
 function buildDestIndexByPerson_(dests) {
   const map = {};
-  dests.forEach(function(row) {
+  dests.forEach(function (row) {
     const personId = String(row[DEST_IDX.PERSON_ID] || '');
     const status = String(row[DEST_IDX.STATUS] || '');
     if (personId && status !== APP_CONST.STATUS_ARCHIVED && status !== APP_CONST.STATUS_MERGED) {
@@ -1659,7 +1782,7 @@ function buildDestIndexByPerson_(dests) {
           destId: String(row[DEST_IDX.DEST_ID] || ''),
           lat: lat,
           lng: lng,
-          usageCount: Number(row[DEST_IDX.USAGE_COUNT] || 0),
+          usageCount: Number(row[DEST_IDX.USAGE_COUNT] || 0)
         };
       }
     }
@@ -1669,7 +1792,7 @@ function buildDestIndexByPerson_(dests) {
 
 function buildDestIndexByPlace_(dests) {
   const map = {};
-  dests.forEach(function(row) {
+  dests.forEach(function (row) {
     const placeId = String(row[DEST_IDX.PLACE_ID] || '');
     const status = String(row[DEST_IDX.STATUS] || '');
     if (placeId && status !== APP_CONST.STATUS_ARCHIVED && status !== APP_CONST.STATUS_MERGED) {
@@ -1680,7 +1803,7 @@ function buildDestIndexByPlace_(dests) {
           destId: String(row[DEST_IDX.DEST_ID] || ''),
           lat: lat,
           lng: lng,
-          usageCount: Number(row[DEST_IDX.USAGE_COUNT] || 0),
+          usageCount: Number(row[DEST_IDX.USAGE_COUNT] || 0)
         };
       }
     }

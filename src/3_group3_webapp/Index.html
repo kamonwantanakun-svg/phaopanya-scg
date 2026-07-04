@@ -1,242 +1,256 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="th">
-<head>
-  <base target="_top">
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LMDS V5.5 Dashboard</title>
+  <head>
+    <base target="_top" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LMDS V5.5 Dashboard</title>
 
-  <!-- Tailwind CSS v4 (browser runtime compiler, with SRI) -->
-  <!-- [FIX WebApp Phase 1] tailwindcss@3.4.16/dist/tailwind.min.css ไม่มีอยู่จริงบน jsDelivr (404) -->
-  <!--   สาเหตุ: Tailwind v3+ เลิกให้ precompiled CSS บน CDN แล้ว ต้องใช้ build process -->
-  <!--   แก้โดยใช้ @tailwindcss/browser@4 ซึ่งเป็น runtime compiler ทางการจาก Tailwind Labs -->
-  <!--   รองรับ utility classes ทั้งหมดที่ใช้ (bg-*, text-*, grid-*, flex-*, etc.) -->
-  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"
-          integrity="sha384-shaHAtPgz0ulP7R/YmFe0nZtC8FxdhJPi73vwJQcADVttxvHLJBJt/pjzkLSbIvL"
-          crossorigin="anonymous"></script>
+    <!-- Tailwind CSS v4 (browser runtime compiler, with SRI) -->
+    <!-- [FIX WebApp Phase 1] tailwindcss@3.4.16/dist/tailwind.min.css ไม่มีอยู่จริงบน jsDelivr (404) -->
+    <!--   สาเหตุ: Tailwind v3+ เลิกให้ precompiled CSS บน CDN แล้ว ต้องใช้ build process -->
+    <!--   แก้โดยใช้ @tailwindcss/browser@4 ซึ่งเป็น runtime compiler ทางการจาก Tailwind Labs -->
+    <!--   รองรับ utility classes ทั้งหมดที่ใช้ (bg-*, text-*, grid-*, flex-*, etc.) -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"
+      integrity="sha384-shaHAtPgz0ulP7R/YmFe0nZtC8FxdhJPi73vwJQcADVttxvHLJBJt/pjzkLSbIvL"
+      crossorigin="anonymous"
+    ></script>
 
-  <!-- Custom Tailwind config (inline, runs after Tailwind loads) -->
-  <script>
-    // Extend Tailwind with LMDS colors — ใช้ CSS variables
-    document.documentElement.style.setProperty('--color-lmds-found', '#b6d7a8');
-    document.documentElement.style.setProperty('--color-lmds-fallback', '#ffe599');
-    document.documentElement.style.setProperty('--color-lmds-not-found', '#f4cccc');
-    document.documentElement.style.setProperty('--color-lmds-branch', '#cfe2f3');
-  </script>
+    <!-- Custom Tailwind config (inline, runs after Tailwind loads) -->
+    <script>
+      // Extend Tailwind with LMDS colors — ใช้ CSS variables
+      document.documentElement.style.setProperty('--color-lmds-found', '#b6d7a8');
+      document.documentElement.style.setProperty('--color-lmds-fallback', '#ffe599');
+      document.documentElement.style.setProperty('--color-lmds-not-found', '#f4cccc');
+      document.documentElement.style.setProperty('--color-lmds-branch', '#cfe2f3');
+    </script>
 
-  <!-- Chart.js 4.4.6 (with SRI) -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"
-          integrity="sha384-Sse/HDqcypGpyTDpvZOJNnG0TT3feGQUkF9H+mnRvic+LjR+K1NhTt8f51KIQ3v3"
-          crossorigin="anonymous"></script>
+    <!-- Chart.js 4.4.6 (with SRI) -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"
+      integrity="sha384-Sse/HDqcypGpyTDpvZOJNnG0TT3feGQUkF9H+mnRvic+LjR+K1NhTt8f51KIQ3v3"
+      crossorigin="anonymous"
+    ></script>
 
-  <!-- Lucide Icons 0.460.0 (with SRI) -->
-  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"
-          integrity="sha384-ieG+IKD0d/ZPXyCBTMVAbqsQdns8QGJR/e26WMw7M4fkaI/rHcS/YIoi+ah9WGge"
-          crossorigin="anonymous"></script>
+    <!-- Lucide Icons 0.460.0 (with SRI) -->
+    <script
+      src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"
+      integrity="sha384-ieG+IKD0d/ZPXyCBTMVAbqsQdns8QGJR/e26WMw7M4fkaI/rHcS/YIoi+ah9WGge"
+      crossorigin="anonymous"
+    ></script>
 
-  <!-- Inter font (preconnect + stylesheet) -->
-  <!-- [FIX WebApp] ลบ SRI hash ออก — Google Fonts CSS ส่ง content ต่างกันตาม User-Agent
+    <!-- Inter font (preconnect + stylesheet) -->
+    <!-- [FIX WebApp] ลบ SRI hash ออก — Google Fonts CSS ส่ง content ต่างกันตาม User-Agent
        (woff2 vs woff) ทำให้ SRI hash ไม่ stable → บางครั้งโดน block -->
-  <!--   ถ้าต้องการ SRI จริง ต้อง self-host font ใน Apps Script (เกินขอบเขต Phase 1) -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-        rel="stylesheet">
+    <!--   ถ้าต้องการ SRI จริง ต้อง self-host font ใน Apps Script (เกินขอบเขต Phase 1) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
-  <!-- Custom styles -->
-  <?!= include_('Styles'); ?>
-</head>
-<body class="bg-gray-50 text-gray-800 font-sans antialiased">
+    <!-- Custom styles -->
+    <?!= include_('Styles'); ?>
+  </head>
+  <body class="bg-gray-50 text-gray-800 font-sans antialiased">
+    <!-- ────────────────────────────────────────────────────────── -->
+    <!-- Top Bar                                                       -->
+    <!-- ────────────────────────────────────────────────────────── -->
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-30">
+      <div class="flex justify-between items-center px-6 py-3">
+        <!-- Left: Logo + Title + Live indicator -->
+        <div class="flex items-center gap-3">
+          <span class="text-2xl" aria-hidden="true">🚚</span>
+          <h1 class="text-lg font-semibold text-gray-900">
+            LMDS V5.5
+            <span class="text-xs font-normal text-gray-500 ml-1">Dashboard</span>
+          </h1>
 
-  <!-- ────────────────────────────────────────────────────────── -->
-  <!-- Top Bar                                                       -->
-  <!-- ────────────────────────────────────────────────────────── -->
-  <header class="bg-white border-b border-gray-200 sticky top-0 z-30">
-    <div class="flex justify-between items-center px-6 py-3">
-      <!-- Left: Logo + Title + Live indicator -->
-      <div class="flex items-center gap-3">
-        <span class="text-2xl" aria-hidden="true">🚚</span>
-        <h1 class="text-lg font-semibold text-gray-900">
-          LMDS V5.5
-          <span class="text-xs font-normal text-gray-500 ml-1">Dashboard</span>
-        </h1>
+          <span
+            id="liveIndicator"
+            class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 bg-green-100 text-green-700 rounded-full font-medium"
+          >
+            <span class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+            Live
+          </span>
 
-        <span id="liveIndicator"
-              class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 bg-green-100 text-green-700 rounded-full font-medium">
-          <span class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-          Live
-        </span>
-
-        <span id="refreshCountdown"
-              class="text-xs text-gray-500 hidden sm:inline">
-          refresh in 60s
-        </span>
-      </div>
-
-      <!-- Right: User info + Logout -->
-      <div class="flex items-center gap-4">
-        <div class="text-right hidden sm:block">
-          <div id="userName" class="text-sm font-medium text-gray-700"><?= currentUser.name ?></div>
-          <div id="userEmail" class="text-xs text-gray-500"><?= currentUser.email ?></div>
+          <span id="refreshCountdown" class="text-xs text-gray-500 hidden sm:inline"> refresh in 60s </span>
         </div>
-        <div class="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-semibold"
-             id="userAvatar">
-          <? if (currentUser.name) { ?>
-            <?= currentUser.name.charAt(0).toUpperCase() ?>
-          <? } else { ?>
-            U
-          <? } ?>
-        </div>
-        <button id="manualRefreshBtn" type="button"
-                class="text-gray-500 hover:text-blue-600 transition-colors"
-                title="Refresh now"
-                aria-label="Refresh now">
-          <i data-lucide="refresh-cw" class="w-4 h-4"></i>
-        </button>
-      </div>
-    </div>
-  </header>
 
-  <!-- ────────────────────────────────────────────────────────── -->
-  <!-- Layout: Sidebar + Main Content                                -->
-  <!-- ────────────────────────────────────────────────────────── -->
-  <div class="flex">
-
-    <!-- Sidebar -->
-    <aside class="w-56 bg-white border-r border-gray-200 min-h-[calc(100vh-3.5rem)] p-4 hidden md:block">
-      <nav class="space-y-1" id="navMenu">
-        <button type="button" onclick="globalThis.navigateTo_('dashboard')"
-           class="nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors w-full text-left"
-           data-route="dashboard">
-          <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
-          <span>Dashboard</span>
-        </button>
-
-        <button type="button" onclick="globalThis.navigateTo_('fact')"
-           class="nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors w-full text-left"
-           data-route="fact">
-          <i data-lucide="package" class="w-4 h-4"></i>
-          <span>FACT_DELIVERY</span>
-        </button>
-
-        <button type="button" onclick="globalThis.navigateTo_('qreview')"
-           class="nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors w-full text-left"
-           data-route="qreview">
-          <i data-lucide="alert-triangle" class="w-4 h-4"></i>
-          <span>Q_REVIEW</span>
-        </button>
-
-        <button type="button" onclick="globalThis.navigateTo_('source')"
-           class="nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors w-full text-left"
-           data-route="source">
-          <i data-lucide="inbox" class="w-4 h-4"></i>
-          <span>Source Sheet</span>
-        </button>
-
-        <button type="button" onclick="globalThis.navigateTo_('match')"
-           class="nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors w-full text-left"
-           data-route="match">
-          <i data-lucide="trending-up" class="w-4 h-4"></i>
-          <span>Match Engine</span>
-        </button>
-
-        <button type="button" onclick="globalThis.navigateTo_('search')"
-           class="nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors w-full text-left"
-           data-route="search">
-          <i data-lucide="search" class="w-4 h-4"></i>
-          <span>Search</span>
-        </button>
-      </nav>
-
-      <!-- Divider -->
-      <hr class="my-4 border-gray-200">
-
-      <!-- App info -->
-      <div class="px-3 py-2 text-xs text-gray-400 space-y-1">
-        <div>Version: <span class="text-gray-600 font-medium"><?= appVersion ?></span></div>
-        <div>Deployed: <span class="text-gray-600" id="deployedAt">-</span></div>
-        <div class="pt-2">
-          <a href="https://github.com/Siriwat08/phaopanya-scg"
-             target="_blank"
-             class="text-blue-500 hover:underline">
-            View Repository →
-          </a>
-        </div>
-      </div>
-    </aside>
-
-    <!-- Main Content -->
-    <main id="mainContent" class="flex-1 p-6 min-h-[calc(100vh-3.5rem)]">
-
-      <!-- ─────────────────────────────────────────────────────── -->
-      <!-- Loading State (initial)                                  -->
-      <!-- ─────────────────────────────────────────────────────── -->
-      <div id="loadingState" class="flex items-center justify-center h-64">
-        <div class="text-center">
-          <div class="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-          <p class="mt-3 text-sm text-gray-500">กำลังโหลดข้อมูล...</p>
-        </div>
-      </div>
-
-      <!-- ─────────────────────────────────────────────────────── -->
-      <!-- Error State                                              -->
-      <!-- ─────────────────────────────────────────────────────── -->
-      <div id="errorState" class="hidden">
-        <div class="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-          <div class="text-4xl mb-2">⚠️</div>
-          <h2 class="text-lg font-semibold text-red-800 mb-1">เกิดข้อผิดพลาด</h2>
-          <p id="errorMessage" class="text-sm text-red-600"></p>
-          <button type="button" onclick="globalThis.location.reload()"
-                  class="mt-4 px-4 py-2 bg-red-600 text-white rounded text-sm hover:bg-red-700">
-            โหลดหน้าใหม่
+        <!-- Right: User info + Logout -->
+        <div class="flex items-center gap-4">
+          <div class="text-right hidden sm:block">
+            <div id="userName" class="text-sm font-medium text-gray-700"><?= currentUser.name ?></div>
+            <div id="userEmail" class="text-xs text-gray-500"><?= currentUser.email ?></div>
+          </div>
+          <div
+            class="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-semibold"
+            id="userAvatar"
+          >
+            <? if (currentUser.name) { ?> <?= currentUser.name.charAt(0).toUpperCase() ?> <? } else { ?> U <? } ?>
+          </div>
+          <button
+            id="manualRefreshBtn"
+            type="button"
+            class="text-gray-500 hover:text-blue-600 transition-colors"
+            title="Refresh now"
+            aria-label="Refresh now"
+          >
+            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
           </button>
         </div>
       </div>
+    </header>
 
-      <!-- ─────────────────────────────────────────────────────── -->
-      <!-- View Container (จะถูก render โดย app.js)                  -->
-      <!-- ─────────────────────────────────────────────────────── -->
-      <div id="viewContainer"></div>
+    <!-- ────────────────────────────────────────────────────────── -->
+    <!-- Layout: Sidebar + Main Content                                -->
+    <!-- ────────────────────────────────────────────────────────── -->
+    <div class="flex">
+      <!-- Sidebar -->
+      <aside class="w-56 bg-white border-r border-gray-200 min-h-[calc(100vh-3.5rem)] p-4 hidden md:block">
+        <nav class="space-y-1" id="navMenu">
+          <button
+            type="button"
+            onclick="globalThis.navigateTo_('dashboard')"
+            class="nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors w-full text-left"
+            data-route="dashboard"
+          >
+            <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
+            <span>Dashboard</span>
+          </button>
 
-    </main>
-  </div>
+          <button
+            type="button"
+            onclick="globalThis.navigateTo_('fact')"
+            class="nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors w-full text-left"
+            data-route="fact"
+          >
+            <i data-lucide="package" class="w-4 h-4"></i>
+            <span>FACT_DELIVERY</span>
+          </button>
 
-  <!-- ────────────────────────────────────────────────────────── -->
-  <!-- Toast Notifications (bottom-right)                          -->
-  <!-- ────────────────────────────────────────────────────────── -->
-  <div id="toastContainer"
-       class="fixed bottom-4 right-4 z-50 space-y-2 pointer-events-none"></div>
+          <button
+            type="button"
+            onclick="globalThis.navigateTo_('qreview')"
+            class="nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors w-full text-left"
+            data-route="qreview"
+          >
+            <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+            <span>Q_REVIEW</span>
+          </button>
 
-  <!-- ────────────────────────────────────────────────────────── -->
-  <!-- SSR Data (passed from server)                               -->
-  <!-- ────────────────────────────────────────────────────────── -->
-  <script>
-    // ข้อมูลที่ server ส่งมาตอนเปิดหน้า (SSR) — ใช้ทันทีโดยไม่ต้องรอ polling
-    globalThis.__INITIAL_DATA__ = <?= JSON.stringify(initialData) ?>;
-    globalThis.__APP_VERSION__  = '<?= appVersion ?>';
-    globalThis.__APP_NAME__     = '<?= appName ?>';
-    globalThis.__CURRENT_USER__ = <?= JSON.stringify(currentUser) ?>;
-    globalThis.__DEPLOYED_AT__  = '<?= deployedAt ?>';
+          <button
+            type="button"
+            onclick="globalThis.navigateTo_('source')"
+            class="nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors w-full text-left"
+            data-route="source"
+          >
+            <i data-lucide="inbox" class="w-4 h-4"></i>
+            <span>Source Sheet</span>
+          </button>
 
-    // Polling config (60 วินาที)
-    globalThis.__POLL_INTERVAL_MS__ = 60 * 1000;
-  </script>
+          <button
+            type="button"
+            onclick="globalThis.navigateTo_('match')"
+            class="nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors w-full text-left"
+            data-route="match"
+          >
+            <i data-lucide="trending-up" class="w-4 h-4"></i>
+            <span>Match Engine</span>
+          </button>
 
-  <!-- ────────────────────────────────────────────────────────── -->
-  <!-- App Scripts (loaded via include_)                           -->
-  <!-- ────────────────────────────────────────────────────────── -->
-  <?!= include_('Api'); ?>
-  <?!= include_('Auth'); ?>
-  <?!= include_('StatCard'); ?>
-  <?!= include_('DataTable'); ?>
-  <?!= include_('ChartCard'); ?>
-  <?!= include_('Dashboard'); ?>
-  <?!= include_('QReview'); ?>
-  <?!= include_('FactDelivery'); ?>
-  <?!= include_('SourceSheet'); ?>
-  <?!= include_('MatchEngine'); ?>
-  <?!= include_('Search'); ?>
-  <?!= include_('App'); ?>
+          <button
+            type="button"
+            onclick="globalThis.navigateTo_('search')"
+            class="nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors w-full text-left"
+            data-route="search"
+          >
+            <i data-lucide="search" class="w-4 h-4"></i>
+            <span>Search</span>
+          </button>
+        </nav>
 
-</body>
+        <!-- Divider -->
+        <hr class="my-4 border-gray-200" />
+
+        <!-- App info -->
+        <div class="px-3 py-2 text-xs text-gray-400 space-y-1">
+          <div>
+            Version: <span class="text-gray-600 font-medium"><?= appVersion ?></span>
+          </div>
+          <div>Deployed: <span class="text-gray-600" id="deployedAt">-</span></div>
+          <div class="pt-2">
+            <a href="https://github.com/Siriwat08/phaopanya-scg" target="_blank" class="text-blue-500 hover:underline">
+              View Repository →
+            </a>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <main id="mainContent" class="flex-1 p-6 min-h-[calc(100vh-3.5rem)]">
+        <!-- ─────────────────────────────────────────────────────── -->
+        <!-- Loading State (initial)                                  -->
+        <!-- ─────────────────────────────────────────────────────── -->
+        <div id="loadingState" class="flex items-center justify-center h-64">
+          <div class="text-center">
+            <div
+              class="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"
+            ></div>
+            <p class="mt-3 text-sm text-gray-500">กำลังโหลดข้อมูล...</p>
+          </div>
+        </div>
+
+        <!-- ─────────────────────────────────────────────────────── -->
+        <!-- Error State                                              -->
+        <!-- ─────────────────────────────────────────────────────── -->
+        <div id="errorState" class="hidden">
+          <div class="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+            <div class="text-4xl mb-2">⚠️</div>
+            <h2 class="text-lg font-semibold text-red-800 mb-1">เกิดข้อผิดพลาด</h2>
+            <p id="errorMessage" class="text-sm text-red-600"></p>
+            <button
+              type="button"
+              onclick="globalThis.location.reload()"
+              class="mt-4 px-4 py-2 bg-red-600 text-white rounded text-sm hover:bg-red-700"
+            >
+              โหลดหน้าใหม่
+            </button>
+          </div>
+        </div>
+
+        <!-- ─────────────────────────────────────────────────────── -->
+        <!-- View Container (จะถูก render โดย app.js)                  -->
+        <!-- ─────────────────────────────────────────────────────── -->
+        <div id="viewContainer"></div>
+      </main>
+    </div>
+
+    <!-- ────────────────────────────────────────────────────────── -->
+    <!-- Toast Notifications (bottom-right)                          -->
+    <!-- ────────────────────────────────────────────────────────── -->
+    <div id="toastContainer" class="fixed bottom-4 right-4 z-50 space-y-2 pointer-events-none"></div>
+
+    <!-- ────────────────────────────────────────────────────────── -->
+    <!-- SSR Data (passed from server)                               -->
+    <!-- ────────────────────────────────────────────────────────── -->
+    <script>
+      // ข้อมูลที่ server ส่งมาตอนเปิดหน้า (SSR) — ใช้ทันทีโดยไม่ต้องรอ polling
+      globalThis.__INITIAL_DATA__ = <?= JSON.stringify(initialData) ?>;
+      globalThis.__APP_VERSION__  = '<?= appVersion ?>';
+      globalThis.__APP_NAME__     = '<?= appName ?>';
+      globalThis.__CURRENT_USER__ = <?= JSON.stringify(currentUser) ?>;
+      globalThis.__DEPLOYED_AT__  = '<?= deployedAt ?>';
+
+      // Polling config (60 วินาที)
+      globalThis.__POLL_INTERVAL_MS__ = 60 * 1000;
+    </script>
+
+    <!-- ────────────────────────────────────────────────────────── -->
+    <!-- App Scripts (loaded via include_)                           -->
+    <!-- ────────────────────────────────────────────────────────── -->
+    <?!= include_('Api'); ?> <?!= include_('Auth'); ?> <?!= include_('StatCard'); ?> <?!= include_('DataTable'); ?> <?!=
+    include_('ChartCard'); ?> <?!= include_('Dashboard'); ?> <?!= include_('QReview'); ?> <?!= include_('FactDelivery');
+    ?> <?!= include_('SourceSheet'); ?> <?!= include_('MatchEngine'); ?> <?!= include_('Search'); ?> <?!=
+    include_('App'); ?>
+  </body>
 </html>

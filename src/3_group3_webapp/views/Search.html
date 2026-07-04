@@ -1,329 +1,363 @@
 <script>
-/**
- * views/Search.html — Search view (Phase 2)
- * ===================================================
- * ค้นหาพิกัดจากชื่อ/ที่อยู่/เบอร์โทร/รหัสไปรษณีย์
- * แสดงผลลัพธ์เป็น list พร้อมปุ่มเปิด Google Maps
- * ===================================================
- */
-globalThis.SearchView = (function () {
-  'use strict';
-
-  let isSearching = false;
-
   /**
-   * render — วาด Search view
-   * @param {Object} data — initial data (not used for search)
-   * @param {HTMLElement} container
+   * views/Search.html — Search view (Phase 2)
+   * ===================================================
+   * ค้นหาพิกัดจากชื่อ/ที่อยู่/เบอร์โทร/รหัสไปรษณีย์
+   * แสดงผลลัพธ์เป็น list พร้อมปุ่มเปิด Google Maps
+   * ===================================================
    */
-  function render(data, container) {
-    if (container === null) return;
+  globalThis.SearchView = (function () {
+    'use strict';
 
-    let html = '';
-    html += buildHeaderHtml_();
-    html += buildSearchBoxHtml_();
-    html += '<div id="searchResults" class="mt-6"></div>';
+    let isSearching = false;
 
-    container.innerHTML = html;
+    /**
+     * render — วาด Search view
+     * @param {Object} data — initial data (not used for search)
+     * @param {HTMLElement} container
+     */
+    function render(data, container) {
+      if (container === null) return;
 
-    bindSearchEvents_(container);
-  }
+      let html = '';
+      html += buildHeaderHtml_();
+      html += buildSearchBoxHtml_();
+      html += '<div id="searchResults" class="mt-6"></div>';
 
-  /**
-   * buildHeaderHtml_ — Section 1: Page header
-   * @return {string}
-   * @private
-   */
-  function buildHeaderHtml_() {
-    return '<div class="mb-6">' +
-      '<h2 class="text-2xl font-bold text-gray-900">🔍 ค้นหาพิกัด</h2>' +
-      '<p class="text-sm text-gray-500 mt-1">ค้นหาจากชื่อร้าน/ชื่อลูกค้า • ที่อยู่ • เบอร์โทร • รหัสไปรษณีย์</p>' +
-      '</div>';
-  }
+      container.innerHTML = html;
 
-  /**
-   * buildSearchBoxHtml_ — Section 2: Search input
-   * @return {string}
-   * @private
-   */
-  function buildSearchBoxHtml_() {
-    return '<div class="bg-white border border-gray-200 rounded-lg p-4">' +
-      '<div class="flex gap-3">' +
+      bindSearchEvents_(container);
+    }
+
+    /**
+     * buildHeaderHtml_ — Section 1: Page header
+     * @return {string}
+     * @private
+     */
+    function buildHeaderHtml_() {
+      return (
+        '<div class="mb-6">' +
+        '<h2 class="text-2xl font-bold text-gray-900">🔍 ค้นหาพิกัด</h2>' +
+        '<p class="text-sm text-gray-500 mt-1">ค้นหาจากชื่อร้าน/ชื่อลูกค้า • ที่อยู่ • เบอร์โทร • รหัสไปรษณีย์</p>' +
+        '</div>'
+      );
+    }
+
+    /**
+     * buildSearchBoxHtml_ — Section 2: Search input
+     * @return {string}
+     * @private
+     */
+    function buildSearchBoxHtml_() {
+      return (
+        '<div class="bg-white border border-gray-200 rounded-lg p-4">' +
+        '<div class="flex gap-3">' +
         '<input id="searchInput" type="text" ' +
-          'class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" ' +
-          'placeholder="พิมพ์ชื่อร้าน / ที่อยู่ / เบอร์โทร / รหัสไปรษณีย์..." ' +
-          'autocomplete="off">' +
+        'class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" ' +
+        'placeholder="พิมพ์ชื่อร้าน / ที่อยู่ / เบอร์โทร / รหัสไปรษณีย์..." ' +
+        'autocomplete="off">' +
         '<button id="searchBtn" ' +
-          'class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">' +
-          '🔍 ค้นหา' +
+        'class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">' +
+        '🔍 ค้นหา' +
         '</button>' +
-      '</div>' +
-      '<p class="text-xs text-gray-400 mt-2">💡 กด Enter เพื่อค้นหา • ค้นหาขั้นต่ำ 2 ตัวอักษร</p>' +
-      '</div>';
-  }
-
-  /**
-   * bindSearchEvents_ — ผูก event listeners
-   * @param {HTMLElement} container
-   * @private
-   */
-  function bindSearchEvents_(container) {
-    const input = container.querySelector('#searchInput');
-    const btn = container.querySelector('#searchBtn');
-
-    if (input) {
-      input.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          doSearch_(input.value);
-        }
-      });
+        '</div>' +
+        '<p class="text-xs text-gray-400 mt-2">💡 กด Enter เพื่อค้นหา • ค้นหาขั้นต่ำ 2 ตัวอักษร</p>' +
+        '</div>'
+      );
     }
 
-    if (btn) {
-      btn.addEventListener('click', function() {
-        doSearch_(input ? input.value : '');
-      });
-    }
-  }
+    /**
+     * bindSearchEvents_ — ผูก event listeners
+     * @param {HTMLElement} container
+     * @private
+     */
+    function bindSearchEvents_(container) {
+      const input = container.querySelector('#searchInput');
+      const btn = container.querySelector('#searchBtn');
 
-  /**
-   * doSearch_ — เรียก API ค้นหา
-   * @param {string} query
-   * @private
-   */
-  async function doSearch_(query) {
-    const trimmed = String(query || '').trim();
-    if (trimmed.length < 2) {
-      showToast_('คำค้นหาสั้นเกินไป', 'กรุณาพิมพ์อย่างน้อย 2 ตัวอักษร', 'warning');
-      return;
-    }
-
-    if (isSearching) return;
-    isSearching = true;
-
-    const resultsEl = document.getElementById('searchResults');
-    if (resultsEl) {
-      resultsEl.innerHTML = buildLoadingHtml_();
-    }
-
-    try {
-      if (!globalThis.api || typeof globalThis.api.searchLocations !== 'function') {
-        throw new Error('API ไม่พร้อมใช้งาน');
+      if (input) {
+        input.addEventListener('keypress', function (e) {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            doSearch_(input.value);
+          }
+        });
       }
-      const data = await globalThis.api.searchLocations(trimmed, 20);
-      renderResults_(data, resultsEl);
-    } catch (err) {
-      console.error('[SearchView] search failed:', err);
+
+      if (btn) {
+        btn.addEventListener('click', function () {
+          doSearch_(input ? input.value : '');
+        });
+      }
+    }
+
+    /**
+     * doSearch_ — เรียก API ค้นหา
+     * @param {string} query
+     * @private
+     */
+    async function doSearch_(query) {
+      const trimmed = String(query || '').trim();
+      if (trimmed.length < 2) {
+        showToast_('คำค้นหาสั้นเกินไป', 'กรุณาพิมพ์อย่างน้อย 2 ตัวอักษร', 'warning');
+        return;
+      }
+
+      if (isSearching) return;
+      isSearching = true;
+
+      const resultsEl = document.getElementById('searchResults');
       if (resultsEl) {
-        resultsEl.innerHTML = buildErrorHtml_(err.message);
+        resultsEl.innerHTML = buildLoadingHtml_();
       }
-      showToast_('ค้นหาล้มเหลว', err.message, 'error');
-    } finally {
-      isSearching = false;
-    }
-  }
 
-  /**
-   * renderResults_ — วาดผลลัพธ์
-   * @param {Object} data — { results, total, query, elapsedMs }
-   * @param {HTMLElement} container
-   * @private
-   */
-  function renderResults_(data, container) {
-    if (!container) return;
-
-    const results = data.results || [];
-    const total = data.total || 0;
-    const elapsedMs = data.elapsedMs || 0;
-
-    if (results.length === 0) {
-      container.innerHTML = buildEmptyHtml_(data.query);
-      return;
+      try {
+        if (!globalThis.api || typeof globalThis.api.searchLocations !== 'function') {
+          throw new Error('API ไม่พร้อมใช้งาน');
+        }
+        const data = await globalThis.api.searchLocations(trimmed, 20);
+        renderResults_(data, resultsEl);
+      } catch (err) {
+        console.error('[SearchView] search failed:', err);
+        if (resultsEl) {
+          resultsEl.innerHTML = buildErrorHtml_(err.message);
+        }
+        showToast_('ค้นหาล้มเหลว', err.message, 'error');
+      } finally {
+        isSearching = false;
+      }
     }
 
-    let html = '';
-    html += buildResultsHeaderHtml_(total, elapsedMs, data.query);
-    html += '<div class="space-y-3">';
+    /**
+     * renderResults_ — วาดผลลัพธ์
+     * @param {Object} data — { results, total, query, elapsedMs }
+     * @param {HTMLElement} container
+     * @private
+     */
+    function renderResults_(data, container) {
+      if (!container) return;
 
-    results.forEach(function(r, idx) {
-      html += buildResultCardHtml_(r, idx);
-    });
+      const results = data.results || [];
+      const total = data.total || 0;
+      const elapsedMs = data.elapsedMs || 0;
 
-    html += '</div>';
-    container.innerHTML = html;
+      if (results.length === 0) {
+        container.innerHTML = buildEmptyHtml_(data.query);
+        return;
+      }
 
-    bindResultCardEvents_(container);
-  }
+      let html = '';
+      html += buildResultsHeaderHtml_(total, elapsedMs, data.query);
+      html += '<div class="space-y-3">';
 
-  /**
-   * buildResultsHeaderHtml_ — หัวข้อผลลัพธ์
-   * @private
-   */
-  function buildResultsHeaderHtml_(total, elapsedMs, query) {
-    return '<div class="mb-4 flex items-center justify-between">' +
-      '<p class="text-sm text-gray-600">' +
-        'พบ <span class="font-semibold text-gray-900">' + total + '</span> รายการ ' +
-        'สำหรับ "<span class="font-medium">' + escapeHtml_(query) + '</span>"' +
-      '</p>' +
-      '<span class="text-xs text-gray-400">(' + elapsedMs + 'ms)</span>' +
-    '</div>';
-  }
+      results.forEach(function (r, idx) {
+        html += buildResultCardHtml_(r, idx);
+      });
 
-  /**
-   * buildResultCardHtml_ — การ์ดผลลัพธ์ 1 รายการ
-   * @param {Object} r — { name, phone, address, lat, lng, destId, source, usageCount }
-   * @param {number} idx
-   * @return {string}
-   * @private
-   */
-  function buildResultCardHtml_(r, idx) {
-    const sourceBadge = r.source === 'PERSON'
-      ? '<span class="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">👤 ชื่อ</span>'
-      : '<span class="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded">📍 สถานที่</span>';
+      html += '</div>';
+      container.innerHTML = html;
 
-    const phoneHtml = r.phone
-      ? '<p class="text-sm text-gray-600 mt-1">📞 ' + escapeHtml_(r.phone) + '</p>'
-      : '';
+      bindResultCardEvents_(container);
+    }
 
-    const addressHtml = r.address
-      ? '<p class="text-sm text-gray-600 mt-1">📮 ' + escapeHtml_(r.address) + '</p>'
-      : '';
+    /**
+     * buildResultsHeaderHtml_ — หัวข้อผลลัพธ์
+     * @private
+     */
+    function buildResultsHeaderHtml_(total, elapsedMs, query) {
+      return (
+        '<div class="mb-4 flex items-center justify-between">' +
+        '<p class="text-sm text-gray-600">' +
+        'พบ <span class="font-semibold text-gray-900">' +
+        total +
+        '</span> รายการ ' +
+        'สำหรับ "<span class="font-medium">' +
+        escapeHtml_(query) +
+        '</span>"' +
+        '</p>' +
+        '<span class="text-xs text-gray-400">(' +
+        elapsedMs +
+        'ms)</span>' +
+        '</div>'
+      );
+    }
 
-    const usageBadge = r.usageCount > 0
-      ? '<span class="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">ใช้ ' + r.usageCount + ' ครั้ง</span>'
-      : '';
+    /**
+     * buildResultCardHtml_ — การ์ดผลลัพธ์ 1 รายการ
+     * @param {Object} r — { name, phone, address, lat, lng, destId, source, usageCount }
+     * @param {number} idx
+     * @return {string}
+     * @private
+     */
+    function buildResultCardHtml_(r, idx) {
+      const sourceBadge =
+        r.source === 'PERSON'
+          ? '<span class="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">👤 ชื่อ</span>'
+          : '<span class="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded">📍 สถานที่</span>';
 
-    const mapsUrl = 'https://www.google.com/maps/dir/?api=1&destination=' + r.lat + ',' + r.lng;
-    const latLngStr = r.lat.toFixed(6) + ', ' + r.lng.toFixed(6);
+      const phoneHtml = r.phone ? '<p class="text-sm text-gray-600 mt-1">📞 ' + escapeHtml_(r.phone) + '</p>' : '';
 
-    return '<div class="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">' +
-      '<div class="flex items-start justify-between gap-3">' +
+      const addressHtml = r.address
+        ? '<p class="text-sm text-gray-600 mt-1">📮 ' + escapeHtml_(r.address) + '</p>'
+        : '';
+
+      const usageBadge =
+        r.usageCount > 0
+          ? '<span class="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">ใช้ ' + r.usageCount + ' ครั้ง</span>'
+          : '';
+
+      const mapsUrl = 'https://www.google.com/maps/dir/?api=1&destination=' + r.lat + ',' + r.lng;
+      const latLngStr = r.lat.toFixed(6) + ', ' + r.lng.toFixed(6);
+
+      return (
+        '<div class="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">' +
+        '<div class="flex items-start justify-between gap-3">' +
         '<div class="flex-1 min-w-0">' +
-          '<div class="flex items-center gap-2 mb-1">' +
-            sourceBadge +
-            usageBadge +
-          '</div>' +
-          '<h3 class="text-base font-semibold text-gray-900 truncate">' + escapeHtml_(r.name) + '</h3>' +
-          phoneHtml +
-          addressHtml +
-          '<p class="text-xs text-gray-400 mt-2 font-mono">📍 ' + latLngStr + '</p>' +
+        '<div class="flex items-center gap-2 mb-1">' +
+        sourceBadge +
+        usageBadge +
+        '</div>' +
+        '<h3 class="text-base font-semibold text-gray-900 truncate">' +
+        escapeHtml_(r.name) +
+        '</h3>' +
+        phoneHtml +
+        addressHtml +
+        '<p class="text-xs text-gray-400 mt-2 font-mono">📍 ' +
+        latLngStr +
+        '</p>' +
         '</div>' +
         '<div class="flex flex-col gap-2 flex-shrink-0">' +
-          '<a href="' + mapsUrl + '" target="_blank" rel="noopener" ' +
-            'class="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition-colors text-center">' +
-            '🗺️ นำทาง' +
-          '</a>' +
-          '<button data-copy-lat="' + r.lat + '" data-copy-lng="' + r.lng + '" ' +
-            'class="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 transition-colors">' +
-            '📋 คัดลอก' +
-          '</button>' +
+        '<a href="' +
+        mapsUrl +
+        '" target="_blank" rel="noopener" ' +
+        'class="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition-colors text-center">' +
+        '🗺️ นำทาง' +
+        '</a>' +
+        '<button data-copy-lat="' +
+        r.lat +
+        '" data-copy-lng="' +
+        r.lng +
+        '" ' +
+        'class="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 transition-colors">' +
+        '📋 คัดลอก' +
+        '</button>' +
         '</div>' +
-      '</div>' +
-    '</div>';
-  }
+        '</div>' +
+        '</div>'
+      );
+    }
 
-  /**
-   * bindResultCardEvents_ — ผูก copy button
-   * @private
-   */
-  function bindResultCardEvents_(container) {
-    const copyBtns = container.querySelectorAll('[data-copy-lat]');
-    copyBtns.forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        const lat = btn.dataset.copyLat;
-        const lng = btn.dataset.copyLng;
-        const text = lat + ', ' + lng;
-        copyToClipboard_(text);
-        showToast_('คัดลอกแล้ว', text, 'success', 2000);
+    /**
+     * bindResultCardEvents_ — ผูก copy button
+     * @private
+     */
+    function bindResultCardEvents_(container) {
+      const copyBtns = container.querySelectorAll('[data-copy-lat]');
+      copyBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          const lat = btn.dataset.copyLat;
+          const lng = btn.dataset.copyLng;
+          const text = lat + ', ' + lng;
+          copyToClipboard_(text);
+          showToast_('คัดลอกแล้ว', text, 'success', 2000);
+        });
       });
-    });
-  }
+    }
 
-  /**
-   * buildLoadingHtml_ — สถานะกำลังค้นหา
-   * @private
-   */
-  function buildLoadingHtml_() {
-    return '<div class="text-center py-8">' +
-      '<div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>' +
-      '<p class="text-sm text-gray-500 mt-2">กำลังค้นหา...</p>' +
-    '</div>';
-  }
+    /**
+     * buildLoadingHtml_ — สถานะกำลังค้นหา
+     * @private
+     */
+    function buildLoadingHtml_() {
+      return (
+        '<div class="text-center py-8">' +
+        '<div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>' +
+        '<p class="text-sm text-gray-500 mt-2">กำลังค้นหา...</p>' +
+        '</div>'
+      );
+    }
 
-  /**
-   * buildEmptyHtml_ — ไม่พบผลลัพธ์
-   * @private
-   */
-  function buildEmptyHtml_(query) {
-    return '<div class="text-center py-8">' +
-      '<div class="text-4xl mb-2">🔍</div>' +
-      '<p class="text-sm text-gray-500">ไม่พบผลลัพธ์สำหรับ "' + escapeHtml_(query) + '"</p>' +
-      '<p class="text-xs text-gray-400 mt-2">ลองค้นหาด้วยคำอื่น หรือตรวจสอบการสะกดคำ</p>' +
-    '</div>';
-  }
+    /**
+     * buildEmptyHtml_ — ไม่พบผลลัพธ์
+     * @private
+     */
+    function buildEmptyHtml_(query) {
+      return (
+        '<div class="text-center py-8">' +
+        '<div class="text-4xl mb-2">🔍</div>' +
+        '<p class="text-sm text-gray-500">ไม่พบผลลัพธ์สำหรับ "' +
+        escapeHtml_(query) +
+        '"</p>' +
+        '<p class="text-xs text-gray-400 mt-2">ลองค้นหาด้วยคำอื่น หรือตรวจสอบการสะกดคำ</p>' +
+        '</div>'
+      );
+    }
 
-  /**
-   * buildErrorHtml_ — แสดง error
-   * @private
-   */
-  function buildErrorHtml_(message) {
-    return '<div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">' +
-      '<div class="text-2xl mb-2">❌</div>' +
-      '<p class="text-sm text-red-700">' + escapeHtml_(message) + '</p>' +
-    '</div>';
-  }
+    /**
+     * buildErrorHtml_ — แสดง error
+     * @private
+     */
+    function buildErrorHtml_(message) {
+      return (
+        '<div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">' +
+        '<div class="text-2xl mb-2">❌</div>' +
+        '<p class="text-sm text-red-700">' +
+        escapeHtml_(message) +
+        '</p>' +
+        '</div>'
+      );
+    }
 
-  /**
-   * escapeHtml_ — escape HTML special chars
-   * @private
-   */
-  function escapeHtml_(str) {
-    return String(str || '')
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll('\'', '&#039;');
-  }
+    /**
+     * escapeHtml_ — escape HTML special chars
+     * @private
+     */
+    function escapeHtml_(str) {
+      return String(str || '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
 
-  /**
-   * copyToClipboard_ — คัดลอกข้อความไป clipboard
-   * @private
-   */
-  function copyToClipboard_(text) {
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text);
-      } else {
-        const textarea = document.createElement('textarea');
-        textarea.value = text;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        textarea.remove();
+    /**
+     * copyToClipboard_ — คัดลอกข้อความไป clipboard
+     * @private
+     */
+    function copyToClipboard_(text) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text);
+        } else {
+          const textarea = document.createElement('textarea');
+          textarea.value = text;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          textarea.remove();
+        }
+      } catch (e) {
+        console.warn('[SearchView] copy failed:', e);
       }
-    } catch (e) {
-      console.warn('[SearchView] copy failed:', e);
     }
-  }
 
-  /**
-   * showToast_ — แสดง toast (ใช้ของ App.html)
-   * @private
-   */
-  function showToast_(title, message, type, duration) {
-    if (globalThis.LMDSApp && typeof globalThis.LMDSApp.showToast === 'function') {
-      globalThis.LMDSApp.showToast(title, message, type, duration);
+    /**
+     * showToast_ — แสดง toast (ใช้ของ App.html)
+     * @private
+     */
+    function showToast_(title, message, type, duration) {
+      if (globalThis.LMDSApp && typeof globalThis.LMDSApp.showToast === 'function') {
+        globalThis.LMDSApp.showToast(title, message, type, duration);
+      }
     }
-  }
 
-  return {
-    render: render,
-  };
-})();
+    return {
+      render: render
+    };
+  })();
 
-console.log('[SearchView] view loaded');
+  console.log('[SearchView] view loaded');
 </script>
