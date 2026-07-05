@@ -59,13 +59,13 @@ function INVESTIGATE_Issue26() {
   const placeData = placeSheet.getRange(2, 1, placeLastRow - 1, 14).getValues();
 
   const totalPlaces = placeData.length;
-  const emptyProvince = 0;
-  const emptyDistrict = 0;
-  const emptyPostcode = 0;
-  const emptyAllFour = 0;
+  let emptyProvince = 0;
+  let emptyDistrict = 0;
+  let emptyPostcode = 0;
+  let emptyAllFour = 0;
   const emptyProvinceSamples = [];
 
-  for (const i = 0; i < placeData.length; i++) {
+  for (let i = 0; i < placeData.length; i++) {
     const row = placeData[i];
     const province = String(row[6] || '').trim();
     const district = String(row[5] || '').trim();
@@ -118,7 +118,7 @@ function INVESTIGATE_Issue26() {
 
   if (emptyProvinceSamples.length > 0) {
     console.log('Sample places with empty province (first 10):');
-    for (const s = 0; s < emptyProvinceSamples.length; s++) {
+    for (let s = 0; s < emptyProvinceSamples.length; s++) {
       const sample = emptyProvinceSamples[s];
       console.log(
         '  ' +
@@ -162,10 +162,10 @@ function INVESTIGATE_Issue26() {
   const factData = factSheet.getRange(2, 1, factLastRow - 1, Math.min(factCols, 34)).getValues();
 
   const totalFacts = factData.length;
-  const reprocessedFacts = 0;
+  let reprocessedFacts = 0;
   const reprocessedSamples = [];
 
-  for (const j = 0; j < factData.length; j++) {
+  for (let j = 0; j < factData.length; j++) {
     const frow = factData[j];
     const matchReason = String(frow[24] || ''); // MATCH_REASON
     const matchStatus = String(frow[22] || ''); // MATCH_STATUS
@@ -200,7 +200,7 @@ function INVESTIGATE_Issue26() {
 
   if (reprocessedSamples.length > 0) {
     console.log('Sample reprocessed facts (first 5):');
-    for (const r = 0; r < reprocessedSamples.length; r++) {
+    for (let r = 0; r < reprocessedSamples.length; r++) {
       const rs = reprocessedSamples[r];
       console.log(
         '  ' +
@@ -244,14 +244,14 @@ function INVESTIGATE_Issue26() {
 
   // Build placeId → place map for quick lookup
   const placeMap = {};
-  for (const p = 0; p < placeData.length; p++) {
+  for (let p = 0; p < placeData.length; p++) {
     const pid = placeData[p][0];
     if (pid) placeMap[pid] = placeData[p];
   }
 
   // Check each reprocessed sample's placeId
-  const reprocessedPlaceWithEmptyProvince = 0;
-  for (const k = 0; k < reprocessedSamples.length; k++) {
+  let reprocessedPlaceWithEmptyProvince = 0;
+  for (let k = 0; k < reprocessedSamples.length; k++) {
     const samplePlaceId = reprocessedSamples[k].placeId;
     if (samplePlaceId && placeMap[samplePlaceId]) {
       const placeRow = placeMap[samplePlaceId];
