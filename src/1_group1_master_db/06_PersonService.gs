@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.046
+ * VERSION: 5.5.047
  * FILE: 06_PersonService.gs
  * LMDS V5.5 — Person Master Service
  * ===================================================
@@ -72,7 +72,7 @@ let _PERSON_ALIAS_INVERTED_INDEX = null;
  *   ถ้า caller (เช่น 17_SearchService) ได้ normResult มาแล้ว ส่งเข้ามาเพื่อข้ามการ normalize ซ้ำ
  *   ถ้าไม่ส่ง → ทำ normalize ภายในเหมือนเดิม (backward compatible)
  */
-function resolvePerson(rawName, preNormResult) {
+function resolvePerson(rawName, preNormResult, contextHint) {
   // [FIX v5.5.012] ใช้ preNormResult ถ้ามี — หลีกเลี่ยง double normalization
   const normResult = preNormResult || normalizePersonNameFull(rawName);
   const cleanName = normResult.cleanName;
@@ -87,17 +87,54 @@ function resolvePerson(rawName, preNormResult) {
     return { personId: null, status: 'NOT_FOUND', confidence: 0, normResult };
   }
 
+  // [UPGRADE v5.5.047] เก็บอันดับ 2 ไว้ด้วยเผื่อต้อง tie-break ด้วย context (2.1)
   let bestPerson = null;
   let bestScore = 0;
+  let secondBestPerson = null;
+  let secondBestScore = 0;
 
   candidates.forEach((candidate) => {
     // [UPGRADE v5.1.001] ส่งข้อมูลว่า match ด้วยเบอร์โทรหรือไม่
     const score = scorePersonCandidate(cleanName, candidate, normResult.extractedPhone);
     if (score > bestScore) {
+      secondBestPerson = bestPerson;
+      secondBestScore = bestScore;
       bestScore = score;
       bestPerson = candidate;
+    } else if (score > secondBestScore) {
+      secondBestScore = score;
+      secondBestPerson = candidate;
     }
   });
+
+  // [NEW v5.5.047 — Contextual Disambiguation 2.1]
+  //   คะแนนอันดับ 1-2 ใกล้กันมาก + มี SoldToName context → เช็คประวัติจริงจาก FACT_DELIVERY
+  //   ถ้า candidate อันดับ 2 เคยส่งของให้ SoldToName นี้ แต่อันดับ 1 ไม่เคย → สลับ
+  const AMBIGUITY_MARGIN = 8;
+  if (
+    contextHint &&
+    contextHint.soldToName &&
+    secondBestPerson &&
+    bestScore - secondBestScore < AMBIGUITY_MARGIN &&
+    bestScore >= AI_CONFIG.THRESHOLD_REVIEW
+  ) {
+    const bestMatchesContext = personMatchesSoldToContext_(bestPerson.personId, contextHint.soldToName);
+    const secondMatchesContext = personMatchesSoldToContext_(secondBestPerson.personId, contextHint.soldToName);
+    if (secondMatchesContext && !bestMatchesContext) {
+      logDebug(
+        'PersonService',
+        'Contextual Disambiguation: สลับจาก ' +
+          bestPerson.personId +
+          ' → ' +
+          secondBestPerson.personId +
+          ' (SoldTo="' +
+          contextHint.soldToName +
+          '")'
+      );
+      bestPerson = secondBestPerson;
+      bestScore = Math.max(secondBestScore, AI_CONFIG.THRESHOLD_AUTO);
+    }
+  }
 
   if (bestScore >= AI_CONFIG.THRESHOLD_AUTO) {
     return { personId: bestPerson.personId, status: 'FOUND', confidence: bestScore, normResult };
@@ -781,3 +818,55 @@ function invalidateAliasCache_() {
 // Callers in this file use saveChunkedCache_() / loadChunkedCache_()
 // which resolve to the global functions in 14_Utils.gs.
 // ============================================================
+
+// ============================================================
+// SECTION 7: [NEW v5.5.047] Contextual Disambiguation (2.1)
+// ============================================================
+
+/**
+ * buildPersonSoldToIndex_ — [NEW v5.5.047] สร้าง index personId → [soldToName ที่เคยพบ] จาก FACT_DELIVERY
+ *   ใช้ใน Contextual Disambiguation — ถ้าชื่อซ้ำ ใช้ SoldToName เป็น tie-breaker
+ *   Cache ผ่าน chunked cache (TTL ตาม AI_CONFIG.CACHE_TTL_SEC ปกติ 6 ชม.)
+ * @return {Object} { [personId]: string[] }
+ * @private
+ */
+function buildPersonSoldToIndex_() {
+  const cacheKey = 'M_PERSON_SOLDTO_INDEX';
+  const cache = CacheService.getScriptCache();
+  const cached = loadChunkedCache_(cache, cacheKey);
+  if (cached) return cached;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
+  const index = {};
+  if (!sheet || sheet.getLastRow() < 2) return index;
+
+  const colsToRead = Math.min(SCHEMA[SHEET.FACT_DELIVERY].length, sheet.getLastColumn());
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, colsToRead).getValues();
+
+  data.forEach(function (row) {
+    const personId = String(row[FACT_IDX.PERSON_ID] || '').trim();
+    const soldTo = normalizeForCompare(String(row[FACT_IDX.SOLD_TO_NAME] || ''));
+    if (!personId || !soldTo) return;
+    if (!index[personId]) index[personId] = [];
+    if (index[personId].indexOf(soldTo) === -1) index[personId].push(soldTo);
+  });
+
+  saveChunkedCache_(cache, cacheKey, index);
+  return index;
+}
+
+/**
+ * personMatchesSoldToContext_ — [NEW v5.5.047] เช็คว่า personId เคยส่งของให้ SoldToName นี้มาก่อนไหม
+ *   ใช้ใน Contextual Disambiguation เป็น tie-breaker
+ * @param {string} personId
+ * @param {string} soldToNameRaw
+ * @return {boolean}
+ * @private
+ */
+function personMatchesSoldToContext_(personId, soldToNameRaw) {
+  if (!personId || !soldToNameRaw) return false;
+  const idx = buildPersonSoldToIndex_();
+  const soldTo = normalizeForCompare(soldToNameRaw);
+  return !!(idx[personId] && idx[personId].indexOf(soldTo) !== -1);
+}

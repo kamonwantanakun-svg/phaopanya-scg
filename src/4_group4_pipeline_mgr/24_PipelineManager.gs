@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.046
+ * VERSION: 5.5.047
  * FILE: 24_PipelineManager.gs
  * LMDS V5.5 — Pipeline Manager (Standalone Module)
  * ===================================================
@@ -100,6 +100,13 @@ const PIPELINE_CONFIG = Object.freeze({
   // === Behavior ===
   CLEAN_MATCH_ENGINE_TRIGGERS: true, // ลบ auto-resume trigger ของ MatchEngine หลังรัน
   LOG_TO_SYS_LOG: true // เขียน log ไป SYS_LOG (ถ้ามี logInfo)
+});
+
+// === Notification Config (5.1 Failure Alert) ===
+//   ตั้งค่า Script Properties: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+//   (ใช้ Bot เดียวกับระบบแจ้งเตือน Billing ที่มีอยู่แล้วได้เลย หรือสร้าง chat ใหม่แยก)
+const PIPELINE_ALERT_CONFIG = Object.freeze({
+  Q_REVIEW_BACKLOG_THRESHOLD: 100 // แจ้งเตือนเมื่อ Q_REVIEW pending เกินจำนวนนี้
 });
 
 // Pipeline States
@@ -673,6 +680,13 @@ function runPipelineBatch() {
   if (isCircuitBreakerTripped_()) {
     setPipelineState_(PIPELINE_STATES.PAUSED_ERRORS, 'Circuit breaker tripped');
     logPipeline_('error', 'Circuit breaker tripped — pausing');
+    // [NEW v5.5.047 Failure Alert 5.1] แจ้งเตือนเมื่อ circuit breaker ตัด
+    sendPipelineAlert_(
+      'Circuit Breaker ตัดการทำงาน — error ติดกันเกิน ' +
+        PIPELINE_CONFIG.MAX_CONSECUTIVE_ERRORS +
+        ' ครั้ง\nต้องรีเซ็ตด้วยเมนู resetCircuitBreakerMenu() หรือ resumePipeline()',
+      'ERROR'
+    );
     return { action: 'PAUSE', reason: 'CIRCUIT_BREAKER' };
   }
 
@@ -709,6 +723,27 @@ function runPipelineBatch() {
     // ─── Step 7: บันทึก quota + checkpoint ───
     incrementQuotaUsage_(runtimeMs);
 
+    // [NEW v5.5.047 — Failure Alert 5.1] เช็ค Q_REVIEW backlog ทุกรอบ batch
+    //   ถ้า pending เกินเกณฑ์ → ส่ง alert (WARN) ให้ admin เข้าไปตรวจสอบ
+    try {
+      if (typeof getReviewStats === 'function') {
+        const reviewStats = getReviewStats();
+        if (reviewStats.pending > PIPELINE_ALERT_CONFIG.Q_REVIEW_BACKLOG_THRESHOLD) {
+          sendPipelineAlert_(
+            'Q_REVIEW มีรายการค้าง ' +
+              reviewStats.pending +
+              ' แถว (เกินเกณฑ์ ' +
+              PIPELINE_ALERT_CONFIG.Q_REVIEW_BACKLOG_THRESHOLD +
+              ')\nควรเข้าไปตรวจสอบและอนุมัติที่เมนู Q_REVIEW',
+            'WARN'
+          );
+        }
+      }
+    } catch (alertErr) {
+      // [Rule 12] ไม่ให้ alert check ทำ pipeline พัง
+      logError('PipelineManager', 'Q_REVIEW backlog check ล้มเหลว: ' + alertErr.message, alertErr);
+    }
+
     const checkpoint = getPipelineCheckpoint_();
     if (checkpoint.startedAt === null) {
       checkpoint.startedAt = batchStart.toISOString();
@@ -732,6 +767,14 @@ function runPipelineBatch() {
       if (tripped) {
         setPipelineState_(PIPELINE_STATES.PAUSED_ERRORS, 'Circuit breaker tripped');
         logPipeline_('error', '=== Pipeline Batch END (PAUSED_ERRORS) — ' + formatDuration_(runtimeMs) + ' ===');
+        // [NEW v5.5.047 Failure Alert 5.1] แจ้งเตือนเมื่อ batch error จน trip
+        sendPipelineAlert_(
+          'Pipeline หยุดทำงาน (PAUSED_ERRORS) หลัง batch error:\n' +
+            batchError.message +
+            '\nRuntime: ' +
+            formatDuration_(runtimeMs),
+          'ERROR'
+        );
         return { action: 'PAUSE', reason: 'CIRCUIT_BREAKER', error: batchError.message };
       }
       setPipelineState_(PIPELINE_STATES.RUNNING, 'Batch error but continuing');
@@ -1225,4 +1268,64 @@ function formatDuration_(ms) {
     return minutes + 'm ' + remainingSeconds + 's';
   }
   return seconds + 's';
+}
+
+// ============================================================
+// SECTION 9: [NEW v5.5.047] Failure Alert via Telegram (5.1)
+// ============================================================
+
+/**
+ * sendPipelineAlert_ — [NEW v5.5.047] ส่งแจ้งเตือนผ่าน Telegram Bot
+ *   Fail-safe: ส่งไม่สำเร็จ → log error แต่ไม่ throw (ห้ามให้ alert ทำ pipeline พัง — Rule 12)
+ *
+ *   Setup: ตั้งค่า Script Properties (Project Settings → Script Properties):
+ *     - TELEGRAM_BOT_TOKEN: token จาก @BotFather
+ *     - TELEGRAM_CHAT_ID: chat id ที่จะรับ alert (ใช้ Bot เดียวกับ Billing ได้)
+ *
+ * @param {string} message - ข้อความ alert (ไม่ต้องมี icon — ใส่ให้อัตโนมัติ)
+ * @param {'INFO'|'WARN'|'ERROR'} [severity='WARN'] - ระดับความรุนแรง (กำหนด icon)
+ * @private
+ */
+function sendPipelineAlert_(message, severity) {
+  const level = severity || 'WARN';
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const token = props.getProperty('TELEGRAM_BOT_TOKEN');
+    const chatId = props.getProperty('TELEGRAM_CHAT_ID');
+    if (!token || !chatId) {
+      // ไม่ตั้งค่า → ข้ามแบบเงียบ (ไม่ใช่ error — เป็น optional feature)
+      logDebug(
+        'PipelineManager',
+        'sendPipelineAlert_: ยังไม่ตั้งค่า TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID — ข้ามการแจ้งเตือน'
+      );
+      return;
+    }
+    let icon;
+    if (level === 'ERROR') {
+      icon = '🔴';
+    } else if (level === 'WARN') {
+      icon = '🟡';
+    } else {
+      icon = 'ℹ️';
+    }
+    const text = icon + ' *LMDS Pipeline Alert*\n' + message;
+
+    const response = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+      method: 'post',
+      contentType: 'application/json',
+      muteHttpExceptions: true,
+      payload: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'Markdown' })
+    });
+
+    const respCode = response.getResponseCode();
+    if (respCode !== 200) {
+      logWarn(
+        'PipelineManager',
+        'sendPipelineAlert_: Telegram API ตอบ ' + respCode + ' — ' + response.getContentText().substring(0, 200)
+      );
+    }
+  } catch (err) {
+    // [Rule 12] ห้ามให้ alert ทำ pipeline พัง — log แล้ว continue
+    logError('PipelineManager', 'sendPipelineAlert_ ล้มเหลว: ' + err.message, err);
+  }
 }
