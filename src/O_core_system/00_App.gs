@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.005
+ * VERSION: 6.0.006
  * FILE: 00_App.gs
  * LMDS V5.5 — Application Entry Point & Menu Controller
  * ===================================================
@@ -133,6 +133,8 @@ function onOpen() {
         .addItem('🔍 [V6] Dedup Audit (Place)', 'runDedupAuditPlace_UI')
         .addSeparator()
         .addItem('👥 [V6] ตั้งค่า Roles (RBAC)', 'setupRoleAssignments_UI')
+        .addSeparator()
+        .addItem('🧹 [V6] ลบ Trigger ค้าง (Cleanup)', 'cleanupStaleTriggers_UI')
         .addItem('📖 ดู Version Info', 'showVersionInfo')
     )
 
@@ -707,5 +709,47 @@ function diagnoseRecentErrors_(ss, lines, fixes) {
       lines.push(`  ❌ [${mod}] ${msg}`);
     });
     fixes.push('ตรวจสอบ Error ใน SYS_LOG — อาจเป็นสาเหตุที่ชีตว่าง');
+  }
+}
+
+// ============================================================
+// SECTION 5: [V6.0.006] Trigger Cleanup
+// ============================================================
+
+/**
+ * cleanupStaleTriggers_UI — [V6.0.006] ลบ trigger ที่ค้างอยู่ (handler function ไม่มีแล้ว)
+ *   ใช้หลังจากลบ Smart Navigation — trigger เก่าที่เรียก handleSelectionChange_
+ *   ยังค้างอยู่ทำให้เกิด error "Script function not found"
+ */
+function cleanupStaleTriggers_UI() {
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    const staleHandlers = [
+      'handleSelectionChange_',
+      'onSelectionChange',
+      'installSmartNavTrigger',
+      'autoInstallSmartNav_'
+    ];
+    let deleted = 0;
+    const details = [];
+
+    for (let i = 0; i < triggers.length; i++) {
+      const handler = triggers[i].getHandlerFunction();
+      if (staleHandlers.indexOf(handler) !== -1) {
+        details.push('  • ' + handler + ' (ID: ' + triggers[i].getUniqueId() + ')');
+        ScriptApp.deleteTrigger(triggers[i]);
+        deleted++;
+      }
+    }
+
+    if (deleted === 0) {
+      safeUiAlert_('✅ ไม่พบ trigger ค้าง — ทุก trigger ใช้งานได้ปกติ');
+    } else {
+      logInfo('App', 'cleanupStaleTriggers_UI: ลบ trigger ค้าง ' + deleted + ' ตัว:\n' + details.join('\n'));
+      safeUiAlert_('✅ ลบ trigger ค้าง ' + deleted + ' ตัว:\n\n' + details.join('\n'));
+    }
+  } catch (e) {
+    logError('App', 'cleanupStaleTriggers_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
   }
 }

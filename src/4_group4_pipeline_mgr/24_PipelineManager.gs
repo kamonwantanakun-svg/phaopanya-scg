@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.005
+ * VERSION: 6.0.006
  * FILE: 24_PipelineManager.gs
  * LMDS V5.5 — Pipeline Manager (Standalone Module)
  * ===================================================
@@ -1142,17 +1142,31 @@ function uninstallPipelineTriggers() {
 
 /**
  * runPipelinePreflight — [V6.0.004] Pre-flight check before running MatchEngine
- *   Checks: DAILY_JOB has today's data, SYS_TH_GEO exists, GEMINI_API_KEY set, SOURCE has unprocessed rows
+ *   [FIX V6.0.006] ลบ DAILY_JOB check — runFullPipeline ใช้ SOURCE sheet ไม่ใช่ DAILY_JOB
+ *   Checks: SOURCE has unprocessed rows, SYS_TH_GEO exists, GEMINI_API_KEY set (if AI enabled)
  * @return {{ ready: boolean, issues: string[] }}
  */
 function runPipelinePreflight() {
   const issues = [];
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // Check 1: DAILY_JOB sheet has today's data
-  const dailySheet = ss.getSheetByName(SHEET.DAILY_JOB);
-  if (!dailySheet || dailySheet.getLastRow() < 2) {
-    issues.push('DAILY_JOB sheet ว่าง — กรุณารัน "ดึงข้อมูล SCG API" ก่อน');
+  // [FIX V6.0.006] Check 1: SOURCE sheet has unprocessed rows (ไม่ใช่ DAILY_JOB)
+  //   สาเหตุ: runFullPipeline = Flow 1 (Source → MatchEngine) ไม่เกี่ยวกับ DAILY_JOB
+  //   DAILY_JOB เป็นของ Flow 2 (Daily Ops) ที่รันแยกผ่าน fetchDataFromSCGJWD
+  const sourceSheet = ss.getSheetByName(SHEET.SOURCE);
+  if (!sourceSheet || sourceSheet.getLastRow() < 2) {
+    issues.push('SOURCE sheet (SCGนครหลวงJWDภูมิภาค) ว่าง — กรุณาโหลดข้อมูลดิบก่อน');
+  } else {
+    // ตรวจว่ามีแถวที่ยังไม่ SUCCESS
+    const syncCol =
+      typeof SRC_IDX !== 'undefined' && typeof SRC_IDX.SYNC_STATUS === 'number' ? SRC_IDX.SYNC_STATUS + 1 : 37;
+    const data = sourceSheet.getRange(2, syncCol, sourceSheet.getLastRow() - 1, 1).getValues();
+    const pending = data.filter(function (r) {
+      return r[0] !== 'SUCCESS' && r[0] !== 'REVIEW';
+    }).length;
+    if (pending === 0) {
+      issues.push('SOURCE sheet ไม่มีแถวที่ต้องประมวลผล (SYNC_STATUS ทั้งหมด = SUCCESS/REVIEW)');
+    }
   }
 
   // Check 2: SYS_TH_GEO dictionary exists
@@ -1170,19 +1184,7 @@ function runPipelinePreflight() {
     }
   }
 
-  // Check 4: SOURCE sheet has unprocessed rows
-  const sourceSheet = ss.getSheetByName(SHEET.SOURCE);
-  if (sourceSheet && sourceSheet.getLastRow() > 1) {
-    const syncCol =
-      typeof SRC_IDX !== 'undefined' && typeof SRC_IDX.SYNC_STATUS === 'number' ? SRC_IDX.SYNC_STATUS + 1 : 37;
-    const data = sourceSheet.getRange(2, syncCol, sourceSheet.getLastRow() - 1, 1).getValues();
-    const pending = data.filter((r) => r[0] !== 'SUCCESS' && r[0] !== 'REVIEW').length;
-    if (pending === 0) {
-      issues.push('SOURCE sheet ไม่มีแถวที่ต้องประมวลผล (SYNC_STATUS ทั้งหมด = SUCCESS/REVIEW)');
-    }
-  } else {
-    issues.push('SOURCE sheet ว่าง หรือไม่มีข้อมูล');
-  }
+  // [FIX V6.0.006] Check 4 ถูกรวมเข้า Check 1 แล้ว — ลบออกเพื่อไม่ให้ตรวจซ้ำ
 
   return { ready: issues.length === 0, issues: issues };
 }
@@ -1359,13 +1361,17 @@ function sendPipelineAlert_(message, severity) {
     } else {
       icon = 'ℹ️';
     }
-    const text = icon + ' *LMDS Pipeline Alert*\n' + message;
+    // [FIX V6.0.006] ใช้ HTML tags แทน Markdown (* ไม่ทำงานใน HTML mode)
+    const text = icon + ' <b>LMDS Pipeline Alert</b>\n' + message;
 
     const response = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
       method: 'post',
       contentType: 'application/json',
       muteHttpExceptions: true,
-      payload: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'Markdown' })
+      // [FIX V6.0.006] เปลี่ยนจาก Markdown → HTML เพื่อหลีกเลี่ยง parse error
+      //   สาเหตุ: Markdown ตีความ _ เป็น italic → ถ้าข้อความมี _ จะทำให้ Telegram ตอบ 400
+      //   HTML ปลอดภัยกว่า — ไม่มีปัญหากับ _ หรือ * ในข้อความ
+      payload: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'HTML' })
     });
 
     const respCode = response.getResponseCode();
