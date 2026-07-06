@@ -19,17 +19,13 @@
     // ────────────────────────────────────────────────────────────
     // Constants
     // ────────────────────────────────────────────────────────────
-    const POLL_INTERVAL_MS = globalThis.__POLL_INTERVAL_MS__ || 60000;
-    const REFRESH_COUNTDOWN_UPDATE_MS = 1000;
+    // [REMOVED V5.5.049] Auto-polling removed — manual refresh only
 
     // ────────────────────────────────────────────────────────────
     // State
     // ────────────────────────────────────────────────────────────
     let currentRoute = 'dashboard';
     let currentData = null;
-    let refreshTimer = null;
-    let countdownTimer = null;
-    let nextRefreshAt = null;
     let isRefreshing = false;
 
     // ────────────────────────────────────────────────────────────
@@ -39,8 +35,6 @@
     let loadingState = null;
     let errorState = null;
     let errorMessage = null;
-    let refreshCountdown = null;
-    let liveIndicator = null;
     let manualRefreshBtn = null;
     let navLinks = null;
     let deployedAtEl = null;
@@ -61,8 +55,6 @@
       loadingState = document.getElementById('loadingState');
       errorState = document.getElementById('errorState');
       errorMessage = document.getElementById('errorMessage');
-      refreshCountdown = document.getElementById('refreshCountdown');
-      liveIndicator = document.getElementById('liveIndicator');
       manualRefreshBtn = document.getElementById('manualRefreshBtn');
       navLinks = document.querySelectorAll('.nav-link');
       deployedAtEl = document.getElementById('deployedAt');
@@ -133,8 +125,7 @@
      */
     function bindSessionExpiredHandler_() {
       document.addEventListener('auth:session-expired', () => {
-        console.warn('[app] Session expired — stopping polling');
-        stopPolling_();
+        console.warn('[app] Session expired');
         showToast_(
           '⏰ Session หมดอายุ',
           'session หมดอายุเนื่องจากไม่ได้ใช้งาน 30 นาที กรุณารีโหลดหน้า',
@@ -150,13 +141,9 @@
      */
     function bindVisibilityHandler_() {
       document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-          console.log('[app] Tab hidden — pausing polling');
-          stopPolling_();
-        } else {
-          console.log('[app] Tab visible — resuming polling');
+        if (!document.hidden) {
+          console.log('[app] Tab visible — refreshing data');
           refresh_(false);
-          startPolling_();
         }
       });
     }
@@ -339,83 +326,7 @@
     }
 
     // ────────────────────────────────────────────────────────────
-    // Polling
-    // ────────────────────────────────────────────────────────────
-
-    /**
-     * startPolling_ — เริ่ม polling ทุก 60 วินาที
-     * @private
-     */
-    function startPolling_() {
-      stopPolling_(); // clear เดิมก่อน
-      scheduleNextRefresh_();
-      startCountdown_();
-      setLiveIndicator_(true);
-    }
-
-    /**
-     * stopPolling_ — หยุด polling
-     * @private
-     */
-    function stopPolling_() {
-      if (refreshTimer) {
-        clearTimeout(refreshTimer);
-        refreshTimer = null;
-      }
-      if (countdownTimer) {
-        clearInterval(countdownTimer);
-        countdownTimer = null;
-      }
-      setLiveIndicator_(false);
-    }
-
-    /**
-     * scheduleNextRefresh_ — ตั้งเวลา refresh ครั้งถัดไป
-     * @private
-     */
-    function scheduleNextRefresh_() {
-      refreshTimer = setTimeout(async () => {
-        await refresh_(false);
-        scheduleNextRefresh_();
-      }, POLL_INTERVAL_MS);
-      nextRefreshAt = Date.now() + POLL_INTERVAL_MS;
-    }
-
-    /**
-     * startCountdown_ — อัปเดต countdown text ทุก 1 วินาที
-     * @private
-     */
-    function startCountdown_() {
-      countdownTimer = setInterval(() => {
-        if (!nextRefreshAt || !refreshCountdown) return;
-        const remaining = Math.max(0, Math.ceil((nextRefreshAt - Date.now()) / 1000));
-        if (remaining === 0) {
-          refreshCountdown.textContent = 'refreshing...';
-        } else {
-          refreshCountdown.textContent = 'refresh in ' + remaining + 's';
-        }
-      }, REFRESH_COUNTDOWN_UPDATE_MS);
-    }
-
-    /**
-     * setLiveIndicator_ — toggle สี Live indicator
-     * @private
-     */
-    function setLiveIndicator_(isLive) {
-      if (!liveIndicator) return;
-      if (isLive) {
-        liveIndicator.className =
-          'inline-flex items-center gap-1.5 text-xs px-2.5 py-1 bg-green-100 text-green-700 rounded-full font-medium';
-        liveIndicator.innerHTML = '<span class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span> Live';
-      } else {
-        liveIndicator.className =
-          'inline-flex items-center gap-1.5 text-xs px-2.5 py-1 bg-gray-100 text-gray-500 rounded-full font-medium';
-        liveIndicator.innerHTML = '<span class="w-1.5 h-1.5 bg-gray-400 rounded-full"></span> Paused';
-      }
-    }
-
-    // ────────────────────────────────────────────────────────────
-    // Refresh
+    // Refresh (manual only — no auto-polling)
     // ────────────────────────────────────────────────────────────
 
     /**
@@ -447,14 +358,8 @@
         hideError_();
         renderCurrentRoute_(false);
 
-        // Reset nextRefreshAt หลัง refresh สำเร็จ
-        nextRefreshAt = Date.now() + POLL_INTERVAL_MS;
-
-        // [FIX White Screen v2] เริ่ม polling หลัง initial fetch สำเร็จ
-        //   สาเหตุ: ก่อนหน้านี้ startPolling_() ไม่ถูกเรียกเลย → หน้าไม่ refresh อัตโนมัติ
-        if (isInitial) {
-          startPolling_();
-        } else {
+        // [REMOVED V5.5.049] Auto-polling removed — manual refresh only
+        if (!isInitial) {
           showToast_('✅ อัปเดตแล้ว', 'ข้อมูลได้รับการอัปเดตเรียบร้อย', 'success', 2000);
         }
       } catch (err) {
@@ -463,7 +368,6 @@
 
         if (err.message === 'Unauthorized') {
           showToast_('🔒 Session หมดอายุ', 'กรุณารีโหลดหน้าเพื่อ login ใหม่', 'error', 0);
-          stopPolling_();
         } else if (isInitial) {
           showError_(err.message);
         } else {

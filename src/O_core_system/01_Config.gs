@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.048
+ * VERSION: 5.5.049
  * FILE: 01_Config.gs
  * LMDS V5.5 — System Configuration & Constants
  * ===================================================
@@ -63,8 +63,8 @@
  * ===================================================
  */
 
-const APP_VERSION = '5.5.048';
-const SCHEMA_VERSION = '5.5.048';
+const APP_VERSION = '5.5.049';
+const SCHEMA_VERSION = '5.5.049';
 const APP_NAME = 'LMDS V5.5';
 
 // [NEW v5.2.001] Global RAM Caches for batch runs
