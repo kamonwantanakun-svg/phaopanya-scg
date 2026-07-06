@@ -34,6 +34,31 @@ npm install
 npx clasp login
 ```
 
+### Setup clasp
+
+ไฟล์ `.clasp.json` ใช้บอก `clasp` ว่าโค้ดในเครื่องเชื่อมกับ Apps Script project ตัวไหน
+เรา **ไม่ commit** `.clasp.json` จริง (เพราะแต่ละ dev อาจใช้ Script ID ของตัวเองในการทดสอบ)
+ดังนั้นใน repo จึงมี `.clasp.json.example` เป็น template
+
+```bash
+# 1. คัดลอก template → สร้าง .clasp.json ของตัวเอง
+cp .clasp.json.example .clasp.json
+
+# 2. เปิดไฟล์ .clasp.json แล้วแทนที่ YOUR_SCRIPT_ID_HERE ด้วย Script ID ของคุณ
+#    หา Script ID ได้จาก Apps Script Editor → Project Settings → Script ID
+#    (หรือ URL: https://script.google.com/home/projects/<SCRIPT_ID>/edit)
+
+# 3. ทดสอบการเชื่อมต่อ + push โค้ดไป Apps Script
+npx clasp status
+npx clasp push
+
+# 4. เปิด Apps Script Editor บนเบราว์เซอร์
+npx clasp open
+```
+
+> **หมายเหตุ**: `.clasp.json` ถูกเพิ่มใน `.gitignore` แล้ว — จะไม่ถูก commit โดย accident
+> ใช้ `.clasp.json.example` เป็น reference เท่านั้น
+
 ## 🔄 Workflow การพัฒนา
 
 ### 1. สร้าง Branch

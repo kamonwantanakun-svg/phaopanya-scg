@@ -7,6 +7,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 | Version | Date | Cycle | Issues |
 |---------|------|-------|--------|
+| 5.5.048 | 2026-07-06 | CRITICAL FIXES + ROADMAP UPDATE | .clasp.json.example + catch block + ALIAS_IDX + dead refs + INVESTIGATE move + README sync + CHANGELOG entries 035-048 |
+| 5.5.047 | 2026-07-05 | QUICK WINS MEDIUM RISK | Contextual Disambiguation (2.1) + Telegram Alert (5.1) |
+| 5.5.046 | 2026-07-05 | QUICK WINS LOW RISK | Self-Healing Alias (3.1) + Dynamic Weighting (2.2) |
+| 5.5.045 | 2026-07-05 | ISSUE #26 FIX | Geo enrichment in reprocResolveOrCreatePlaceForReview_ |
+| 5.5.044 | 2026-07-05 | DEAD CODE REMOVAL | 12 functions + 1 RAM cache + 3 callers (-402 lines) |
+| 5.5.043 | 2026-07-05 | SILENT FAILURE + DEPRECATED | 2 catch blocks + 12 @deprecated markers |
+| 5.5.042 | 2026-07-05 | AUDIT FINDINGS | 6 findings: rawAddr discard + boundary anchor + join key + silent catch + retry + dead code |
+| 5.5.041 | 2026-07-04 | CRITICAL BUGS | 5 bugs: batchError state machine + Gemini key regex + WebApp auth bypass + FACT_DELIVERY guard + pipeline hours |
+| 5.5.040 | 2026-07-04 | CODEQL COMPLIANT REGEX | CodeQL-compliant regex fix |
+| 5.5.039 | 2026-07-04 | CODEQL REVERT | Revert to simple regex |
+| 5.5.038 | 2026-07-04 | CODEQL FINAL CLEAN | 2 alerts + stat sync |
+| 5.5.037 | 2026-07-04 | CODEQL FIXES | 2 remaining alerts |
+| 5.5.036 | 2026-07-04 | CODEQL FIXES | 3 remaining alerts |
+| 5.5.035 | 2026-07-03 | CODEQL FIXES | 27 alerts resolved (23 CodeQL + 4 SonarCloud) |
 | 5.5.034 | 2026-07-03 | DOC-CODE SYNC | โค้ด ↔ เอกสารตรง 100% (steps 1-15) |
 | 5.5.033 | 2026-07-03 | DOC-CODE SYNC (steps 8-12) | docs/ version alignment |
 | 5.5.032 | 2026-07-03 | DOC-CODE SYNC (steps 5-7) | Code issues + README/BLUEPRINT/CONTEXT/Supreme Engineer |

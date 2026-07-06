@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.040
+ * VERSION: 6.0.002
  * FILE: 19_Hardening.gs
  * LMDS V5.5 — System Hardening & Preflight Audit
  * [FIX BUG-A2] v5.4.003: runPreflightAudit() เพิ่ม try-catch
@@ -85,16 +85,17 @@ function runPreflightAudit() {
     logInfo('Hardening', 'เริ่มรัน Preflight Audit');
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    Object.keys(SHEET).forEach(key => {
+    Object.keys(SHEET).forEach((key) => {
       const sheetName = SHEET[key];
-      const sheet     = ss.getSheetByName(sheetName);
+      const sheet = ss.getSheetByName(sheetName);
       if (!sheet) {
         logs.push('❌ ไม่พบชีต: ' + sheetName);
       } else {
         const expectedCols = SCHEMA[sheetName] ? SCHEMA[sheetName].length : 0;
         if (expectedCols > 0 && sheet.getLastColumn() < expectedCols) {
-          logs.push('⚠️ ชีต ' + sheetName + ' มีคอลัมน์น้อยกว่า Schema (' +
-                    sheet.getLastColumn() + '/' + expectedCols + ')');
+          logs.push(
+            '⚠️ ชีต ' + sheetName + ' มีคอลัมน์น้อยกว่า Schema (' + sheet.getLastColumn() + '/' + expectedCols + ')'
+          );
         }
       }
     });
@@ -108,9 +109,9 @@ function runPreflightAudit() {
     if (srcSheet) {
       const lastRow = srcSheet.getLastRow();
       if (lastRow > 1) {
-        const statusCol  = SRC_IDX.SYNC_STATUS + 1;
+        const statusCol = SRC_IDX.SYNC_STATUS + 1;
         const statusData = srcSheet.getRange(2, statusCol, lastRow - 1, 1).getValues();
-        const emptyCount = statusData.filter(r => !r[0]).length;
+        const emptyCount = statusData.filter((r) => !r[0]).length;
         if (emptyCount > 0) {
           logs.push('ℹ️ พบแถวที่ไม่มีสถานะ Sync ใน Source: ' + emptyCount + ' แถว');
         }
@@ -120,11 +121,10 @@ function runPreflightAudit() {
     if (logs.length === 0) {
       safeUiAlert_('✅ Preflight Audit: ระบบพร้อมทำงาน 100%');
     } else {
-      safeUiAlert_('📊 ผลการตรวจสอบ Preflight Audit:\n\n' +
-               logs.join('\n') +
-               '\n\nพบจุดที่ควรตรวจสอบ ' + logs.length + ' รายการ');
+      safeUiAlert_(
+        '📊 ผลการตรวจสอบ Preflight Audit:\n\n' + logs.join('\n') + '\n\nพบจุดที่ควรตรวจสอบ ' + logs.length + ' รายการ'
+      );
     }
-
   } catch (err) {
     logError('Hardening', 'runPreflightAudit: ' + err.message, err);
     safeUiAlert_('❌ Preflight Audit ล้มเหลว: ' + err.message);
@@ -141,25 +141,27 @@ function runPreflightAudit() {
 function fixMissingSyncStatus() {
   // [FIX v5.5.001] เพิ่ม try-catch ครอบทั้งฟังก์ชัน — เช่นเดียวกับ entry-point อื่นๆ
   try {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEET.SOURCE);
-  if (!sheet) return;
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return;
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.SOURCE);
+    if (!sheet) return;
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return;
 
-  const statusCol = SRC_IDX.SYNC_STATUS + 1;
-  const range     = sheet.getRange(2, statusCol, lastRow - 1, 1);
-  const data      = range.getValues();
-  let   fixed     = 0;
+    const statusCol = SRC_IDX.SYNC_STATUS + 1;
+    const range = sheet.getRange(2, statusCol, lastRow - 1, 1);
+    const data = range.getValues();
+    let fixed = 0;
 
-  for (let i = 0; i < data.length; i++) {
-    if (!data[i][0]) { data[i][0] = 'PENDING'; fixed++; }
-  }
-  if (fixed > 0) {
-    range.setValues(data);
-    SpreadsheetApp.getActiveSpreadsheet()
-      .toast('✅ ซ่อมแซมสถานะ Sync สำเร็จ: ' + fixed + ' แถว', 'Hardening');
-  }
+    for (let i = 0; i < data.length; i++) {
+      if (!data[i][0]) {
+        data[i][0] = 'PENDING';
+        fixed++;
+      }
+    }
+    if (fixed > 0) {
+      range.setValues(data);
+      SpreadsheetApp.getActiveSpreadsheet().toast('✅ ซ่อมแซมสถานะ Sync สำเร็จ: ' + fixed + ' แถว', 'Hardening');
+    }
   } catch (e) {
     logError('Hardening', 'fixMissingSyncStatus ล้มเหลว: ' + e.message, e);
     safeUiAlert_('❌ fixMissingSyncStatus ล้มเหลว: ' + e.message);
@@ -172,22 +174,20 @@ function fixMissingSyncStatus() {
 
 function detectDoubleProcessing() {
   try {
-    const ss    = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
     if (!sheet || sheet.getLastRow() < 2) return;
 
-    const invoiceData = sheet.getRange(
-      2, FACT_IDX.INVOICE_NO + 1, sheet.getLastRow() - 1, 1
-    ).getValues();
-    const counts     = {};
+    const invoiceData = sheet.getRange(2, FACT_IDX.INVOICE_NO + 1, sheet.getLastRow() - 1, 1).getValues();
+    const counts = {};
     const duplicates = [];
 
-    invoiceData.forEach(r => {
+    invoiceData.forEach((r) => {
       const inv = normalizeInvoiceNo(r[0]);
       if (!inv) return;
       counts[inv] = (counts[inv] || 0) + 1;
     });
-    Object.keys(counts).forEach(inv => {
+    Object.keys(counts).forEach((inv) => {
       if (counts[inv] > 1) duplicates.push(inv + ' (' + counts[inv] + ' ครั้ง)');
     });
 
@@ -196,9 +196,11 @@ function detectDoubleProcessing() {
       safeUiAlert_('✅ ไม่พบข้อมูลซ้ำใน FACT_DELIVERY');
     } else {
       safeUiAlert_(
-        '⚠️ พบ Invoice ซ้ำ ' + duplicates.length + ' รายการ:\n\n' +
-        duplicates.slice(0, 10).join('\n') +
-        (duplicates.length > 10 ? '\n...และอื่นๆ' : '')
+        '⚠️ พบ Invoice ซ้ำ ' +
+          duplicates.length +
+          ' รายการ:\n\n' +
+          duplicates.slice(0, 10).join('\n') +
+          (duplicates.length > 10 ? '\n...และอื่นๆ' : '')
       );
     }
   } catch (err) {
@@ -232,7 +234,7 @@ function generatePersonAliasesFromHistory() {
 
   try {
     const ctx = prepareAliasHistoryContext_(setup.ss);
-    if (ctx === null) return;  // empty/error path already handled in prepare
+    if (ctx === null) return; // empty/error path already handled in prepare
 
     const loopResult = runAliasHistoryLoop_(ctx, setup.ss);
     finalizeAliasHistory_(ctx, loopResult, setup.ss);
@@ -258,8 +260,8 @@ function acquireAliasHistoryLock_() {
     return null;
   }
 
-  const ss         = SpreadsheetApp.getActiveSpreadsheet();
-  const factSheet  = ss.getSheetByName(SHEET.FACT_DELIVERY);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const factSheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
   const aliasSheet = ss.getSheetByName(SHEET.M_PERSON_ALIAS);
   if (!factSheet || !aliasSheet) {
     safeUiAlert_('❌ ไม่พบชีต FACT_DELIVERY หรือ M_PERSON_ALIAS');
@@ -285,20 +287,18 @@ function acquireAliasHistoryLock_() {
  * @private
  */
 function prepareAliasHistoryContext_(ss) {
-  const factSheet  = ss.getSheetByName(SHEET.FACT_DELIVERY);
+  const factSheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
   const aliasSheet = ss.getSheetByName(SHEET.M_PERSON_ALIAS);
-  const factRows   = factSheet.getLastRow();
+  const factRows = factSheet.getLastRow();
 
-  const factData = factSheet.getRange(
-    2, 1, factRows - 1, SCHEMA[SHEET.FACT_DELIVERY].length
-  ).getValues();
+  const factData = factSheet.getRange(2, 1, factRows - 1, SCHEMA[SHEET.FACT_DELIVERY].length).getValues();
 
   // ─── [PERF-007] โหลด Checkpoint ───
   //   ถ้ามี checkpoint (จากการ Time Guard หยุดกลางคันรอบก่อน) → เริ่มจาก idx นั้น
   //   ถ้าไม่มี → เริ่มจาก 0
   //   Stale protection: checkpoint เก่ากว่า 24 ชม. → auto clear (กัน garbage)
-  var checkpoint = loadHardeningAliasCheckpoint_();
-  var startIdx = checkpoint.startIdx || 0;
+  const checkpoint = loadHardeningAliasCheckpoint_();
+  const startIdx = checkpoint.startIdx || 0;
 
   if (startIdx > 0) {
     ss.toast('🔄 Resume จากแถว ' + (startIdx + 1) + '...', APP_NAME, 5);
@@ -306,12 +306,12 @@ function prepareAliasHistoryContext_(ss) {
   }
 
   // โหลด Person Map
-  const allPersons        = loadAllPersons_();
+  const allPersons = loadAllPersons_();
   const personCanonicalMap = new Map();
-  const personUuidMap      = new Map();
-  allPersons.forEach(function(p) {
-    if (p.personId && p.canonical)   personCanonicalMap.set(p.personId, normalizeForCompare(p.canonical));
-    if (p.personId && p.masterUuid)  personUuidMap.set(p.personId, p.masterUuid);
+  const personUuidMap = new Map();
+  allPersons.forEach(function (p) {
+    if (p.personId && p.canonical) personCanonicalMap.set(p.personId, normalizeForCompare(p.canonical));
+    if (p.personId && p.masterUuid) personUuidMap.set(p.personId, p.masterUuid);
   });
 
   // [REFACTOR-05] ใช้ buildExistingPersonAliasSet_() แทน inline code
@@ -333,8 +333,8 @@ function prepareAliasHistoryContext_(ss) {
     newGlobalRows: [],
     now: new Date(),
     hardeningStart: new Date(),
-    hardeningLimit: AI_CONFIG.TIME_LIMIT_MS || 300000,  // 5 นาที
-    ALIAS_ENRICH_SCORE: 95  // [FIX v5.5.001] Named constant
+    hardeningLimit: AI_CONFIG.TIME_LIMIT_MS || 300000, // 5 นาที
+    ALIAS_ENRICH_SCORE: 95 // [FIX v5.5.001] Named constant
   };
 }
 
@@ -356,13 +356,16 @@ function runAliasHistoryLoop_(ctx, ss) {
   for (let idx = ctx.startIdx; idx < ctx.factData.length; idx++) {
     lastIdx = idx;
     // [REFACTOR-05] Time Guard: flush แล้ว break + บันทึก checkpoint
-    if (idx % 100 === 0 && (new Date() - ctx.hardeningStart) > (ctx.hardeningLimit - 30000)) {
+    if (idx % 100 === 0 && new Date() - ctx.hardeningStart > ctx.hardeningLimit - 30000) {
       if (ctx.newAliasRows.length + ctx.newGlobalRows.length > 0) {
         const flushedPA = flushPersonAliasRows_(ctx.aliasSheet, ctx.newAliasRows);
         const flushedGA = flushGlobalAliasRows_(ss, ctx.newGlobalRows);
         ctx.newAliasRows = [];
         ctx.newGlobalRows = [];
-        logWarn('Hardening', `generatePersonAliasesFromHistory: flushed partial at ${idx}/${ctx.factData.length} (PA:${flushedPA}, GA:${flushedGA})`);
+        logWarn(
+          'Hardening',
+          `generatePersonAliasesFromHistory: flushed partial at ${idx}/${ctx.factData.length} (PA:${flushedPA}, GA:${flushedGA})`
+        );
       }
       // [PERF-007] บันทึก checkpoint ก่อน break → resume รอบถัดไป
       saveHardeningAliasCheckpoint_(idx);
@@ -371,8 +374,13 @@ function runAliasHistoryLoop_(ctx, ss) {
     }
 
     const aliasResult = hardeningBuildOneAliasRow_(
-      ctx.factData[idx], ctx.personCanonicalMap, ctx.personUuidMap,
-      ctx.existingAliasSet, ctx.existingGlobalAliasSet, ctx.ALIAS_ENRICH_SCORE, ctx.now
+      ctx.factData[idx],
+      ctx.personCanonicalMap,
+      ctx.personUuidMap,
+      ctx.existingAliasSet,
+      ctx.existingGlobalAliasSet,
+      ctx.ALIAS_ENRICH_SCORE,
+      ctx.now
     );
     if (aliasResult.paRow) ctx.newAliasRows.push(aliasResult.paRow);
     if (aliasResult.gaRow) ctx.newGlobalRows.push(aliasResult.gaRow);
@@ -403,13 +411,16 @@ function finalizeAliasHistory_(ctx, loopResult, ss) {
     ? '\n\n⚠️ หยุดก่อนเพราะ Timeout — บันทึกตำแหน่งไว้แล้ว กด Run ใหม่จะทำต่อ'
     : '';
   safeUiAlert_(
-    (totalPA > 0 || totalGA > 0)
+    totalPA > 0 || totalGA > 0
       ? '✅ สร้าง Alias สำเร็จ!\n' +
-        '- M_PERSON_ALIAS: ' + totalPA + ' รายการ\n' +
-        '- M_ALIAS: ' + totalGA + ' รายการ' +
-        timeoutMsg
-      : 'ℹ️ ตรวจสอบเรียบร้อย: ข้อมูล Alias อัปเดตถ้วนแล้ว' +
-        timeoutMsg
+          '- M_PERSON_ALIAS: ' +
+          totalPA +
+          ' รายการ\n' +
+          '- M_ALIAS: ' +
+          totalGA +
+          ' รายการ' +
+          timeoutMsg
+      : 'ℹ️ ตรวจสอบเรียบร้อย: ข้อมูล Alias อัปเดตถ้วนแล้ว' + timeoutMsg
   );
 }
 
@@ -436,17 +447,26 @@ function saveHardeningAliasCheckpoint_(idx) {
  * @return {{ startIdx: number, timestamp: number }}
  */
 function loadHardeningAliasCheckpoint_() {
-  var raw = PropertiesService.getScriptProperties().getProperty(HARDENING_ALIAS_CHECKPOINT_KEY);
+  const raw = PropertiesService.getScriptProperties().getProperty(HARDENING_ALIAS_CHECKPOINT_KEY);
   if (!raw) return { startIdx: 0 };
   try {
-    var cp = JSON.parse(raw);
+    const cp = JSON.parse(raw);
     // Stale protection: เก่ากว่า 24 ชม. → clear
-    if (cp.timestamp && (Date.now() - cp.timestamp) > 24 * 60 * 60 * 1000) {
+    if (cp.timestamp && Date.now() - cp.timestamp > 24 * 60 * 60 * 1000) {
       clearHardeningAliasCheckpoint_();
       return { startIdx: 0 };
     }
     return cp;
   } catch (e) {
+    // [FIX BUG-AUDIT-014 V5.5.043] log ก่อน reset checkpoint เพื่อให้วินิจฉัย corruption ได้
+    logWarn(
+      'Hardening',
+      'loadHardeningAliasCheckpoint_: JSON.parse ล้มเหลว — reset to startIdx=0. ' +
+        'raw="' +
+        String(raw).substring(0, 200) +
+        '", error=' +
+        e.message
+    );
     return { startIdx: 0 };
   }
 }
@@ -470,8 +490,16 @@ function clearHardeningAliasCheckpoint_() {
  * @param {Date} now - timestamp
  * @return {{ paRow: Array|null, gaRow: Array|null }}
  */
-function hardeningBuildOneAliasRow_(factRow, personCanonicalMap, personUuidMap, existingAliasSet, existingGlobalAliasSet, aliasEnrichScore, now) {
-  const pId     = String(factRow[FACT_IDX.PERSON_ID]   || '').trim();
+function hardeningBuildOneAliasRow_(
+  factRow,
+  personCanonicalMap,
+  personUuidMap,
+  existingAliasSet,
+  existingGlobalAliasSet,
+  aliasEnrichScore,
+  now
+) {
+  const pId = String(factRow[FACT_IDX.PERSON_ID] || '').trim();
   const rawName = String(factRow[FACT_IDX.SHIP_TO_NAME] || '').trim();
   if (!pId || !rawName) return { paRow: null, gaRow: null };
 
@@ -497,10 +525,7 @@ function hardeningBuildOneAliasRow_(factRow, personCanonicalMap, personUuidMap, 
     const globalKey = 'PERSON::' + masterUuid + '::' + rawNorm;
     if (!existingGlobalAliasSet.has(globalKey)) {
       existingGlobalAliasSet.add(globalKey);
-      gaRow = [
-        generateShortId('A'), masterUuid, rawName, 'PERSON',
-        aliasEnrichScore, 'HISTORY_ENRICH', now, true
-      ];
+      gaRow = [generateShortId('A'), masterUuid, rawName, 'PERSON', aliasEnrichScore, 'HISTORY_ENRICH', now, true];
     }
   }
 
@@ -515,9 +540,9 @@ function hardeningBuildOneAliasRow_(factRow, personCanonicalMap, personUuidMap, 
 function buildExistingPersonAliasSet_() {
   const set = new Set();
   const existingAliasData = loadAllAliases_();
-  existingAliasData.forEach(function(r) {
+  existingAliasData.forEach(function (r) {
     if (!r[PERSON_ALIAS_IDX.ACTIVE_FLAG]) return;
-    const pId   = String(r[PERSON_ALIAS_IDX.PERSON_ID]  || '').trim();
+    const pId = String(r[PERSON_ALIAS_IDX.PERSON_ID] || '').trim();
     const aNorm = normalizeForCompare(r[PERSON_ALIAS_IDX.ALIAS_NAME]);
     if (pId && aNorm) set.add(pId + '::' + aNorm);
   });
@@ -532,10 +557,7 @@ function buildExistingPersonAliasSet_() {
  */
 function flushPersonAliasRows_(aliasSheet, rows) {
   if (!rows || rows.length === 0) return 0;
-  aliasSheet.getRange(
-    aliasSheet.getLastRow() + 1, 1,
-    rows.length, SCHEMA[SHEET.M_PERSON_ALIAS].length
-  ).setValues(rows);
+  aliasSheet.getRange(aliasSheet.getLastRow() + 1, 1, rows.length, SCHEMA[SHEET.M_PERSON_ALIAS].length).setValues(rows);
   invalidateAliasCache_();
   return rows.length;
 }
@@ -557,14 +579,14 @@ function flushGlobalAliasRows_(ss, rows) {
   const existingSet = buildGlobalAliasDedupSet_();
 
   const newRows = [];
-  rows.forEach(function(aliasRow) {
-    var masterUuid   = String(aliasRow[ALIAS_IDX.MASTER_UUID]  || '');
-    var variantName  = String(aliasRow[ALIAS_IDX.VARIANT_NAME] || '');
-    var entityType   = String(aliasRow[ALIAS_IDX.ENTITY_TYPE]  || '');
+  rows.forEach(function (aliasRow) {
+    const masterUuid = String(aliasRow[ALIAS_IDX.MASTER_UUID] || '');
+    const variantName = String(aliasRow[ALIAS_IDX.VARIANT_NAME] || '');
+    const entityType = String(aliasRow[ALIAS_IDX.ENTITY_TYPE] || '');
     // [FIX CodeQL js/unused-local-variable V5.5.035] confidence + source ไม่ถูกใช้ใน dedup logic — ลบทิ้ง
 
     // Dedup check ใน RAM
-    let norm = normalizeForCompare(variantName);
+    const norm = normalizeForCompare(variantName);
     const dedupKey = entityType + '::' + masterUuid + '::' + norm;
     if (!norm || existingSet.has(dedupKey)) return;
 
@@ -577,10 +599,9 @@ function flushGlobalAliasRows_(ss, rows) {
   if (newRows.length > 0) {
     const mAliasSheet = ss.getSheetByName(SHEET.M_ALIAS);
     if (mAliasSheet) {
-      mAliasSheet.getRange(
-        mAliasSheet.getLastRow() + 1, 1,
-        newRows.length, SCHEMA[SHEET.M_ALIAS].length
-      ).setValues(newRows);
+      mAliasSheet
+        .getRange(mAliasSheet.getLastRow() + 1, 1, newRows.length, SCHEMA[SHEET.M_ALIAS].length)
+        .setValues(newRows);
 
       // [FIX REV7-001] Invalidate M_ALIAS cache โดยตรง — รูปแบบเดียวกับ 10_MatchEngine.gs
       CacheService.getScriptCache().removeAll([CACHE_KEY.GLOBAL_ALIAS_ALL, CACHE_KEY.GLOBAL_ALIAS_REVERSE]);
@@ -622,25 +643,28 @@ function applySheetProtection_UI() {
     const results = [];
 
     // [SEC-009 FIX] ดึงรายชื่อ Admin ทั้งหมดเพื่อเพิ่มเป็น editor
-    const adminsStr = String(
-      PropertiesService.getScriptProperties().getProperty('LMDS_ADMINS') || ''
-    ).trim();
+    const adminsStr = String(PropertiesService.getScriptProperties().getProperty('LMDS_ADMINS') || '').trim();
     const adminEmails = adminsStr
-      ? adminsStr.split(',').map(function(e) { return e.trim(); }).filter(Boolean)
+      ? adminsStr
+          .split(',')
+          .map(function (e) {
+            return e.trim();
+          })
+          .filter(Boolean)
       : [];
 
     // === 1. Protected Ranges: ชีตที่มี PII ===
     // [SEC-009 FIX] ขยาย protectedSheets ครอบทุกชีตที่มี PII/Single Writer
     const protectedSheets = [
-      { name: SHEET.EMPLOYEE,       reason: 'ข้อมูลพนักงาน (เลขบัตร, เบอร์โทร)', hide: true },
-      { name: SHEET.M_PERSON,       reason: 'ข้อมูลบุคคล (เบอร์โทร)', hide: false },
-      { name: SHEET.M_PLACE,        reason: 'ที่อยู่ลูกค้า + master_uuid (PII)', hide: false },
-      { name: SHEET.M_ALIAS,        reason: 'Global Alias Ledger (Single Writer Pattern)', hide: false },
-      { name: SHEET.FACT_DELIVERY,  reason: 'ประวัติการขนส่ง (Invoice + ชื่อ + ที่อยู่ PII)', hide: false },
-      { name: SHEET.SOURCE,         reason: 'ข้อมูลต้นทาง (ที่อยู่, Email, ชื่อลูกค้า)', hide: true },
+      { name: SHEET.EMPLOYEE, reason: 'ข้อมูลพนักงาน (เลขบัตร, เบอร์โทร)', hide: true },
+      { name: SHEET.M_PERSON, reason: 'ข้อมูลบุคคล (เบอร์โทร)', hide: false },
+      { name: SHEET.M_PLACE, reason: 'ที่อยู่ลูกค้า + master_uuid (PII)', hide: false },
+      { name: SHEET.M_ALIAS, reason: 'Global Alias Ledger (Single Writer Pattern)', hide: false },
+      { name: SHEET.FACT_DELIVERY, reason: 'ประวัติการขนส่ง (Invoice + ชื่อ + ที่อยู่ PII)', hide: false },
+      { name: SHEET.SOURCE, reason: 'ข้อมูลต้นทาง (ที่อยู่, Email, ชื่อลูกค้า)', hide: true }
     ];
 
-    protectedSheets.forEach(config => {
+    protectedSheets.forEach((config) => {
       const msg = applySheetLevelProtection_(ss, config, me, adminEmails);
       results.push(msg);
     });
@@ -653,9 +677,11 @@ function applySheetProtection_UI() {
     const geoMsg = applyGeoPointProtection_(ss, me, adminEmails);
     if (geoMsg) results.push(geoMsg);
 
-    logInfo('Hardening', '[SEC-005] ตั้งค่า Sheet Protection สำเร็จ (7 sheets + M_GEO_POINT, Q_REVIEW Range Protection)');
+    logInfo(
+      'Hardening',
+      '[SEC-005] ตั้งค่า Sheet Protection สำเร็จ (7 sheets + M_GEO_POINT, Q_REVIEW Range Protection)'
+    );
     safeUiAlert_('🛡️ ตั้งค่าการป้องกันข้อมูล Sensitive สำเร็จ!\n\n' + results.join('\n'));
-
   } catch (err) {
     logError('Hardening', '[SEC-005] applySheetProtection_UI ล้มเหลว: ' + err.message, err);
     safeUiAlert_('❌ ตั้งค่าการป้องกันล้มเหลว: ' + err.message);
@@ -684,21 +710,37 @@ function applySheetLevelProtection_(ss, config, me, adminEmails) {
 
   // ลบ Editor เดิมทั้งหมด
   const editors = protection.getEditors();
-  editors.forEach(editor => {
-    try { protection.removeEditor(editor.getEmail()); } catch (e) {}
+  editors.forEach((editor) => {
+    try {
+      protection.removeEditor(editor.getEmail());
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
   });
   // [SEC-009 FIX] เพิ่ม Script Owner
   if (me) {
-    try { protection.addEditor(me); } catch (e) {}
+    try {
+      protection.addEditor(me);
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
   }
   // [SEC-009 FIX] เพิ่ม Admin ทั้งหมดจาก LMDS_ADMINS
-  adminEmails.forEach(email => {
-    try { protection.addEditor(email); } catch (e) {}
+  adminEmails.forEach((email) => {
+    try {
+      protection.addEditor(email);
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
   });
 
   // Hidden Sheet (ถ้ากำหนด)
   if (config.hide) {
-    try { sheet.hideSheet(); } catch (e) {}
+    try {
+      sheet.hideSheet();
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
   }
 
   return `✅ ${config.name}: Protected${config.hide ? ' + Hidden' : ''}`;
@@ -725,17 +767,31 @@ function applyReviewRangeProtection_(ss, me, adminEmails) {
   const protectedColCount = (REVIEW_IDX.RECOMMEND || 16) + 1;
   const protectedRange = reviewSheet.getRange(1, 1, reviewMaxRows, protectedColCount);
   const rangeProtection = protectedRange.protect();
-  rangeProtection.setDescription('[SEC-005] Q_REVIEW candidate/system columns — ป้องกันการแก้ไขตรง (reviewer แก้ได้เฉพาะ cols R-V)');
+  rangeProtection.setDescription(
+    '[SEC-005] Q_REVIEW candidate/system columns — ป้องกันการแก้ไขตรง (reviewer แก้ได้เฉพาะ cols R-V)'
+  );
 
   const reviewEditors = rangeProtection.getEditors();
-  reviewEditors.forEach(editor => {
-    try { rangeProtection.removeEditor(editor.getEmail()); } catch (e) {}
+  reviewEditors.forEach((editor) => {
+    try {
+      rangeProtection.removeEditor(editor.getEmail());
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
   });
   if (me) {
-    try { rangeProtection.addEditor(me); } catch (e) {}
+    try {
+      rangeProtection.addEditor(me);
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
   }
-  adminEmails.forEach(email => {
-    try { rangeProtection.addEditor(email); } catch (e) {}
+  adminEmails.forEach((email) => {
+    try {
+      rangeProtection.addEditor(email);
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
   });
   return '✅ Q_REVIEW: Range Protected (A1:Q — reviewer แก้ R-V ได้)';
 }
@@ -756,15 +812,27 @@ function applyGeoPointProtection_(ss, me, adminEmails) {
   const geoProtection = geoSheet.protect();
   geoProtection.setDescription('[SEC-005] ข้อมูลพิกัด — เฉพาะ Script เท่านั้นที่เขียน');
   const geoEditors = geoProtection.getEditors();
-  geoEditors.forEach(editor => {
-    try { geoProtection.removeEditor(editor.getEmail()); } catch (e) {}
+  geoEditors.forEach((editor) => {
+    try {
+      geoProtection.removeEditor(editor.getEmail());
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
   });
   if (me) {
-    try { geoProtection.addEditor(me); } catch (e) {}
+    try {
+      geoProtection.addEditor(me);
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
   }
   // [SEC-009 FIX] เพิ่ม admin สำหรับ M_GEO_POINT ด้วย
-  adminEmails.forEach(email => {
-    try { geoProtection.addEditor(email); } catch (e) {}
+  adminEmails.forEach((email) => {
+    try {
+      geoProtection.addEditor(email);
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
   });
   return '✅ M_GEO_POINT: Protected';
 }

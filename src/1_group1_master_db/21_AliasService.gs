@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.040
+ * VERSION: 6.0.002
  * FILE: 21_AliasService.gs
  * LMDS V5.5 — Hybrid Alias Architecture (Global M_ALIAS + Entity-Specific Views)
  * ===================================================
@@ -109,7 +109,7 @@ function saveAliasCacheChunked_(cacheKey, data) {
   if (typeof saveChunkedCache_ !== 'function') {
     throw new Error('saveAliasCacheChunked_: saveChunkedCache_ not loaded — check 14_Utils.gs');
   }
-  var cache = CacheService.getScriptCache();
+  const cache = CacheService.getScriptCache();
   saveChunkedCache_(cache, cacheKey, data);
 }
 
@@ -125,8 +125,8 @@ function loadAliasCacheChunked_(cacheKey) {
   if (typeof loadChunkedCache_ !== 'function') {
     throw new Error('loadAliasCacheChunked_: loadChunkedCache_ not loaded — check 14_Utils.gs');
   }
-  var cache = CacheService.getScriptCache();
-  var cached = loadChunkedCache_(cache, cacheKey);
+  const cache = CacheService.getScriptCache();
+  const cached = loadChunkedCache_(cache, cacheKey);
   if (cached && typeof cached === 'object') {
     return cached;
   }
@@ -149,49 +149,52 @@ function loadAliasCacheChunked_(cacheKey) {
  */
 function createGlobalAlias(masterUuid, variantName, entityType, confidence, source) {
   try {
-  if (!masterUuid || !variantName || !entityType) return null;
-  const cleanVariant = normalizeForCompare(variantName);
-  if (!cleanVariant || cleanVariant.length < 2) return null;
+    if (!masterUuid || !variantName || !entityType) return null;
+    const cleanVariant = normalizeForCompare(variantName);
+    if (!cleanVariant || cleanVariant.length < 2) return null;
 
-  // ตรวจสอบ duplicate ใน RAM cache ก่อน (เร็วกว่าอ่านชีต)
-  const existingMap = loadGlobalAliasesMap_();
-  const uidKey = entityType + '_' + masterUuid;
-  if (existingMap[uidKey] && existingMap[uidKey].includes(cleanVariant)) {
-    return null; // มีอยู่แล้ว ข้าม
-  }
+    // ตรวจสอบ duplicate ใน RAM cache ก่อน (เร็วกว่าอ่านชีต)
+    const existingMap = loadGlobalAliasesMap_();
+    const uidKey = entityType + '_' + masterUuid;
+    if (existingMap[uidKey] && existingMap[uidKey].includes(cleanVariant)) {
+      return null; // มีอยู่แล้ว ข้าม
+    }
 
-  // เขียนลง M_ALIAS sheet
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEET.M_ALIAS);
-  if (!sheet) return null;
+    // เขียนลง M_ALIAS sheet
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.M_ALIAS);
+    if (!sheet) return null;
 
-  const aliasId = generateShortId('A');
-  const now = new Date();
-  const newRow = [
-    aliasId,
-    masterUuid,
-    variantName,           // เก็บชื่อดิบไว้ (ยังไม่ normalize)
-    entityType,
-    confidence || 100,
-    source || 'MANUAL',
-    now,
-    true
-  ];
-  // [FIX v5.5.001] ใช้ getRange+setValues แทน appendRow เพื่อความเสถียร (consistent with other CRUD)
-  const lastRow = sheet.getLastRow();
-  sheet.getRange(lastRow + 1, 1, 1, newRow.length).setValues([newRow]);
+    const aliasId = generateShortId('A');
+    const now = new Date();
+    const newRow = [
+      aliasId,
+      masterUuid,
+      variantName, // เก็บชื่อดิบไว้ (ยังไม่ normalize)
+      entityType,
+      confidence || 100,
+      source || 'MANUAL',
+      now,
+      true
+    ];
+    // [FIX v5.5.001] ใช้ getRange+setValues แทน appendRow เพื่อความเสถียร (consistent with other CRUD)
+    const lastRow = sheet.getLastRow();
+    sheet.getRange(lastRow + 1, 1, 1, newRow.length).setValues([newRow]);
 
-  // [REMOVED v5.4.001] ไม่เรียก syncAliasToEntityTable_() อีกต่อไป
-  // เพื่อป้องกัน circular dependency (createGlobalAlias → sync → createPersonAlias → createGlobalAlias)
-  // M_PERSON_ALIAS / M_PLACE_ALIAS เขียนที่ autoEnrichAliasesFromFactBatch_() เท่านั้น
+    // [REMOVED v5.4.001] ไม่เรียก syncAliasToEntityTable_() อีกต่อไป
+    // เพื่อป้องกัน circular dependency (createGlobalAlias → sync → createPersonAlias → createGlobalAlias)
+    // M_PERSON_ALIAS / M_PLACE_ALIAS เขียนที่ autoEnrichAliasesFromFactBatch_() เท่านั้น
 
-  // ล้าง Cache เพื่อให้การค้นหาครั้งถัดไปเห็นข้อมูลใหม่
-  // [FIX CRIT-002] Use CACHE_KEY constants instead of hardcoded strings — Single Source of Truth
-  CacheService.getScriptCache().removeAll([CACHE_KEY.GLOBAL_ALIAS_ALL, CACHE_KEY.GLOBAL_ALIAS_REVERSE]);
+    // ล้าง Cache เพื่อให้การค้นหาครั้งถัดไปเห็นข้อมูลใหม่
+    // [FIX CRIT-002] Use CACHE_KEY constants instead of hardcoded strings — Single Source of Truth
+    CacheService.getScriptCache().removeAll([CACHE_KEY.GLOBAL_ALIAS_ALL, CACHE_KEY.GLOBAL_ALIAS_REVERSE]);
 
-  // [FIX CodeQL js/trivial-conditional V5.5.035] variantName ถูก guard แล้วในบรรทัด 152 — ไม่จำเป็นต้อง || ''
-  logDebug('AliasService', `createGlobalAlias: ${aliasId} [${entityType}] (variant hash: ${generateMd5Hash(String(variantName)).substring(0, 8)}) → ${masterUuid.substring(0, 8)}... (${source})`);
-  return aliasId;
+    // [FIX CodeQL js/trivial-conditional V5.5.035] variantName ถูก guard แล้วในบรรทัด 152 — ไม่จำเป็นต้อง || ''
+    logDebug(
+      'AliasService',
+      `createGlobalAlias: ${aliasId} [${entityType}] (variant hash: ${generateMd5Hash(String(variantName)).substring(0, 8)}) → ${masterUuid.substring(0, 8)}... (${source})`
+    );
+    return aliasId;
   } catch (err) {
     // [FIX B3 v5.5.002] เพิ่ม try-catch ตาม Rule 12
     logError('AliasService', `createGlobalAlias ล้มเหลว: ${err.message}`, err);
@@ -222,14 +225,14 @@ function loadGlobalAliasesMap_() {
 
   const schemaLen = SCHEMA[SHEET.M_ALIAS].length;
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, schemaLen).getValues();
-  data.forEach(function(row) {
+  data.forEach(function (row) {
     if (row[ALIAS_IDX.ACTIVE_FLAG] !== true && String(row[ALIAS_IDX.ACTIVE_FLAG]).toUpperCase() !== 'TRUE') return;
-    var masterId = String(row[ALIAS_IDX.MASTER_UUID] || '');
-    var eType = String(row[ALIAS_IDX.ENTITY_TYPE] || '');
-    var cleanName = normalizeForCompare(row[ALIAS_IDX.VARIANT_NAME]);
+    const masterId = String(row[ALIAS_IDX.MASTER_UUID] || '');
+    const eType = String(row[ALIAS_IDX.ENTITY_TYPE] || '');
+    const cleanName = normalizeForCompare(row[ALIAS_IDX.VARIANT_NAME]);
     if (!masterId || !eType || !cleanName) return;
 
-    var dictKey = eType + '_' + masterId;
+    const dictKey = eType + '_' + masterId;
     if (!resultObj[dictKey]) resultObj[dictKey] = [];
     resultObj[dictKey].push(cleanName);
   });
@@ -237,6 +240,37 @@ function loadGlobalAliasesMap_() {
   // [FIX CRIT-001] ใช้ chunked cache saver แทน cache.put ตรง — ป้อนกัน 100KB limit
   saveAliasCacheChunked_(cacheKey, resultObj);
   return resultObj;
+}
+
+/**
+ * getPersonMasterUuid_ — [NEW v5.5.046] แปลง personId → masterUuid สำหรับสร้าง Global Alias
+ *   ใช้ใน Self-Healing Alias flow (Issue #30 Phase 3) — เมื่อ Admin กด MERGE_TO_CANDIDATE
+ *   เราต้องการสร้าง alias จาก rawPersonName → masterUuid ของ candidate ที่ Admin เลือก
+ *
+ * @param {string} personId - รหัส person ที่ต้องการดู masterUuid
+ * @return {string|null} masterUuid หรือ null ถ้าไม่พบ
+ * @private
+ */
+function getPersonMasterUuid_(personId) {
+  if (!personId) return null;
+  const all = loadAllPersons_();
+  const found = all.find((p) => p.personId === personId);
+  return found && found.masterUuid ? found.masterUuid : null;
+}
+
+/**
+ * getPlaceMasterUuid_ — [NEW v5.5.046] แปลง placeId → masterUuid สำหรับสร้าง Global Alias
+ *   ใช้ใน Self-Healing Alias flow (Issue #30 Phase 3) — เมื่อ Admin กด MERGE_TO_CANDIDATE
+ *
+ * @param {string} placeId - รหัส place ที่ต้องการดู masterUuid
+ * @return {string|null} masterUuid หรือ null ถ้าไม่พบ
+ * @private
+ */
+function getPlaceMasterUuid_(placeId) {
+  if (!placeId) return null;
+  const all = loadAllPlaces_();
+  const found = all.find((p) => p.placeId === placeId);
+  return found && found.masterUuid ? found.masterUuid : null;
 }
 
 /**
@@ -261,16 +295,15 @@ function loadGlobalAliasAll_() {
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
     result.push({
-      aliasId:     String(row[ALIAS_IDX.ALIAS_ID]     || ''),
-      masterUuid:  String(row[ALIAS_IDX.MASTER_UUID]  || ''),
+      aliasId: String(row[ALIAS_IDX.ALIAS_ID] || ''),
+      masterUuid: String(row[ALIAS_IDX.MASTER_UUID] || ''),
       variantName: String(row[ALIAS_IDX.VARIANT_NAME] || ''),
-      entityType:  String(row[ALIAS_IDX.ENTITY_TYPE]  || ''),
-      confidence:  Number(row[ALIAS_IDX.CONFIDENCE]   || 0),
-      source:      String(row[ALIAS_IDX.SOURCE]       || ''),
-      createdAt:   row[ALIAS_IDX.CREATED_AT],
-      activeFlag:  row[ALIAS_IDX.ACTIVE_FLAG] === true ||
-                   String(row[ALIAS_IDX.ACTIVE_FLAG]).toUpperCase() === 'TRUE',
-      _rowNum:     i + 2  // sheet row number (1-indexed + header row)
+      entityType: String(row[ALIAS_IDX.ENTITY_TYPE] || ''),
+      confidence: Number(row[ALIAS_IDX.CONFIDENCE] || 0),
+      source: String(row[ALIAS_IDX.SOURCE] || ''),
+      createdAt: row[ALIAS_IDX.CREATED_AT],
+      activeFlag: row[ALIAS_IDX.ACTIVE_FLAG] === true || String(row[ALIAS_IDX.ACTIVE_FLAG]).toUpperCase() === 'TRUE',
+      _rowNum: i + 2 // sheet row number (1-indexed + header row)
     });
   }
   return result;
@@ -299,11 +332,11 @@ function loadGlobalAliasReverseIndex_() {
 
   const schemaLen = SCHEMA[SHEET.M_ALIAS].length;
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, schemaLen).getValues();
-  data.forEach(function(row) {
+  data.forEach(function (row) {
     if (row[ALIAS_IDX.ACTIVE_FLAG] !== true && String(row[ALIAS_IDX.ACTIVE_FLAG]).toUpperCase() !== 'TRUE') return;
-    var masterUuid = String(row[ALIAS_IDX.MASTER_UUID] || '');
-    var eType = String(row[ALIAS_IDX.ENTITY_TYPE] || '');
-    var cleanName = normalizeForCompare(row[ALIAS_IDX.VARIANT_NAME]);
+    const masterUuid = String(row[ALIAS_IDX.MASTER_UUID] || '');
+    const eType = String(row[ALIAS_IDX.ENTITY_TYPE] || '');
+    const cleanName = normalizeForCompare(row[ALIAS_IDX.VARIANT_NAME]);
     if (!masterUuid || !eType || !cleanName) return;
 
     if (!reverseIndex[cleanName]) reverseIndex[cleanName] = [];
@@ -327,17 +360,17 @@ function loadGlobalAliasReverseIndex_() {
  * @return {Object|null} { masterUuid, score } หรือ null
  */
 function resolveMasterUuidViaGlobalAlias(queryName, entityType) {
-  var cleanQ = normalizeForCompare(queryName);
+  const cleanQ = normalizeForCompare(queryName);
   if (!cleanQ || cleanQ.length < 2) return { masterUuid: null, score: 0 };
 
   // [FIX v5.5.001] ใช้ reverse index แทน iteration ทั้ง aliasesMap — O(1) exact lookup
-  var reverseIndex = loadGlobalAliasReverseIndex_();
+  const reverseIndex = loadGlobalAliasReverseIndex_();
 
   // 1. Exact match (O(1) lookup)
-  var exactMatches = reverseIndex[cleanQ];
+  const exactMatches = reverseIndex[cleanQ];
   if (exactMatches && exactMatches.length > 0) {
     // กรองตาม entityType
-    for (var i = 0; i < exactMatches.length; i++) {
+    for (let i = 0; i < exactMatches.length; i++) {
       if (exactMatches[i].entityType === entityType) {
         return { masterUuid: exactMatches[i].masterUuid, score: 100 };
       }
@@ -345,21 +378,24 @@ function resolveMasterUuidViaGlobalAlias(queryName, entityType) {
   }
 
   // 2. Substring match fallback (iterate keys only when exact match fails)
-  var bestMatch = null;
-  var bestScore = 0;
-  var maxIterations = 500; // [FIX CRIT-016] จำกัด iteration ป้องกัน timeout
-  var iterated = 0;
-  for (var key in reverseIndex) {
+  let bestMatch = null;
+  let bestScore = 0;
+  const maxIterations = 500; // [FIX CRIT-016] จำกัด iteration ป้องกัน timeout
+  let iterated = 0;
+  for (const key in reverseIndex) {
     if (++iterated > maxIterations) break; // [FIX CRIT-016]
-    var entries = reverseIndex[key];
+    const entries = reverseIndex[key];
     // กรอง entries ตาม entityType
-    var hasCorrectType = false;
-    for (var j = 0; j < entries.length; j++) {
-      if (entries[j].entityType === entityType) { hasCorrectType = true; break; }
+    let hasCorrectType = false;
+    for (let j = 0; j < entries.length; j++) {
+      if (entries[j].entityType === entityType) {
+        hasCorrectType = true;
+        break;
+      }
     }
     if (!hasCorrectType) continue;
 
-    var score = 0;
+    let score = 0;
     if (key.length >= 4 && cleanQ.includes(key)) {
       score = 95; // Substring match
     } else if (cleanQ.length >= 4 && key.includes(cleanQ)) {
@@ -369,7 +405,7 @@ function resolveMasterUuidViaGlobalAlias(queryName, entityType) {
     if (score > bestScore) {
       bestScore = score;
       // หา masterUuid ของ entityType ที่ถูกต้อง
-      for (var k = 0; k < entries.length; k++) {
+      for (let k = 0; k < entries.length; k++) {
         if (entries[k].entityType === entityType) {
           bestMatch = entries[k].masterUuid;
           break;
@@ -401,14 +437,13 @@ function resolveMasterUuidViaGlobalAlias(queryName, entityType) {
 function fastLookupByShipToName(shipToName, preNormResult, rawAddress, enableSubstringFallback) {
   if (!shipToName) return null;
   // [FIX v5.5.021 C1] ใช้ preNormResult.cleanName ถ้ามี เพื่อลด overhead
-  var cleanName = (preNormResult && preNormResult.cleanName) 
-    ? preNormResult.cleanName 
-    : normalizeForCompare(shipToName);
+  const cleanName =
+    preNormResult && preNormResult.cleanName ? preNormResult.cleanName : normalizeForCompare(shipToName);
   if (!cleanName || cleanName.length < 2) return null;
 
   // 1. ค้นหาจาก M_ALIAS reverse index (O(1) lookup)
-  var reverseIndex = loadGlobalAliasReverseIndex_();
-  var matches = reverseIndex[cleanName];
+  const reverseIndex = loadGlobalAliasReverseIndex_();
+  let matches = reverseIndex[cleanName];
 
   // [Fix Phase-C #2] Deprecate substring fallback — เปลี่ยนเป็น opt-in (default = false)
   //   เดิม: exact match fail → substring loop (max 500 iter) — ไม่ scale ถ้า M_ALIAS > 5,000
@@ -416,13 +451,17 @@ function fastLookupByShipToName(shipToName, preNormResult, rawAddress, enableSub
   //        ถ้า caller ส่ง enableSubstringFallback=true → ทำงานเหมือนเดิม พร้อม log warning
   if ((!matches || matches.length === 0) && enableSubstringFallback === true) {
     // 2. Fallback (opt-in): ลองค้นหาแบบ substring
-    logWarn('AliasService',
+    logWarn(
+      'AliasService',
       'fastLookupByShipToName: substring fallback ENABLED (opt-in) — ' +
-      'cleanName="' + cleanName + '". ' +
-      '⚠️ O(N) scan — ใช้เฉพาะกรณีจำเป็น เพราะ M_ALIAS ใหญ่ขึ้นเรื่อย ๆ');
-    var maxIterations = 500; // [FIX CRIT-017] จำกัด iteration ป้องกัน timeout
-    var iterated = 0;
-    for (var key in reverseIndex) {
+        'cleanName="' +
+        cleanName +
+        '". ' +
+        '⚠️ O(N) scan — ใช้เฉพาะกรณีจำเป็น เพราะ M_ALIAS ใหญ่ขึ้นเรื่อย ๆ'
+    );
+    const maxIterations = 500; // [FIX CRIT-017] จำกัด iteration ป้องกัน timeout
+    let iterated = 0;
+    for (const key in reverseIndex) {
       if (++iterated > maxIterations) break; // [FIX CRIT-017]
       if (key.length >= 4 && (cleanName.includes(key) || key.includes(cleanName))) {
         matches = reverseIndex[key];
@@ -431,19 +470,23 @@ function fastLookupByShipToName(shipToName, preNormResult, rawAddress, enableSub
     }
   } else if (!matches || matches.length === 0) {
     // exact match failed และ substring fallback ถูกปิด (default)
-    logInfo('AliasService',
+    logInfo(
+      'AliasService',
       'fastLookupByShipToName: exact match failed, substring fallback disabled ' +
-      '(cleanName="' + cleanName + '") — caller จะ fallback ไป Tier 1');
+        '(cleanName="' +
+        cleanName +
+        '") — caller จะ fallback ไป Tier 1'
+    );
   }
 
   if (!matches || matches.length === 0) return null;
 
   // 3. แปลง masterUuid → entityId → destination → coordinates
   // ลองทุก match ที่เจอ เอาอันแรกที่มีพิกัด
-  for (var i = 0; i < matches.length; i++) {
-    var match = matches[i];
-    var entityId = null;
-    var dests = [];
+  for (let i = 0; i < matches.length; i++) {
+    const match = matches[i];
+    let entityId = null;
+    let dests = [];
 
     if (match.entityType === 'PERSON') {
       entityId = convertUuidToPersonId(match.masterUuid);
@@ -459,14 +502,16 @@ function fastLookupByShipToName(shipToName, preNormResult, rawAddress, enableSub
 
     if (dests.length > 0) {
       // Sort by usageCount descending
-      dests.sort(function(a, b) { return (b.usageCount || 0) - (a.usageCount || 0); });
+      dests.sort(function (a, b) {
+        return (b.usageCount || 0) - (a.usageCount || 0);
+      });
       // [ADD v5.5.022-PATCH1] Tie-Breaker: ถ้ามีหลาย dest และมี rawAddress → เลือกด้วย address matching
       //   ใช้ helper จาก 17_SearchService.gs (selectBestDestByAddress_) ผ่าน typeof guard
       //   ถ้า helper ไม่พร้อม หรือไม่ match → fallback เอา usageCount สูงสุด (พฤติกรรมเดิม)
-      var topDest = dests[0];
+      let topDest = dests[0];
       if (dests.length > 1 && rawAddress && typeof selectBestDestByAddress_ === 'function') {
         try {
-          var matched = selectBestDestByAddress_(dests, rawAddress);
+          const matched = selectBestDestByAddress_(dests, rawAddress);
           if (matched) topDest = matched;
         } catch (e) {
           // ไม่ throw — fallback ใช้ usageCount สูงสุด
@@ -529,11 +574,11 @@ function assignMasterUuidIfMissing() {
     const confirm = ui.alert(
       '⚠️ ยืนยันการ Assign Master UUID',
       'ฟังก์ชันนี้จะสร้าง master_uuid ใหม่ให้แถวที่ยังไม่มี UUID ใน:\n' +
-      '  • M_PERSON\n' +
-      '  • M_PLACE\n\n' +
-      'หาก M_ALIAS มีข้อมูลอ้างอิง UUID เดิมอยู่ จะใช้งานไม่ได้หลังจากนี้\n\n' +
-      'แนะนำให้รัน Hybrid Alias Migration ครบถ้วนก่อน\n\n' +
-      'ดำเนินการต่อ?',
+        '  • M_PERSON\n' +
+        '  • M_PLACE\n\n' +
+        'หาก M_ALIAS มีข้อมูลอ้างอิง UUID เดิมอยู่ จะใช้งานไม่ได้หลังจากนี้\n\n' +
+        'แนะนำให้รัน Hybrid Alias Migration ครบถ้วนก่อน\n\n' +
+        'ดำเนินการต่อ?',
       ui.ButtonSet.YES_NO
     );
     if (confirm !== ui.Button.YES) {
@@ -545,44 +590,43 @@ function assignMasterUuidIfMissing() {
     logWarn('AliasService', 'assignMasterUuidIfMissing: ข้าม confirmation (no UI context)');
   }
 
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var fixedTotal = 0;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let fixedTotal = 0;
 
-  [SHEET.M_PERSON, SHEET.M_PLACE].forEach(function(sheetName) {
-    try { // [FIX CRIT-015] Per-sheet isolation — error ใน sheet หนึ่งไม่ทำให้ sheet อื่นเสีย
-    var sheet = ss.getSheetByName(sheetName);
-    if (!sheet) return;
+  [SHEET.M_PERSON, SHEET.M_PLACE].forEach(function (sheetName) {
+    try {
+      // [FIX CRIT-015] Per-sheet isolation — error ใน sheet หนึ่งไม่ทำให้ sheet อื่นเสีย
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) return;
 
-    // [FIX S3 v5.5.002] ใช้ *_IDX constant แทน headers.indexOf() — Rule 2
-    var mUuidColIdx = sheetName === SHEET.M_PERSON
-      ? PERSON_IDX.MASTER_UUID
-      : PLACE_IDX.MASTER_UUID;
+      // [FIX S3 v5.5.002] ใช้ *_IDX constant แทน headers.indexOf() — Rule 2
+      const mUuidColIdx = sheetName === SHEET.M_PERSON ? PERSON_IDX.MASTER_UUID : PLACE_IDX.MASTER_UUID;
 
-    // Guard: ตรวจว่าคอลัมน์มีอยู่จริงในชีต
-    if (mUuidColIdx >= sheet.getLastColumn()) {
-      logWarn('AliasService', sheetName + ': คอลัมน์ master_uuid เกินขอบเขตชีต — ข้าม');
-      return;
-    }
-
-    var lr = sheet.getLastRow();
-    if (lr < 2) return;
-
-    var uuidColRange = sheet.getRange(2, mUuidColIdx + 1, lr - 1, 1);
-    var uidData = uuidColRange.getValues();
-    var fixedCount = 0;
-
-    for (var i = 0; i < uidData.length; i++) {
-      if (!uidData[i][0]) {
-        uidData[i][0] = Utilities.getUuid();
-        fixedCount++;
+      // Guard: ตรวจว่าคอลัมน์มีอยู่จริงในชีต
+      if (mUuidColIdx >= sheet.getLastColumn()) {
+        logWarn('AliasService', sheetName + ': คอลัมน์ master_uuid เกินขอบเขตชีต — ข้าม');
+        return;
       }
-    }
 
-    if (fixedCount > 0) {
-      uuidColRange.setValues(uidData);
-      logInfo('AliasService', sheetName + ': มอบ master_uuid ให้ ' + fixedCount + ' แถวที่ยังไม่มี');
-    }
-    fixedTotal += fixedCount;
+      const lr = sheet.getLastRow();
+      if (lr < 2) return;
+
+      const uuidColRange = sheet.getRange(2, mUuidColIdx + 1, lr - 1, 1);
+      const uidData = uuidColRange.getValues();
+      let fixedCount = 0;
+
+      for (let i = 0; i < uidData.length; i++) {
+        if (!uidData[i][0]) {
+          uidData[i][0] = Utilities.getUuid();
+          fixedCount++;
+        }
+      }
+
+      if (fixedCount > 0) {
+        uuidColRange.setValues(uidData);
+        logInfo('AliasService', sheetName + ': มอบ master_uuid ให้ ' + fixedCount + ' แถวที่ยังไม่มี');
+      }
+      fixedTotal += fixedCount;
     } catch (sheetErr) {
       logError('AliasService', sheetName + ': ' + sheetErr.message, sheetErr);
     }
@@ -622,14 +666,14 @@ function MIGRATION_HybridAliasSystem() {
 
   // [FIX BUG-A2] try-catch ครอบ execution ทั้งหมด
   try {
-    const state     = loadMigrationCheckpoint_();
-    const ss        = SpreadsheetApp.getActiveSpreadsheet();
+    const state = loadMigrationCheckpoint_();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
     const startTime = new Date();
-    const timeLimit = AI_CONFIG.TIME_LIMIT_MS || (5 * 60 * 1000);
-    let   timedOut  = false;
+    const timeLimit = AI_CONFIG.TIME_LIMIT_MS || 5 * 60 * 1000;
+    const timedOut = false;
 
-    var ctx = { ss: ss, state: state, startTime: startTime, timeLimit: timeLimit, timedOut: false };
-    var counts = { uuidFixed: 0, migrateCount: 0, scgCount: 0, factCount: 0 };
+    const ctx = { ss: ss, state: state, startTime: startTime, timeLimit: timeLimit, timedOut: false };
+    const counts = { uuidFixed: 0, migrateCount: 0, scgCount: 0, factCount: 0 };
 
     // ─── Step 1: ตรวจสอบ master_uuid ─── [REF-005]
     counts.uuidFixed = migrateStep1_AssignUuid_(ss, state);
@@ -638,7 +682,7 @@ function MIGRATION_HybridAliasSystem() {
     // [FIX CodeQL js/trivial-conditional V5.5.035] ใช้ ctx.timedOut (object property) ที่ CodeQL มองว่าเปลี่ยนได้
     //  แทน local variable timedOut ที่วิเคราะห์เป็น trivial
     if (!ctx.timedOut && state.step <= 2) {
-      var step2Result = runMigrationStepSafely_(ctx, function() {
+      const step2Result = runMigrationStepSafely_(ctx, function () {
         return migrateStep2_PersonAlias_(ctx.ss, ctx.state, ctx.startTime, ctx.timeLimit);
       });
       counts.migrateCount += step2Result.count;
@@ -647,7 +691,7 @@ function MIGRATION_HybridAliasSystem() {
 
     // ─── Step 3: ย้าย M_PLACE_ALIAS → M_ALIAS ─── [REF-005]
     if (!ctx.timedOut && state.step <= 3) {
-      var step3Result = runMigrationStepSafely_(ctx, function() {
+      const step3Result = runMigrationStepSafely_(ctx, function () {
         return migrateStep3_PlaceAlias_(ctx.ss, ctx.state, ctx.startTime, ctx.timeLimit);
       });
       counts.migrateCount += step3Result.count;
@@ -656,7 +700,7 @@ function MIGRATION_HybridAliasSystem() {
 
     // ─── Step 4: ดึงจาก SCG ดิบ ─── [REF-005]
     if (!ctx.timedOut && state.step <= 4) {
-      var step4Result = runMigrationStepSafely_(ctx, function() {
+      const step4Result = runMigrationStepSafely_(ctx, function () {
         return migrateStep4_SCGData_(ctx.ss, ctx.state, ctx.startTime, ctx.timeLimit);
       });
       counts.scgCount = step4Result.count;
@@ -665,32 +709,39 @@ function MIGRATION_HybridAliasSystem() {
 
     // ─── Step 5: ดึงจาก FACT ─── [REF-005]
     if (!ctx.timedOut && state.step <= 5) {
-      var step5Result = runMigrationStepSafely_(ctx, function() {
+      const step5Result = runMigrationStepSafely_(ctx, function () {
         return migrateStep5_FactData_(ctx.ss, ctx.state, ctx.startTime, ctx.timeLimit);
       });
       counts.factCount = step5Result.count;
       ctx.timedOut = ctx.timedOut || step5Result.timedOut;
     }
 
-    const elapsedSec   = Math.round((new Date() - startTime) / 1000);
+    const elapsedSec = Math.round((new Date() - startTime) / 1000);
     const totalMigrated = counts.migrateCount + counts.scgCount + counts.factCount;
 
     if (!timedOut) clearMigrationCheckpoint_();
 
-    logInfo('AliasService',
-      'Migration: UUID=' + counts.uuidFixed +
-      ' PersonAlias→M_ALIAS=' + counts.migrateCount +
-      ' SCG→M_ALIAS=' + counts.scgCount +
-      ' FACT→M_ALIAS=' + counts.factCount +
-      ' รวม=' + totalMigrated +
-      (timedOut ? ' ⚠️ TIMEOUT' : '') +
-      ' (' + elapsedSec + 's)'
+    logInfo(
+      'AliasService',
+      'Migration: UUID=' +
+        counts.uuidFixed +
+        ' PersonAlias→M_ALIAS=' +
+        counts.migrateCount +
+        ' SCG→M_ALIAS=' +
+        counts.scgCount +
+        ' FACT→M_ALIAS=' +
+        counts.factCount +
+        ' รวม=' +
+        totalMigrated +
+        (timedOut ? ' ⚠️ TIMEOUT' : '') +
+        ' (' +
+        elapsedSec +
+        's)'
     );
 
-    var reportMsg = buildMigrationReport_(state, counts, elapsedSec, totalMigrated, timedOut);
+    const reportMsg = buildMigrationReport_(state, counts, elapsedSec, totalMigrated, timedOut);
     // [FIX B2 v5.5.002] เปลี่ยน ui.alert() เป็น safeUiAlert_() — trigger-safe (Rule 4)
     safeUiAlert_(reportMsg);
-
   } catch (err) {
     logError('AliasService', 'MIGRATION_HybridAliasSystem: ' + err.message, err);
     // [FIX B2 v5.5.002] เปลี่ยน ui.alert() เป็น safeUiAlert_() — trigger-safe (Rule 4)
@@ -718,13 +769,13 @@ function confirmMigrationDialog_() {
   const confirmation = ui.alert(
     '🔄 Migration: Hybrid Alias System',
     'ระบบจะดำเนินการดังนี้:\n' +
-    '1. ตรวจสอบและเพิ่ม master_uuid ให้ทุก entity ที่ยังไม่มี\n' +
-    '2. ย้ายข้อมูลจาก M_PERSON_ALIAS → M_ALIAS\n' +
-    '3. ย้ายข้อมูลจาก M_PLACE_ALIAS → M_ALIAS\n' +
-    '4. ดึงชื่อปลายทางจากชีต SCG ดิบ → M_ALIAS\n\n' +
-    '⚠️ มี Time Guard ป้องกัน Timeout (5 นาที)\n' +
-    'หากข้อมูลเยอะ อาจต้องรันหลายครั้ง\n\n' +
-    'พร้อมดำเนินการหรือไม่?',
+      '1. ตรวจสอบและเพิ่ม master_uuid ให้ทุก entity ที่ยังไม่มี\n' +
+      '2. ย้ายข้อมูลจาก M_PERSON_ALIAS → M_ALIAS\n' +
+      '3. ย้ายข้อมูลจาก M_PLACE_ALIAS → M_ALIAS\n' +
+      '4. ดึงชื่อปลายทางจากชีต SCG ดิบ → M_ALIAS\n\n' +
+      '⚠️ มี Time Guard ป้องกัน Timeout (5 นาที)\n' +
+      'หากข้อมูลเยอะ อาจต้องรันหลายครั้ง\n\n' +
+      'พร้อมดำเนินการหรือไม่?',
     ui.ButtonSet.YES_NO
   );
   return confirmation === ui.Button.YES;
@@ -754,18 +805,31 @@ function runMigrationStepSafely_(ctx, stepFn) {
  * @private
  */
 function buildMigrationReport_(state, counts, elapsedSec, totalMigrated, timedOut) {
-  const uuidLabel = (state.step <= 1)
-    ? ('• เพิ่ม master_uuid: ' + counts.uuidFixed + ' รายการ\n')
-    : '• master_uuid: ข้าม (Checkpoint Resume)\n';  // [FIX BUG-A3]
+  const uuidLabel =
+    state.step <= 1
+      ? '• เพิ่ม master_uuid: ' + counts.uuidFixed + ' รายการ\n'
+      : '• master_uuid: ข้าม (Checkpoint Resume)\n'; // [FIX BUG-A3]
 
-  return (timedOut ? '⚠️ Migration หยุดกลางคัน (Timeout)!\n\n' : '✅ Migration เสร็จสิ้น!\n\n') +
+  return (
+    (timedOut ? '⚠️ Migration หยุดกลางคัน (Timeout)!\n\n' : '✅ Migration เสร็จสิ้น!\n\n') +
     uuidLabel +
-    '• PersonAlias → M_ALIAS: ' + counts.migrateCount + ' รายการ\n' +
-    '• SCG Raw → M_ALIAS: ' + counts.scgCount + ' รายการ\n' +
-    '• FACT → M_ALIAS: ' + counts.factCount + ' รายการ\n' +
-    '• รวมทั้งหมด: ' + totalMigrated + ' รายการ\n' +
-    '• ใช้เวลา: ' + elapsedSec + ' วินาที' +
-    (timedOut ? '\n\n💡 รัน Migration อีกครั้งเพื่อดำเนินการต่อ' : '');
+    '• PersonAlias → M_ALIAS: ' +
+    counts.migrateCount +
+    ' รายการ\n' +
+    '• SCG Raw → M_ALIAS: ' +
+    counts.scgCount +
+    ' รายการ\n' +
+    '• FACT → M_ALIAS: ' +
+    counts.factCount +
+    ' รายการ\n' +
+    '• รวมทั้งหมด: ' +
+    totalMigrated +
+    ' รายการ\n' +
+    '• ใช้เวลา: ' +
+    elapsedSec +
+    ' วินาที' +
+    (timedOut ? '\n\n💡 รัน Migration อีกครั้งเพื่อดำเนินการต่อ' : '')
+  );
 }
 
 // ============================================================
@@ -780,7 +844,7 @@ function buildMigrationReport_(state, counts, elapsedSec, totalMigrated, timedOu
  * @return {number} Number of UUIDs assigned (0 if skipped)
  */
 function migrateStep1_AssignUuid_(ss, state) {
-  var uuidFixed = 0;
+  let uuidFixed = 0;
   if (state.step <= 1) {
     logInfo('AliasService', 'Step 1: ตรวจสอบ master_uuid...');
     uuidFixed = assignMasterUuidIfMissing();
@@ -789,19 +853,22 @@ function migrateStep1_AssignUuid_(ss, state) {
     // เดิมใช้ removeAll แค่ base keys ทำให้ chunk keys (_CHUNKS, _0, _1, ...) ตกค้าง
     // และ loadAliasCacheChunked_ จะอ่านข้อมูลเก่าจาก chunks ที่ตกค้าง → cache เก่าในขั้นตอนถัดไป
     if (typeof invalidateChunkedCache_ === 'function') {
-      invalidateChunkedCache_(CACHE_KEY.PERSON_ALL, function() {
+      invalidateChunkedCache_(CACHE_KEY.PERSON_ALL, function () {
         if (typeof _PERSON_NOTE_INVERTED_INDEX !== 'undefined') _PERSON_NOTE_INVERTED_INDEX = null;
       });
-      invalidateChunkedCache_(CACHE_KEY.PLACE_ALL, function() {
+      invalidateChunkedCache_(CACHE_KEY.PLACE_ALL, function () {
         if (typeof _GLOBAL_GEO_DICT_CACHE_PLACE !== 'undefined') _GLOBAL_GEO_DICT_CACHE_PLACE = null;
       });
       invalidateChunkedCache_(CACHE_KEY.GLOBAL_ALIAS_ALL);
       invalidateChunkedCache_(CACHE_KEY.GLOBAL_ALIAS_REVERSE);
     } else {
       // Fallback: ถ้า invalidateChunkedCache_ ไม่พร้อม (ไม่ควรเกิดใน V5.5.007+)
-      CacheService.getScriptCache().removeAll(
-        ['M_PERSON_ALL', 'M_PLACE_ALL', 'M_GLOBAL_ALIAS_ALL', 'M_GLOBAL_ALIAS_REVERSE']
-      );
+      CacheService.getScriptCache().removeAll([
+        'M_PERSON_ALL',
+        'M_PLACE_ALL',
+        'M_GLOBAL_ALIAS_ALL',
+        'M_GLOBAL_ALIAS_REVERSE'
+      ]);
     }
     saveMigrationCheckpoint_(2, 0);
   } else {
@@ -819,14 +886,21 @@ function migrateStep1_AssignUuid_(ss, state) {
  * @return {{ count: number, timedOut: boolean }}
  */
 function migrateStep2_PersonAlias_(ss, state, startTime, timeLimit) {
-  var count = 0;
-  var timedOut = false;
+  let count = 0;
+  let timedOut = false;
   logInfo('AliasService', 'Step 2: ย้าย M_PERSON_ALIAS → M_ALIAS (Batch)...');
   count = migrateEntityAliasToGlobalBatch_(
-    ss, 'PERSON', SHEET.M_PERSON_ALIAS, PERSON_ALIAS_IDX,
+    ss,
+    'PERSON',
+    SHEET.M_PERSON_ALIAS,
+    PERSON_ALIAS_IDX,
     state.step === 2 ? state.rowIndex : 0,
-    startTime, timeLimit,
-    function(uuid) { saveMigrationCheckpoint_(2, uuid); timedOut = true; }
+    startTime,
+    timeLimit,
+    function (uuid) {
+      saveMigrationCheckpoint_(2, uuid);
+      timedOut = true;
+    }
   );
   if (!timedOut) saveMigrationCheckpoint_(3, 0);
   return { count: count, timedOut: timedOut };
@@ -841,14 +915,21 @@ function migrateStep2_PersonAlias_(ss, state, startTime, timeLimit) {
  * @return {{ count: number, timedOut: boolean }}
  */
 function migrateStep3_PlaceAlias_(ss, state, startTime, timeLimit) {
-  var count = 0;
-  var timedOut = false;
+  let count = 0;
+  let timedOut = false;
   logInfo('AliasService', 'Step 3: ย้าย M_PLACE_ALIAS → M_ALIAS (Batch)...');
   count = migrateEntityAliasToGlobalBatch_(
-    ss, 'PLACE', SHEET.M_PLACE_ALIAS, PLACE_ALIAS_IDX,
+    ss,
+    'PLACE',
+    SHEET.M_PLACE_ALIAS,
+    PLACE_ALIAS_IDX,
     state.step === 3 ? state.rowIndex : 0,
-    startTime, timeLimit,
-    function(uuid) { saveMigrationCheckpoint_(3, uuid); timedOut = true; }
+    startTime,
+    timeLimit,
+    function (uuid) {
+      saveMigrationCheckpoint_(3, uuid);
+      timedOut = true;
+    }
   );
   if (!timedOut) saveMigrationCheckpoint_(4, 0);
   return { count: count, timedOut: timedOut };
@@ -863,9 +944,9 @@ function migrateStep3_PlaceAlias_(ss, state, startTime, timeLimit) {
  * @return {{ count: number, timedOut: boolean }}
  */
 function migrateStep4_SCGData_(ss, state, startTime, timeLimit) {
-  var count = 0;
-  var timedOut = false;
-  if ((new Date() - startTime) > timeLimit) {
+  let count = 0;
+  let timedOut = false;
+  if (new Date() - startTime > timeLimit) {
     saveMigrationCheckpoint_(4, 0);
     timedOut = true;
   } else {
@@ -892,9 +973,9 @@ function migrateStep4_SCGData_(ss, state, startTime, timeLimit) {
  * @return {{ count: number, timedOut: boolean }}
  */
 function migrateStep5_FactData_(ss, state, startTime, timeLimit) {
-  var count = 0;
-  var timedOut = false;
-  if ((new Date() - startTime) > timeLimit) {
+  let count = 0;
+  let timedOut = false;
+  if (new Date() - startTime > timeLimit) {
     saveMigrationCheckpoint_(5, 0);
     timedOut = true;
   } else {
@@ -923,63 +1004,86 @@ function migrateStep5_FactData_(ss, state, startTime, timeLimit) {
  * @param {Function} onTimeout - Callback when timeout (receives current index)
  * @return {number} จำนวน alias ที่สร้างใหม่
  */
-function migrateEntityAliasToGlobalBatch_(ss, entityType, aliasSheetName, aliasIdx, startIdx, startTime, timeLimit, onTimeout) {
-  var aliasSheet = ss.getSheetByName(aliasSheetName);
+function migrateEntityAliasToGlobalBatch_(
+  ss,
+  entityType,
+  aliasSheetName,
+  aliasIdx,
+  startIdx,
+  startTime,
+  timeLimit,
+  onTimeout
+) {
+  const aliasSheet = ss.getSheetByName(aliasSheetName);
   if (!aliasSheet || aliasSheet.getLastRow() < 2) return 0;
 
-  var aliasData = aliasSheet.getRange(
-    2, 1, aliasSheet.getLastRow() - 1, SCHEMA[aliasSheetName].length
-  ).getValues();
+  const aliasData = aliasSheet.getRange(2, 1, aliasSheet.getLastRow() - 1, SCHEMA[aliasSheetName].length).getValues();
 
   // โหลด dedup set ครั้งเดียว [REF-012] ใช้ centralized buildGlobalAliasDedupSet_()
-  var existingAliasSet = buildGlobalAliasDedupSet_();
-  var mAliasSheet = ss.getSheetByName(SHEET.M_ALIAS);
+  const existingAliasSet = buildGlobalAliasDedupSet_();
+  const mAliasSheet = ss.getSheetByName(SHEET.M_ALIAS);
 
   // UUID converter
-  var uuidConverter = entityType === 'PERSON' ? convertPersonIdToUuid : convertPlaceIdToUuid;
+  const uuidConverter = entityType === 'PERSON' ? convertPersonIdToUuid : convertPlaceIdToUuid;
 
   // Build new rows
-  var newRows = [];
-  var now = new Date();
-  var count = 0;
+  const newRows = [];
+  const now = new Date();
+  let count = 0;
 
-  for (var i = startIdx; i < aliasData.length; i++) {
+  for (let i = startIdx; i < aliasData.length; i++) {
     // Time Guard ทุก 50 แถว
-    if (i % 50 === 0 && i > startIdx && (new Date() - startTime) > timeLimit) {
+    if (i % 50 === 0 && i > startIdx && new Date() - startTime > timeLimit) {
       if (typeof onTimeout === 'function') onTimeout(i);
       break;
     }
 
-    var aliasRow = aliasData[i];
-    var entityId   = String(aliasRow[aliasIdx[entityType === 'PERSON' ? 'PERSON_ID' : 'PLACE_ID']] || '').trim();
-    var aliasName  = String(aliasRow[aliasIdx.ALIAS_NAME] || '').trim();
-    var matchScore = Number(aliasRow[aliasIdx.MATCH_SCORE] || 100);
+    const aliasRow = aliasData[i];
+    const entityId = String(aliasRow[aliasIdx[entityType === 'PERSON' ? 'PERSON_ID' : 'PLACE_ID']] || '').trim();
+    const aliasName = String(aliasRow[aliasIdx.ALIAS_NAME] || '').trim();
+    const matchScore = Number(aliasRow[aliasIdx.MATCH_SCORE] || 100);
     if (!entityId || !aliasName || !aliasRow[aliasIdx.ACTIVE_FLAG]) continue;
 
-    var masterUuid = uuidConverter(entityId);
+    const masterUuid = uuidConverter(entityId);
     if (!masterUuid) continue;
 
-    var normKey = normalizeForCompare(aliasName);
-    var dedupKey = entityType + '::' + masterUuid + '::' + normKey;
+    const normKey = normalizeForCompare(aliasName);
+    const dedupKey = entityType + '::' + masterUuid + '::' + normKey;
     if (existingAliasSet.has(dedupKey)) continue;
 
     existingAliasSet.add(dedupKey);
-    newRows.push([generateShortId('A'), masterUuid, aliasName, entityType, matchScore, 'V52_LEGACY_MIGRATION', now, true]);
+    newRows.push([
+      generateShortId('A'),
+      masterUuid,
+      aliasName,
+      entityType,
+      matchScore,
+      'V52_LEGACY_MIGRATION',
+      now,
+      true
+    ]);
     count++;
   }
 
   // Batch write ครั้งเดียว
   if (newRows.length > 0 && mAliasSheet) {
-    mAliasSheet.getRange(
-      mAliasSheet.getLastRow() + 1, 1, newRows.length, SCHEMA[SHEET.M_ALIAS].length
-    ).setValues(newRows);
+    mAliasSheet
+      .getRange(mAliasSheet.getLastRow() + 1, 1, newRows.length, SCHEMA[SHEET.M_ALIAS].length)
+      .setValues(newRows);
     // [FIX CRIT-002] Use CACHE_KEY constants instead of hardcoded strings — Single Source of Truth
     CacheService.getScriptCache().removeAll([CACHE_KEY.GLOBAL_ALIAS_ALL, CACHE_KEY.GLOBAL_ALIAS_REVERSE]);
   }
 
-  logInfo('AliasService',
-    'migrateEntityAliasToGlobalBatch_[' + entityType + ']: ' +
-    'ตรวจ ' + aliasData.length + ' แถว → สร้าง ' + count + ' alias ใหม่'
+  logInfo(
+    'AliasService',
+    'migrateEntityAliasToGlobalBatch_[' +
+      entityType +
+      ']: ' +
+      'ตรวจ ' +
+      aliasData.length +
+      ' แถว → สร้าง ' +
+      count +
+      ' alias ใหม่'
   );
   return count;
 }
@@ -995,7 +1099,7 @@ function migrateEntityAliasToGlobalBatch_(ss, entityType, aliasSheetName, aliasI
 /**
  * ALIAS_ENRICH_CHECKPOINT_KEY — [REF-003] PropertiesService key prefix for alias enrichment checkpoint
  */
-var ALIAS_ENRICH_CHECKPOINT_KEY = 'ALIAS_ENRICH_CHECKPOINT';
+const ALIAS_ENRICH_CHECKPOINT_KEY = 'ALIAS_ENRICH_CHECKPOINT';
 
 /**
  * saveAliasEnrichCheckpoint_ — [REF-003] Save progress สำหรับ populateAliasFromSCGRawData_ / populateAliasFromFactDelivery_
@@ -1006,12 +1110,15 @@ var ALIAS_ENRICH_CHECKPOINT_KEY = 'ALIAS_ENRICH_CHECKPOINT';
  * @private
  */
 function saveAliasEnrichCheckpoint_(source, idx, totalProcessed) {
-  var props = PropertiesService.getScriptProperties();
-  props.setProperty(ALIAS_ENRICH_CHECKPOINT_KEY + '_' + source, JSON.stringify({
-    idx: idx,
-    totalProcessed: totalProcessed,
-    savedAt: new Date().getTime()
-  }));
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty(
+    ALIAS_ENRICH_CHECKPOINT_KEY + '_' + source,
+    JSON.stringify({
+      idx: idx,
+      totalProcessed: totalProcessed,
+      savedAt: new Date().getTime()
+    })
+  );
 }
 
 /**
@@ -1022,14 +1129,18 @@ function saveAliasEnrichCheckpoint_(source, idx, totalProcessed) {
  * @private
  */
 function loadAliasEnrichCheckpoint_(source) {
-  var props = PropertiesService.getScriptProperties();
-  var raw = props.getProperty(ALIAS_ENRICH_CHECKPOINT_KEY + '_' + source);
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty(ALIAS_ENRICH_CHECKPOINT_KEY + '_' + source);
   if (!raw) return null;
   try {
-    var cp = JSON.parse(raw);
-    var ageMs = new Date().getTime() - (cp.savedAt || 0);
-    if (ageMs > 24 * 60 * 60 * 1000) {  // 24h stale
-      logWarn('AliasService', 'AliasEnrich checkpoint (' + source + ') stale (' + Math.round(ageMs / 3600000) + 'h) — clearing');
+    const cp = JSON.parse(raw);
+    const ageMs = new Date().getTime() - (cp.savedAt || 0);
+    if (ageMs > 24 * 60 * 60 * 1000) {
+      // 24h stale
+      logWarn(
+        'AliasService',
+        'AliasEnrich checkpoint (' + source + ') stale (' + Math.round(ageMs / 3600000) + 'h) — clearing'
+      );
       clearAliasEnrichCheckpoint_(source);
       return null;
     }
@@ -1057,7 +1168,7 @@ function clearAliasEnrichCheckpoint_(source) {
  * @return {number} จำนวน alias ใหม่
  */
 function populateAliasFromSCGRawData_() {
-  const ss          = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sourceSheet = ss.getSheetByName(SHEET.SOURCE);
   if (!sourceSheet || sourceSheet.getLastRow() < 2) {
     logWarn('AliasService', 'populateAliasFromSCGRawData_: ชีต SOURCE ว่าง');
@@ -1066,15 +1177,15 @@ function populateAliasFromSCGRawData_() {
 
   // [FIX BUG-B3] Time Guard
   const startTime = new Date();
-  const timeLimit = AI_CONFIG.TIME_LIMIT_MS || (5 * 60 * 1000);
+  const timeLimit = AI_CONFIG.TIME_LIMIT_MS || 5 * 60 * 1000;
 
   // [FIX S7 v5.5.002] ใช้ SRC_READ_COLS จาก 01_Config.gs แทน magic number 37
   const schemaLen = SRC_READ_COLS;
-  const srcData   = sourceSheet.getRange(2, 1, sourceSheet.getLastRow() - 1, schemaLen).getValues();
+  const srcData = sourceSheet.getRange(2, 1, sourceSheet.getLastRow() - 1, schemaLen).getValues();
 
   // ─── 1. รวบชื่อไม่ซ้ำจาก Source ───
   const nameCount = {};
-  srcData.forEach(function(r) {
+  srcData.forEach(function (r) {
     const rawName = String(r[SRC_IDX.RAW_PERSON_NAME] || '').trim();
     if (!rawName || rawName.length < 2) return;
     const normKey = normalizeForCompare(rawName);
@@ -1084,46 +1195,56 @@ function populateAliasFromSCGRawData_() {
   });
 
   // ─── 2. โหลด Person/Place map (UUID lookup) ───
-  const allPersons    = loadAllPersons_();
-  const allPlaces     = loadAllPlaces_();
+  const allPersons = loadAllPersons_();
+  const allPlaces = loadAllPlaces_();
   const personNormMap = {};
-  const placeNormMap  = {};
-  allPersons.forEach(function(p) { if (p.normalized && p.masterUuid) personNormMap[p.normalized] = p.masterUuid; });
-  allPlaces.forEach(function(p)  { if (p.normalized && p.masterUuid) placeNormMap[p.normalized]  = p.masterUuid; });
+  const placeNormMap = {};
+  allPersons.forEach(function (p) {
+    if (p.normalized && p.masterUuid) personNormMap[p.normalized] = p.masterUuid;
+  });
+  allPlaces.forEach(function (p) {
+    if (p.normalized && p.masterUuid) placeNormMap[p.normalized] = p.masterUuid;
+  });
 
   // [PERF-002] Build prefix indexes ครั้งเดียวก่อนลูป — ลด substring fallback จาก O(N) → O(K)
   //   เดิม: 1,000 unique names × 1,000 persons = 1M substring comparisons
   //   ใหม่: 1,000 names × avg 8 candidates per prefix = 8,000 comparisons (ลด ~95%)
-  var personPrefixMap = buildPrefixIndex_(personNormMap);
-  var placePrefixMap  = buildPrefixIndex_(placeNormMap);
+  const personPrefixMap = buildPrefixIndex_(personNormMap);
+  const placePrefixMap = buildPrefixIndex_(placeNormMap);
 
   // ─── 3. [FIX BUG-B1] [REF-012] โหลด dedup set ครั้งเดียว (แทน loadGlobalAliasesMap_ ใน loop) ───
   // [REF-012] Uses centralized buildGlobalAliasDedupSet_() from 14_Utils.gs
   const existingAliasSet = buildGlobalAliasDedupSet_();
-  const mAliasSheet    = ss.getSheetByName(SHEET.M_ALIAS);
+  const mAliasSheet = ss.getSheetByName(SHEET.M_ALIAS);
 
   // ─── 4. Build new rows (pure memory ops) ───
-  const newRows   = [];
-  const now       = new Date();
-  let   processed = 0;
+  const newRows = [];
+  const now = new Date();
+  let processed = 0;
 
   // [REF-003] Load checkpoint for resume support
-  var cp = loadAliasEnrichCheckpoint_('SCG_RAW');
-  var startOffset = cp ? cp.idx : 0;
+  const cp = loadAliasEnrichCheckpoint_('SCG_RAW');
+  const startOffset = cp ? cp.idx : 0;
   if (cp) {
     processed = cp.totalProcessed || 0;
-    logInfo('AliasService', 'Resume populateAliasFromSCGRawData_ จาก offset ' + startOffset + ' (processed=' + processed + ')');
+    logInfo(
+      'AliasService',
+      'Resume populateAliasFromSCGRawData_ จาก offset ' + startOffset + ' (processed=' + processed + ')'
+    );
   }
-  var allKeys = Object.keys(nameCount);
-  var timedOut = false;
-  var k;
+  const allKeys = Object.keys(nameCount);
+  let timedOut = false;
+  let k;
 
   for (k = startOffset; k < allKeys.length; k++) {
-    var normKey = allKeys[k];
+    const normKey = allKeys[k];
 
     // [FIX BUG-B3] Time Guard ทุก 100 records — [REF-003] + save checkpoint + auto-resume
-    if (processed > 0 && processed % 100 === 0 && (new Date() - startTime) > timeLimit) {
-      logWarn('AliasService', 'populateAliasFromSCGRawData_: Time Guard หยุดที่ offset ' + k + ' (processed=' + processed + ')');
+    if (processed > 0 && processed % 100 === 0 && new Date() - startTime > timeLimit) {
+      logWarn(
+        'AliasService',
+        'populateAliasFromSCGRawData_: Time Guard หยุดที่ offset ' + k + ' (processed=' + processed + ')'
+      );
       saveAliasEnrichCheckpoint_('SCG_RAW', k, processed);
       if (typeof installAutoResume_ === 'function') installAutoResume_('populateAliasFromSCGRawData');
       timedOut = true;
@@ -1158,17 +1279,23 @@ function populateAliasFromSCGRawData_() {
 
   // ─── 5. [FIX BUG-B1] Batch write ครั้งเดียว ───
   if (newRows.length > 0 && mAliasSheet) {
-    mAliasSheet.getRange(
-      mAliasSheet.getLastRow() + 1, 1, newRows.length, SCHEMA[SHEET.M_ALIAS].length
-    ).setValues(newRows);
+    mAliasSheet
+      .getRange(mAliasSheet.getLastRow() + 1, 1, newRows.length, SCHEMA[SHEET.M_ALIAS].length)
+      .setValues(newRows);
     // [FIX CRIT-002] Use CACHE_KEY constants instead of hardcoded strings — Single Source of Truth
     CacheService.getScriptCache().removeAll([CACHE_KEY.GLOBAL_ALIAS_ALL, CACHE_KEY.GLOBAL_ALIAS_REVERSE]);
   }
 
-  logInfo('AliasService',
-    'populateAliasFromSCGRawData_: ตรวจ ' + Object.keys(nameCount).length +
-    ' ชื่อ → สร้าง ' + newRows.length + ' alias ใหม่ (' + processed + ' processed)' +
-    (timedOut ? ' [TIMEOUT — resume จาก offset ' + (k + 1) + ']' : '')
+  logInfo(
+    'AliasService',
+    'populateAliasFromSCGRawData_: ตรวจ ' +
+      Object.keys(nameCount).length +
+      ' ชื่อ → สร้าง ' +
+      newRows.length +
+      ' alias ใหม่ (' +
+      processed +
+      ' processed)' +
+      (timedOut ? ' [TIMEOUT — resume จาก offset ' + (k + 1) + ']' : '')
   );
   return newRows.length;
 }
@@ -1186,26 +1313,24 @@ function populateAliasFromSCGRawData_() {
  * @return {number} จำนวน alias ใหม่
  */
 function populateAliasFromFactDelivery_() {
-  const ss        = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const factSheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
   if (!factSheet || factSheet.getLastRow() < 2) return 0;
 
   // [FIX BUG-B3] Time Guard
   const startTime = new Date();
-  const timeLimit = AI_CONFIG.TIME_LIMIT_MS || (5 * 60 * 1000);
+  const timeLimit = AI_CONFIG.TIME_LIMIT_MS || 5 * 60 * 1000;
 
-  const factData = factSheet.getRange(
-    2, 1, factSheet.getLastRow() - 1, SCHEMA[SHEET.FACT_DELIVERY].length
-  ).getValues();
+  const factData = factSheet.getRange(2, 1, factSheet.getLastRow() - 1, SCHEMA[SHEET.FACT_DELIVERY].length).getValues();
 
   // ─── 1. รวบชื่อไม่ซ้ำ + FK จาก FACT ───
   const nameMap = {};
-  factData.forEach(function(r) {
-    const rawName  = String(r[FACT_IDX.SHIP_TO_NAME] || '').trim();
-    const personId = String(r[FACT_IDX.PERSON_ID]    || '').trim();
-    const placeId  = String(r[FACT_IDX.PLACE_ID]     || '').trim();
+  factData.forEach(function (r) {
+    const rawName = String(r[FACT_IDX.SHIP_TO_NAME] || '').trim();
+    const personId = String(r[FACT_IDX.PERSON_ID] || '').trim();
+    const placeId = String(r[FACT_IDX.PLACE_ID] || '').trim();
     // [FIX CRIT-005] อ่าน DRIVER_VERIFIED ด้วย
-    const dvName   = String(r[FACT_IDX.DRIVER_VERIFIED_NAME] || '').trim();
+    const dvName = String(r[FACT_IDX.DRIVER_VERIFIED_NAME] || '').trim();
     // [FIX CodeQL js/unused-local-variable V5.5.035] dvAddr ไม่ถูกใช้ — ลบทิ้ง
 
     if (!rawName || rawName.length < 2) return;
@@ -1215,53 +1340,64 @@ function populateAliasFromFactDelivery_() {
 
     // [FIX CRIT-005] เพิ่ม DRIVER_VERIFIED เข้า nameMap ด้วย
     if (dvName && dvName.length >= 2) {
-      var dvNormKey = normalizeForCompare(dvName);
+      const dvNormKey = normalizeForCompare(dvName);
       if (dvNormKey && dvNormKey.length >= 2 && !nameMap[dvNormKey]) {
-        nameMap[dvNormKey] = { rawName: dvName, personId: personId, placeId: placeId, source: 'DRIVER_VERIFIED_RECOVERY' };
+        nameMap[dvNormKey] = {
+          rawName: dvName,
+          personId: personId,
+          placeId: placeId,
+          source: 'DRIVER_VERIFIED_RECOVERY'
+        };
       }
     }
   });
 
   // ─── 2. [REF-012] โหลด dedup set ครั้งเดียว — centralized buildGlobalAliasDedupSet_() ───
   const existingAliasSet = buildGlobalAliasDedupSet_();
-  const mAliasSheet      = ss.getSheetByName(SHEET.M_ALIAS);
+  const mAliasSheet = ss.getSheetByName(SHEET.M_ALIAS);
 
   // ─── 2b. [PERF-003] Build ID→UUID maps ครั้งเดียวก่อนลูป — O(1) lookup แทน convertPersonIdToUuid O(N) ───
   //   เดิม: 1,000 names × O(1,000 persons) find = 1M iterations (via convertPersonIdToUuid)
   //   ใหม่: 1,000 names × 1 map lookup = 1,000 iterations (ลด ~99%)
-  var allPersons = loadAllPersons_();
-  var allPlaces  = loadAllPlaces_();
-  var personIdToUuidMap = {};
-  var placeIdToUuidMap  = {};
-  allPersons.forEach(function(p) {
+  const allPersons = loadAllPersons_();
+  const allPlaces = loadAllPlaces_();
+  const personIdToUuidMap = {};
+  const placeIdToUuidMap = {};
+  allPersons.forEach(function (p) {
     if (p.personId && p.masterUuid) personIdToUuidMap[p.personId] = p.masterUuid;
   });
-  allPlaces.forEach(function(p) {
+  allPlaces.forEach(function (p) {
     if (p.placeId && p.masterUuid) placeIdToUuidMap[p.placeId] = p.masterUuid;
   });
 
   // ─── 3. Build new rows ───
-  const newRows   = [];
-  const now       = new Date();
-  let   processed = 0;
+  const newRows = [];
+  const now = new Date();
+  let processed = 0;
 
   // [REF-003] Load checkpoint for resume support
-  var cp = loadAliasEnrichCheckpoint_('FACT_DELIVERY');
-  var startOffset = cp ? cp.idx : 0;
+  const cp = loadAliasEnrichCheckpoint_('FACT_DELIVERY');
+  const startOffset = cp ? cp.idx : 0;
   if (cp) {
     processed = cp.totalProcessed || 0;
-    logInfo('AliasService', 'Resume populateAliasFromFactDelivery_ จาก offset ' + startOffset + ' (processed=' + processed + ')');
+    logInfo(
+      'AliasService',
+      'Resume populateAliasFromFactDelivery_ จาก offset ' + startOffset + ' (processed=' + processed + ')'
+    );
   }
-  var allKeys = Object.keys(nameMap);
-  var timedOut = false;
-  var k;
+  const allKeys = Object.keys(nameMap);
+  let timedOut = false;
+  let k;
 
   for (k = startOffset; k < allKeys.length; k++) {
-    var normKey = allKeys[k];
+    const normKey = allKeys[k];
 
     // [FIX BUG-B3] Time Guard ทุก 100 records — [REF-003] + save checkpoint + auto-resume
-    if (processed > 0 && processed % 100 === 0 && (new Date() - startTime) > timeLimit) {
-      logWarn('AliasService', 'populateAliasFromFactDelivery_: Time Guard หยุดที่ offset ' + k + ' (processed=' + processed + ')');
+    if (processed > 0 && processed % 100 === 0 && new Date() - startTime > timeLimit) {
+      logWarn(
+        'AliasService',
+        'populateAliasFromFactDelivery_: Time Guard หยุดที่ offset ' + k + ' (processed=' + processed + ')'
+      );
       saveAliasEnrichCheckpoint_('FACT_DELIVERY', k, processed);
       if (typeof installAutoResume_ === 'function') installAutoResume_('populateAliasFromFactDelivery');
       timedOut = true;
@@ -1269,9 +1405,9 @@ function populateAliasFromFactDelivery_() {
     }
     processed++;
 
-    const info     = nameMap[normKey];
-    let   matchedUuid = null;
-    let   matchedType = 'PERSON';
+    const info = nameMap[normKey];
+    let matchedUuid = null;
+    let matchedType = 'PERSON';
 
     // [PERF-003] O(1) map lookup แทน convertPersonIdToUuid() O(N)
     //   personIdToUuidMap build ครั้งเดียวก่อนลูป — lookup เป็น O(1)
@@ -1299,17 +1435,23 @@ function populateAliasFromFactDelivery_() {
 
   // ─── 4. Batch write ครั้งเดียว ───
   if (newRows.length > 0 && mAliasSheet) {
-    mAliasSheet.getRange(
-      mAliasSheet.getLastRow() + 1, 1, newRows.length, SCHEMA[SHEET.M_ALIAS].length
-    ).setValues(newRows);
+    mAliasSheet
+      .getRange(mAliasSheet.getLastRow() + 1, 1, newRows.length, SCHEMA[SHEET.M_ALIAS].length)
+      .setValues(newRows);
     // [FIX CRIT-002] Use CACHE_KEY constants instead of hardcoded strings — Single Source of Truth
     CacheService.getScriptCache().removeAll([CACHE_KEY.GLOBAL_ALIAS_ALL, CACHE_KEY.GLOBAL_ALIAS_REVERSE]);
   }
 
-  logInfo('AliasService',
-    'populateAliasFromFactDelivery_: ตรวจ ' + Object.keys(nameMap).length +
-    ' ชื่อ → สร้าง ' + newRows.length + ' alias ใหม่ (' + processed + ' processed)' +
-    (timedOut ? ' [TIMEOUT — resume จาก offset ' + (k + 1) + ']' : '')
+  logInfo(
+    'AliasService',
+    'populateAliasFromFactDelivery_: ตรวจ ' +
+      Object.keys(nameMap).length +
+      ' ชื่อ → สร้าง ' +
+      newRows.length +
+      ' alias ใหม่ (' +
+      processed +
+      ' processed)' +
+      (timedOut ? ' [TIMEOUT — resume จาก offset ' + (k + 1) + ']' : '')
   );
   return newRows.length;
 }
@@ -1329,10 +1471,10 @@ function populateAliasFromFactDelivery_() {
  * @private
  */
 function buildPrefixIndex_(normMap) {
-  var prefixMap = {};
-  for (var normName in normMap) {
-    if (normName.length < 4) continue;  // substring fallback เดิมใช้ length>=4
-    var prefix = normName.substring(0, 4);
+  const prefixMap = {};
+  for (const normName in normMap) {
+    if (normName.length < 4) continue; // substring fallback เดิมใช้ length>=4
+    const prefix = normName.substring(0, 4);
     if (!prefixMap[prefix]) prefixMap[prefix] = [];
     prefixMap[prefix].push({ fullNorm: normName, uuid: normMap[normName] });
   }
@@ -1356,18 +1498,17 @@ function findMatchingPerson_(normName, personNormMap, optPrefixMap) {
 
   // 2. [PERF-002] Substring fallback — ใช้ prefix index ถ้ามี (O(K) แทน O(N))
   if (optPrefixMap && normName.length >= 4) {
-    var prefix = normName.substring(0, 4);
-    var candidates = optPrefixMap[prefix];
-    if (!candidates || candidates.length === 0) return null;  // skip substring ทั้งหมด
+    const prefix = normName.substring(0, 4);
+    const candidates = optPrefixMap[prefix];
+    if (!candidates || candidates.length === 0) return null; // skip substring ทั้งหมด
 
-    for (var ci = 0; ci < candidates.length; ci++) {
-      var c = candidates[ci];
-      if (c.fullNorm.length >= 4 &&
-          (normName.includes(c.fullNorm) || c.fullNorm.includes(normName))) {
+    for (let ci = 0; ci < candidates.length; ci++) {
+      const c = candidates[ci];
+      if (c.fullNorm.length >= 4 && (normName.includes(c.fullNorm) || c.fullNorm.includes(normName))) {
         return c.uuid;
       }
     }
-    return null;  // candidates มีแต่ไม่ match → ไม่ fallback ไป full scan (preserve behavior เดิมในกรณี common)
+    return null; // candidates มีแต่ไม่ match → ไม่ fallback ไป full scan (preserve behavior เดิมในกรณี common)
   }
 
   // 3. Legacy fallback (กรณี caller ไม่ส่ง prefixMap — backward compat)
@@ -1396,14 +1537,13 @@ function findMatchingPlace_(normName, placeNormMap, optPrefixMap) {
 
   // 2. [PERF-002] Substring fallback — ใช้ prefix index ถ้ามี (O(K) แทน O(N))
   if (optPrefixMap && normName.length >= 4) {
-    var prefix = normName.substring(0, 4);
-    var candidates = optPrefixMap[prefix];
+    const prefix = normName.substring(0, 4);
+    const candidates = optPrefixMap[prefix];
     if (!candidates || candidates.length === 0) return null;
 
-    for (var ci = 0; ci < candidates.length; ci++) {
-      var c = candidates[ci];
-      if (c.fullNorm.length >= 4 &&
-          (normName.includes(c.fullNorm) || c.fullNorm.includes(normName))) {
+    for (let ci = 0; ci < candidates.length; ci++) {
+      const c = candidates[ci];
+      if (c.fullNorm.length >= 4 && (normName.includes(c.fullNorm) || c.fullNorm.includes(normName))) {
         return c.uuid;
       }
     }
@@ -1463,13 +1603,19 @@ function saveMigrationCheckpoint_(step, rowIndex) {
  * loadMigrationCheckpoint_ — โหลดตำแหน่ง Migration ที่บันทึกไว้
  */
 function loadMigrationCheckpoint_() {
-  var raw = PropertiesService.getScriptProperties()
-    .getProperty(MIGRATION_CHECKPOINT_KEY);
-  if (raw) { try { return JSON.parse(raw); } catch(e) {
-    // [FIX BUG-H02 V5.5.022] เพิ่ม logWarn — ละเมิด Rule 12 (No Silent Fail)
-    //   checkpoint data เสีย → เริ่ม migration จาก step 1 ใหม่ อาจทำให้ข้อมูลซ้ำซ้อน
-    logWarn('AliasService', 'loadMigrationCheckpoint_: JSON.parse ล้มเหลว — resetting to step 1 — raw: ' + String(raw).substring(0, 100));
-  } }
+  const raw = PropertiesService.getScriptProperties().getProperty(MIGRATION_CHECKPOINT_KEY);
+  if (raw) {
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      // [FIX BUG-H02 V5.5.022] เพิ่ม logWarn — ละเมิด Rule 12 (No Silent Fail)
+      //   checkpoint data เสีย → เริ่ม migration จาก step 1 ใหม่ อาจทำให้ข้อมูลซ้ำซ้อน
+      logWarn(
+        'AliasService',
+        'loadMigrationCheckpoint_: JSON.parse ล้มเหลว — resetting to step 1 — raw: ' + String(raw).substring(0, 100)
+      );
+    }
+  }
   return { step: 1, rowIndex: 0 };
 }
 
@@ -1477,6 +1623,5 @@ function loadMigrationCheckpoint_() {
  * clearMigrationCheckpoint_ — ลบ Checkpoint หลัง Migration เสร็จ
  */
 function clearMigrationCheckpoint_() {
-  PropertiesService.getScriptProperties()
-    .deleteProperty(MIGRATION_CHECKPOINT_KEY);
+  PropertiesService.getScriptProperties().deleteProperty(MIGRATION_CHECKPOINT_KEY);
 }

@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.040
+ * VERSION: 6.0.002
  * FILE: 11_TransactionService.gs
  * LMDS V5.5 — FACT_DELIVERY Transaction Service
  * ===================================================
@@ -70,76 +70,96 @@
  */
 function upsertFactDelivery(srcObj, personId, placeId, geoId, destId, decision) {
   try {
-  const ss         = SpreadsheetApp.getActiveSpreadsheet();
-  const factSheet  = ss.getSheetByName(SHEET.FACT_DELIVERY);
-  if (!factSheet) {
-    logError('TransactionService', `ไม่พบชีต ${SHEET.FACT_DELIVERY}`, new Error('SHEET_NOT_FOUND'));
-    return null;
-  }
-
-  const existingRow = findFactRowByInvoice_(factSheet, srcObj.invoiceNo);
-  const now         = new Date();
-
-  // [FIX v003] เรียก getGeoLatLng_ ครั้งเดียว แล้ว destructure
-  // [FIX CRIT-001] เปลี่ยน initialization จาก 0 เป็น null — ป้องกันพิกัดถูกต้องถูกเขียนทับด้วย 0
-  let resolvedLat = null;
-  let resolvedLng = null;
-
-  if (geoId) {
-    const geoLL = getGeoLatLng_(geoId);
-    if (geoLL) {
-      resolvedLat = geoLL.lat;
-      resolvedLng = geoLL.lng;
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const factSheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
+    if (!factSheet) {
+      logError('TransactionService', `ไม่พบชีต ${SHEET.FACT_DELIVERY}`, new Error('SHEET_NOT_FOUND'));
+      return null;
     }
-  }
 
-  // [FIX v003] fallback → rawLat/rawLng ถ้า getGeoLatLng_ คืน null
-  // [FIX CRIT-001] เปลี่ยนเงื่อนไขจาก === 0 เป็น === null
-  if (resolvedLat === null || resolvedLng === null) {
-    if (srcObj.rawLat && srcObj.rawLng &&
-        !isNaN(Number(srcObj.rawLat)) && !isNaN(Number(srcObj.rawLng))) {
-      resolvedLat = Number(srcObj.rawLat);
-      resolvedLng = Number(srcObj.rawLng);
+    const existingRow = findFactRowByInvoice_(factSheet, srcObj.invoiceNo);
+    const now = new Date();
+
+    // [FIX v003] เรียก getGeoLatLng_ ครั้งเดียว แล้ว destructure
+    // [FIX CRIT-001] เปลี่ยน initialization จาก 0 เป็น null — ป้องกันพิกัดถูกต้องถูกเขียนทับด้วย 0
+    let resolvedLat = null;
+    let resolvedLng = null;
+
+    if (geoId) {
+      const geoLL = getGeoLatLng_(geoId);
+      if (geoLL) {
+        resolvedLat = geoLL.lat;
+        resolvedLng = geoLL.lng;
+      }
     }
-  }
 
-  // แยก deliveryDate/deliveryTime
-  let deliveryDateVal = '';
-  let deliveryTimeVal = '';
-  if (srcObj.deliveryTime) {
-    deliveryTimeVal = formatTimeValue_(srcObj.deliveryTime);
-  }
-
-  if (srcObj.deliveryDate) {
-    try {
-      deliveryDateVal = new Date(srcObj.deliveryDate);
-    } catch (e) {
-      deliveryDateVal = srcObj.deliveryDate;
+    // [FIX v003] fallback → rawLat/rawLng ถ้า getGeoLatLng_ คืน null
+    // [FIX CRIT-001] เปลี่ยนเงื่อนไขจาก === 0 เป็น === null
+    if (resolvedLat === null || resolvedLng === null) {
+      if (srcObj.rawLat && srcObj.rawLng && !isNaN(Number(srcObj.rawLat)) && !isNaN(Number(srcObj.rawLng))) {
+        resolvedLat = Number(srcObj.rawLat);
+        resolvedLng = Number(srcObj.rawLng);
+      }
     }
-  }
 
-  if (existingRow > 0) {
-    // --- UPDATE ---
-    // [FIX BUG-M03 V5.5.022] เพิ่ม Math.min guard ป้องกัน Range error
-    //   ถ้า FACT_DELIVERY sheet มีคอลัมน์น้อยกว่า SCHEMA (เช่นยังไม่ได้ add คอลัมน์ใหม่)
-    //   getRange จะ throw error ทันที — ต่างจาก data loaders อื่นที่มี Math.min guard
-    const schemaLen = SCHEMA[SHEET.FACT_DELIVERY].length;
-    const sheetCols = Math.min(schemaLen, factSheet.getLastColumn());
-    const rowRange = factSheet.getRange(existingRow, 1, 1, sheetCols);
-    const rawRowData = rowRange.getValues()[0];
-    // ถ้าข้อมูลในชีตสั้นกว่า SCHEMA → extend array ให้ครบ ป้องกัน undefined index
-    const rowData = rawRowData.length < schemaLen
-      ? rawRowData.concat(new Array(schemaLen - rawRowData.length).fill(''))
-      : rawRowData;
-    return factUpdateRow_(rowRange, rowData, personId, placeId, geoId, destId,
-                          decision, resolvedLat, resolvedLng, now, srcObj);
+    // แยก deliveryDate/deliveryTime
+    let deliveryDateVal = '';
+    let deliveryTimeVal = '';
+    if (srcObj.deliveryTime) {
+      deliveryTimeVal = formatTimeValue_(srcObj.deliveryTime);
+    }
 
-  } else {
-    // --- INSERT ---
-    return factCreateRow_(srcObj, personId, placeId, geoId, destId, decision,
-                          resolvedLat, resolvedLng, deliveryDateVal, deliveryTimeVal, now);
-  }
+    if (srcObj.deliveryDate) {
+      try {
+        deliveryDateVal = new Date(srcObj.deliveryDate);
+      } catch (e) {
+        deliveryDateVal = srcObj.deliveryDate;
+      }
+    }
 
+    if (existingRow > 0) {
+      // --- UPDATE ---
+      // [FIX BUG-M03 V5.5.022] เพิ่ม Math.min guard ป้องกัน Range error
+      //   ถ้า FACT_DELIVERY sheet มีคอลัมน์น้อยกว่า SCHEMA (เช่นยังไม่ได้ add คอลัมน์ใหม่)
+      //   getRange จะ throw error ทันที — ต่างจาก data loaders อื่นที่มี Math.min guard
+      const schemaLen = SCHEMA[SHEET.FACT_DELIVERY].length;
+      const sheetCols = Math.min(schemaLen, factSheet.getLastColumn());
+      const rowRange = factSheet.getRange(existingRow, 1, 1, sheetCols);
+      const rawRowData = rowRange.getValues()[0];
+      // ถ้าข้อมูลในชีตสั้นกว่า SCHEMA → extend array ให้ครบ ป้องกัน undefined index
+      const rowData =
+        rawRowData.length < schemaLen
+          ? rawRowData.concat(new Array(schemaLen - rawRowData.length).fill(''))
+          : rawRowData;
+      return factUpdateRow_(
+        rowRange,
+        rowData,
+        personId,
+        placeId,
+        geoId,
+        destId,
+        decision,
+        resolvedLat,
+        resolvedLng,
+        now,
+        srcObj
+      );
+    } else {
+      // --- INSERT ---
+      return factCreateRow_(
+        srcObj,
+        personId,
+        placeId,
+        geoId,
+        destId,
+        decision,
+        resolvedLat,
+        resolvedLng,
+        deliveryDateVal,
+        deliveryTimeVal,
+        now
+      );
+    }
   } catch (e) {
     // [FIX R13-05 REVIEW15] Rule 13: ส่ง e เพื่อรักษา stack trace ของ error จริง
     logError('TransactionService', 'upsertFactDelivery ล้มเหลว: ' + e.message, e);
@@ -166,25 +186,37 @@ function upsertFactDelivery(srcObj, personId, placeId, geoId, destId, decision) 
  * @param {Date} now
  * @return {{ txId: string, isNew: boolean, rowData: null }}
  */
-function factUpdateRow_(rowRange, rowData, personId, placeId, geoId, destId, decision, resolvedLat, resolvedLng, now, srcObj) {
+function factUpdateRow_(
+  rowRange,
+  rowData,
+  personId,
+  placeId,
+  geoId,
+  destId,
+  decision,
+  resolvedLat,
+  resolvedLng,
+  now,
+  srcObj
+) {
   // [Fix Phase-C #4] defensive: ป้องกัน '' overwrite ค่าเดิม
   //   เดิม: personId != null ? personId : rowData[...] — ถ้า future refactor ส่ง '' แทน null จะ overwrite ค่าเดิม
   //   ใหม่: (personId != null && personId !== '') ? personId : rowData[...]
   //   เหตุผล: '' (empty string) เป็น falsy แต่ != null เป็น true → ต้อง check !== '' เพิ่ม
   //   ป้องกัน regression เมื่อมีการแก้ caller ในอนาคตให้ส่ง '' แทน null
-  rowData[FACT_IDX.PERSON_ID]    = (personId  != null && personId  !== '') ? personId  : rowData[FACT_IDX.PERSON_ID];
-  rowData[FACT_IDX.PLACE_ID]     = (placeId   != null && placeId   !== '') ? placeId   : rowData[FACT_IDX.PLACE_ID];
-  rowData[FACT_IDX.GEO_ID]       = (geoId     != null && geoId     !== '') ? geoId     : rowData[FACT_IDX.GEO_ID];
-  rowData[FACT_IDX.DEST_ID]      = (destId    != null && destId    !== '') ? destId    : rowData[FACT_IDX.DEST_ID];
+  rowData[FACT_IDX.PERSON_ID] = personId != null && personId !== '' ? personId : rowData[FACT_IDX.PERSON_ID];
+  rowData[FACT_IDX.PLACE_ID] = placeId != null && placeId !== '' ? placeId : rowData[FACT_IDX.PLACE_ID];
+  rowData[FACT_IDX.GEO_ID] = geoId != null && geoId !== '' ? geoId : rowData[FACT_IDX.GEO_ID];
+  rowData[FACT_IDX.DEST_ID] = destId != null && destId !== '' ? destId : rowData[FACT_IDX.DEST_ID];
   // [FIX CRIT-001] ใช้ strict !== null เพื่อให้ null (ไม่มีพิกัด) รักษาค่าเดิม ไม่เขียนทับด้วย 0
   rowData[FACT_IDX.RESOLVED_LAT] = resolvedLat !== null ? resolvedLat : rowData[FACT_IDX.RESOLVED_LAT];
   rowData[FACT_IDX.RESOLVED_LNG] = resolvedLng !== null ? resolvedLng : rowData[FACT_IDX.RESOLVED_LNG];
-  rowData[FACT_IDX.MATCH_STATUS] = decision.action  || rowData[FACT_IDX.MATCH_STATUS];
-  rowData[FACT_IDX.MATCH_CONF]   = decision.confidence;
-  rowData[FACT_IDX.MATCH_REASON] = decision.reason  || '';
-  rowData[FACT_IDX.MATCH_ACTION] = decision.action  || '';
-  rowData[FACT_IDX.UPDATED_AT]   = now;
-  rowData[FACT_IDX.EVIDENCE]     = decision.evidence || rowData[FACT_IDX.EVIDENCE] || '';
+  rowData[FACT_IDX.MATCH_STATUS] = decision.action || rowData[FACT_IDX.MATCH_STATUS];
+  rowData[FACT_IDX.MATCH_CONF] = decision.confidence;
+  rowData[FACT_IDX.MATCH_REASON] = decision.reason || '';
+  rowData[FACT_IDX.MATCH_ACTION] = decision.action || '';
+  rowData[FACT_IDX.UPDATED_AT] = now;
+  rowData[FACT_IDX.EVIDENCE] = decision.evidence || rowData[FACT_IDX.EVIDENCE] || '';
   // [FIX CRIT-001] เขียน DRIVER_VERIFIED ใน UPDATE path — merge mode (ไม่เขียนทับค่าเดิม)
   if (srcObj && srcObj.driverVerifiedName) {
     rowData[FACT_IDX.DRIVER_VERIFIED_NAME] = srcObj.driverVerifiedName;
@@ -213,43 +245,55 @@ function factUpdateRow_(rowRange, rowData, personId, placeId, geoId, destId, dec
  * @param {Date} now
  * @return {{ txId: string, isNew: boolean, rowData: Array }}
  */
-function factCreateRow_(srcObj, personId, placeId, geoId, destId, decision, resolvedLat, resolvedLng, deliveryDateVal, deliveryTimeVal, now) {
-  const txId   = generateShortId('TX');
+function factCreateRow_(
+  srcObj,
+  personId,
+  placeId,
+  geoId,
+  destId,
+  decision,
+  resolvedLat,
+  resolvedLng,
+  deliveryDateVal,
+  deliveryTimeVal,
+  now
+) {
+  const txId = generateShortId('TX');
   const newRow = new Array(SCHEMA[SHEET.FACT_DELIVERY].length).fill('');
 
-  newRow[FACT_IDX.TX_ID]          = txId;
-  newRow[FACT_IDX.SOURCE_SHEET]   = srcObj.sourceSheet   || SHEET.SOURCE;
-  newRow[FACT_IDX.SOURCE_ROW]     = srcObj.sourceRow     || 0;
-  newRow[FACT_IDX.SOURCE_REC_ID]  = srcObj.sourceId      || '';
-  newRow[FACT_IDX.DELIVERY_DATE]  = deliveryDateVal;
-  newRow[FACT_IDX.DELIVERY_TIME]  = deliveryTimeVal;
-  newRow[FACT_IDX.INVOICE_NO]     = srcObj.invoiceNo     || '';
-  newRow[FACT_IDX.SHIPMENT_NO]    = srcObj.shipmentNo    || '';
-  newRow[FACT_IDX.DRIVER_NAME]    = srcObj.driverName    || '';
-  newRow[FACT_IDX.TRUCK_LICENSE]  = srcObj.truckLicense  || '';
-  newRow[FACT_IDX.SOLD_TO_CODE]   = srcObj.soldToCode    || '';
-  newRow[FACT_IDX.SOLD_TO_NAME]   = srcObj.soldToName    || '';
-  newRow[FACT_IDX.SHIP_TO_NAME]   = srcObj.rawPersonName || '';
-  newRow[FACT_IDX.SHIP_TO_ADDR]   = srcObj.scgAddress    || ''; // [FIX v5.2.003] ใช้ต้นฉบับจาก SCG (คอลัมน์ 18)
+  newRow[FACT_IDX.TX_ID] = txId;
+  newRow[FACT_IDX.SOURCE_SHEET] = srcObj.sourceSheet || SHEET.SOURCE;
+  newRow[FACT_IDX.SOURCE_ROW] = srcObj.sourceRow || 0;
+  newRow[FACT_IDX.SOURCE_REC_ID] = srcObj.sourceId || '';
+  newRow[FACT_IDX.DELIVERY_DATE] = deliveryDateVal;
+  newRow[FACT_IDX.DELIVERY_TIME] = deliveryTimeVal;
+  newRow[FACT_IDX.INVOICE_NO] = srcObj.invoiceNo || '';
+  newRow[FACT_IDX.SHIPMENT_NO] = srcObj.shipmentNo || '';
+  newRow[FACT_IDX.DRIVER_NAME] = srcObj.driverName || '';
+  newRow[FACT_IDX.TRUCK_LICENSE] = srcObj.truckLicense || '';
+  newRow[FACT_IDX.SOLD_TO_CODE] = srcObj.soldToCode || '';
+  newRow[FACT_IDX.SOLD_TO_NAME] = srcObj.soldToName || '';
+  newRow[FACT_IDX.SHIP_TO_NAME] = srcObj.rawPersonName || '';
+  newRow[FACT_IDX.SHIP_TO_ADDR] = srcObj.scgAddress || ''; // [FIX v5.2.003] ใช้ต้นฉบับจาก SCG (คอลัมน์ 18)
   newRow[FACT_IDX.GEO_RESOLVED_ADDR] = srcObj.resolvedAddr || ''; // [FIX v5.2.003] ใช้ที่อยู่ที่ระบบหาได้ (คอลัมน์ 24)
-  newRow[FACT_IDX.PERSON_ID]      = personId             || '';
-  newRow[FACT_IDX.PLACE_ID]       = placeId              || '';
-  newRow[FACT_IDX.GEO_ID]         = geoId                || '';
-  newRow[FACT_IDX.DEST_ID]        = destId               || '';
-  newRow[FACT_IDX.WAREHOUSE]      = srcObj.warehouse     || '';
-  newRow[FACT_IDX.RAW_LAT]        = srcObj.rawLat        || 0;
-  newRow[FACT_IDX.RAW_LNG]        = srcObj.rawLng        || 0;
-  newRow[FACT_IDX.MATCH_STATUS]   = decision.action      || '';
-  newRow[FACT_IDX.MATCH_CONF]     = decision.confidence  || 0;
-  newRow[FACT_IDX.MATCH_REASON]   = decision.reason      || '';
-  newRow[FACT_IDX.MATCH_ACTION]   = decision.action      || '';
+  newRow[FACT_IDX.PERSON_ID] = personId || '';
+  newRow[FACT_IDX.PLACE_ID] = placeId || '';
+  newRow[FACT_IDX.GEO_ID] = geoId || '';
+  newRow[FACT_IDX.DEST_ID] = destId || '';
+  newRow[FACT_IDX.WAREHOUSE] = srcObj.warehouse || '';
+  newRow[FACT_IDX.RAW_LAT] = srcObj.rawLat || 0;
+  newRow[FACT_IDX.RAW_LNG] = srcObj.rawLng || 0;
+  newRow[FACT_IDX.MATCH_STATUS] = decision.action || '';
+  newRow[FACT_IDX.MATCH_CONF] = decision.confidence || 0;
+  newRow[FACT_IDX.MATCH_REASON] = decision.reason || '';
+  newRow[FACT_IDX.MATCH_ACTION] = decision.action || '';
   // [FIX CRIT-001] INSERT path: เขียน 0 เมื่อไม่มีพิกัด (รักษา Schema contract ที่ชีตไม่ควรมี null)
-  newRow[FACT_IDX.RESOLVED_LAT]   = resolvedLat !== null ? resolvedLat : 0;
-  newRow[FACT_IDX.RESOLVED_LNG]   = resolvedLng !== null ? resolvedLng : 0;
-  newRow[FACT_IDX.CREATED_AT]     = now;
-  newRow[FACT_IDX.UPDATED_AT]     = now;
-  newRow[FACT_IDX.RECORD_STATUS]  = APP_CONST.STATUS_ACTIVE;
-  newRow[FACT_IDX.EVIDENCE]       = decision.evidence || '';
+  newRow[FACT_IDX.RESOLVED_LAT] = resolvedLat !== null ? resolvedLat : 0;
+  newRow[FACT_IDX.RESOLVED_LNG] = resolvedLng !== null ? resolvedLng : 0;
+  newRow[FACT_IDX.CREATED_AT] = now;
+  newRow[FACT_IDX.UPDATED_AT] = now;
+  newRow[FACT_IDX.RECORD_STATUS] = APP_CONST.STATUS_ACTIVE;
+  newRow[FACT_IDX.EVIDENCE] = decision.evidence || '';
   // [ADD v5.5.014] เก็บชื่อจริงที่คนขับ/ผู้ดูแลยืนยัน — จาก Source sheet col 38-39
   newRow[FACT_IDX.DRIVER_VERIFIED_NAME] = srcObj.driverVerifiedName || '';
   newRow[FACT_IDX.DRIVER_VERIFIED_ADDR] = srcObj.driverVerifiedAddr || '';
@@ -275,8 +319,8 @@ function findFactRowByInvoice_(factSheet, invoiceNo) {
   if (!_FACT_INVOICE_RAM_CACHE) {
     _FACT_INVOICE_RAM_CACHE = new Map();
     const invoiceCol = FACT_IDX.INVOICE_NO + 1;
-    const lastRow    = factSheet.getLastRow() - 1;
-    const data       = factSheet.getRange(2, invoiceCol, lastRow, 1).getValues();
+    const lastRow = factSheet.getLastRow() - 1;
+    const data = factSheet.getRange(2, invoiceCol, lastRow, 1).getValues();
     for (let i = 0; i < data.length; i++) {
       const norm = normalizeInvoiceNo(data[i][0]);
       if (norm) _FACT_INVOICE_RAM_CACHE.set(norm, i + 2);
@@ -304,7 +348,7 @@ function getGeoLatLng_(geoId) {
   if (!_GEO_LATLNG_RAM_CACHE) {
     const allGeos = loadAllGeos_();
     _GEO_LATLNG_RAM_CACHE = {};
-    allGeos.forEach(g => {
+    allGeos.forEach((g) => {
       if (g.geoId) _GEO_LATLNG_RAM_CACHE[g.geoId] = { lat: g.lat, lng: g.lng };
     });
   }
@@ -343,14 +387,14 @@ function invalidateGeoLatLngCache_() {
  */
 function formatTimeValue_(timeVal) {
   if (!timeVal) return '';
-  
+
   // 1. ถ้าเป็น Date object ให้ Format เป็นเวลาทันที
   if (timeVal instanceof Date) {
     return Utilities.formatDate(timeVal, Session.getScriptTimeZone(), 'HH:mm:ss');
   }
 
   // 2. ถ้าเป็น String ให้ลองเช็คว่ามีรูปแบบวันที่ติดมาไหม
-  let timeStr = String(timeVal).trim();
+  const timeStr = String(timeVal).trim();
   if (timeStr.includes('1899')) {
     // ถ้าเจอปี 1899 ให้พยายามตัดเอาเฉพาะส่วนเวลา (ปกติจะเป็นส่วนท้าย)
     const match = timeStr.match(/\d{2}:\d{2}:\d{2}/);

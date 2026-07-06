@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.040
+ * VERSION: 6.0.002
  * FILE: 24_PipelineManager.gs
  * LMDS V5.5 — Pipeline Manager (Standalone Module)
  * ===================================================
@@ -84,41 +84,48 @@
 const PIPELINE_CONFIG = Object.freeze({
   // === Quota Limits (Free Gmail tier: 90 min/day total runtime) ===
   //   เหลือ buffer 15 นาที → ใช้จริง 75 นาที/วัน
-  MAX_RUNTIME_MS_PER_DAY:   75 * 60 * 1000,   // 4,500,000 ms = 75 นาที
-  MAX_RUNTIME_MS_PER_RUN:   4 * 60 * 1000,    // 240,000 ms = 4 นาที (buffer ก่อน 6 นาที hard limit)
-  MAX_RUNS_PER_DAY:         15,               // 15 รอบ/วัน (user requirement)
+  MAX_RUNTIME_MS_PER_DAY: 75 * 60 * 1000, // 4,500,000 ms = 75 นาที
+  MAX_RUNTIME_MS_PER_RUN: 4 * 60 * 1000, // 240,000 ms = 4 นาที (buffer ก่อน 6 นาที hard limit)
+  MAX_RUNS_PER_DAY: 15, // 15 รอบ/วัน (user requirement)
 
   // === Circuit Breaker ===
-  MAX_CONSECUTIVE_ERRORS:   3,                // ถ้า error ติดๆ กัน 3 ครั้ง → PAUSE
-  ERROR_COOLDOWN_MS:        60 * 60 * 1000,   // รอ 1 ชม ก่อนลองใหม่หลัง error (ถ้ายังไม่ pause)
+  MAX_CONSECUTIVE_ERRORS: 3, // ถ้า error ติดๆ กัน 3 ครั้ง → PAUSE
+  ERROR_COOLDOWN_MS: 60 * 60 * 1000, // รอ 1 ชม ก่อนลองใหม่หลัง error (ถ้ายังไม่ pause)
 
   // === Trigger Schedule (Time-based) ===
-  BATCH_RUN_INTERVAL_HOURS: 1,                // รันทุก 1 ชม
-  BATCH_RUN_START_HOUR:     8,                // เริ่ม 08:00 น.
-  BATCH_RUN_END_HOUR:       22,               // หยุด 22:00 น. (รวม 15 รอบ: 8,9,...,22)
+  BATCH_RUN_INTERVAL_HOURS: 1, // รันทุก 1 ชม
+  BATCH_RUN_START_HOUR: 8, // เริ่ม 08:00 น.
+  BATCH_RUN_END_HOUR: 22, // หยุด 22:00 น. (รวม 15 รอบ: 8,9,...,22)
 
   // === Behavior ===
-  CLEAN_MATCH_ENGINE_TRIGGERS: true,          // ลบ auto-resume trigger ของ MatchEngine หลังรัน
-  LOG_TO_SYS_LOG:               true,         // เขียน log ไป SYS_LOG (ถ้ามี logInfo)
+  CLEAN_MATCH_ENGINE_TRIGGERS: true, // ลบ auto-resume trigger ของ MatchEngine หลังรัน
+  LOG_TO_SYS_LOG: true // เขียน log ไป SYS_LOG (ถ้ามี logInfo)
+});
+
+// === Notification Config (5.1 Failure Alert) ===
+//   ตั้งค่า Script Properties: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+//   (ใช้ Bot เดียวกับระบบแจ้งเตือน Billing ที่มีอยู่แล้วได้เลย หรือสร้าง chat ใหม่แยก)
+const PIPELINE_ALERT_CONFIG = Object.freeze({
+  Q_REVIEW_BACKLOG_THRESHOLD: 100 // แจ้งเตือนเมื่อ Q_REVIEW pending เกินจำนวนนี้
 });
 
 // Pipeline States
 const PIPELINE_STATES = Object.freeze({
-  IDLE:           'IDLE',            // ยังไม่เริ่ม
-  RUNNING:        'RUNNING',         // กำลังรัน
-  PAUSED_QUOTA:   'PAUSED_QUOTA',    // หยุดเพราะ quota เต็ม
-  PAUSED_ERRORS:  'PAUSED_ERRORS',   // หยุดเพราะ error ซ้ำ
-  PAUSED_MANUAL:  'PAUSED_MANUAL',   // หยุดโดย admin
-  COMPLETED:      'COMPLETED',       // เสร็จสมบูรณ์
+  IDLE: 'IDLE', // ยังไม่เริ่ม
+  RUNNING: 'RUNNING', // กำลังรัน
+  PAUSED_QUOTA: 'PAUSED_QUOTA', // หยุดเพราะ quota เต็ม
+  PAUSED_ERRORS: 'PAUSED_ERRORS', // หยุดเพราะ error ซ้ำ
+  PAUSED_MANUAL: 'PAUSED_MANUAL', // หยุดโดย admin
+  COMPLETED: 'COMPLETED' // เสร็จสมบูรณ์
 });
 
 // Script Properties keys (prefix PIPELINE_ เพื่อกันชนกับ module อื่น)
 const PIPELINE_PROPS = Object.freeze({
-  STATE:      'PIPELINE_STATE',
+  STATE: 'PIPELINE_STATE',
   CHECKPOINT: 'PIPELINE_CHECKPOINT',
-  QUOTA:      'PIPELINE_DAILY_QUOTA',
-  CIRCUIT:    'PIPELINE_CIRCUIT_BREAKER',
-  HISTORY:    'PIPELINE_HISTORY',
+  QUOTA: 'PIPELINE_DAILY_QUOTA',
+  CIRCUIT: 'PIPELINE_CIRCUIT_BREAKER',
+  HISTORY: 'PIPELINE_HISTORY'
 });
 
 // ============================================================
@@ -137,16 +144,24 @@ function getPipelineState_() {
     return {
       state: PIPELINE_STATES.IDLE,
       lastUpdated: null,
-      message: '',
+      message: ''
     };
   }
   try {
     return JSON.parse(raw);
   } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset เพื่อให้วินิจฉัย state corruption ได้
+    logPipeline_(
+      'warn',
+      'getPipelineState_: JSON.parse ล้มเหลว — reset to IDLE. raw="' +
+        String(raw).substring(0, 200) +
+        '", error=' +
+        e.message
+    );
     return {
       state: PIPELINE_STATES.IDLE,
       lastUpdated: null,
-      message: 'Invalid state JSON — reset to IDLE',
+      message: 'Invalid state JSON — reset to IDLE'
     };
   }
 }
@@ -162,7 +177,7 @@ function setPipelineState_(state, message) {
   const stateObj = {
     state: state,
     lastUpdated: new Date().toISOString(),
-    message: message || '',
+    message: message || ''
   };
   props.setProperty(PIPELINE_PROPS.STATE, JSON.stringify(stateObj));
   logPipeline_('info', 'State changed: ' + state + (message ? ' — ' + message : ''));
@@ -182,18 +197,26 @@ function getPipelineCheckpoint_() {
       runCount: 0,
       totalRuntimeMs: 0,
       lastBatchRows: 0,
-      startedAt: null,
+      startedAt: null
     };
   }
   try {
     return JSON.parse(raw);
   } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset checkpoint
+    logPipeline_(
+      'warn',
+      'getPipelineCheckpoint_: JSON.parse ล้มเหลว — reset to defaults. raw="' +
+        String(raw).substring(0, 200) +
+        '", error=' +
+        e.message
+    );
     return {
       lastRunAt: null,
       runCount: 0,
       totalRuntimeMs: 0,
       lastBatchRows: 0,
-      startedAt: null,
+      startedAt: null
     };
   }
 }
@@ -236,7 +259,7 @@ function getDailyQuota_() {
       date: today,
       runtimeMs: 0,
       runCount: 0,
-      lastResetAt: new Date().toISOString(),
+      lastResetAt: new Date().toISOString()
     };
   }
 
@@ -248,16 +271,21 @@ function getDailyQuota_() {
         date: today,
         runtimeMs: 0,
         runCount: 0,
-        lastResetAt: new Date().toISOString(),
+        lastResetAt: new Date().toISOString()
       };
     }
     return quota;
   } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset quota
+    logPipeline_(
+      'warn',
+      'getDailyQuota_: JSON.parse ล้มเหลว — reset to 0. raw="' + String(raw).substring(0, 200) + '", error=' + e.message
+    );
     return {
       date: today,
       runtimeMs: 0,
       runCount: 0,
-      lastResetAt: new Date().toISOString(),
+      lastResetAt: new Date().toISOString()
     };
   }
 }
@@ -300,7 +328,7 @@ function isQuotaAvailable_() {
       available: false,
       reason: 'RUNTIME_LIMIT',
       remainingMs: remainingMs,
-      remainingRuns: remainingRuns,
+      remainingRuns: remainingRuns
     };
   }
 
@@ -310,7 +338,7 @@ function isQuotaAvailable_() {
       available: false,
       reason: 'RUN_COUNT_LIMIT',
       remainingMs: remainingMs,
-      remainingRuns: 0,
+      remainingRuns: 0
     };
   }
 
@@ -318,7 +346,7 @@ function isQuotaAvailable_() {
     available: true,
     reason: 'OK',
     remainingMs: remainingMs,
-    remainingRuns: remainingRuns,
+    remainingRuns: remainingRuns
   };
 }
 
@@ -339,17 +367,25 @@ function getCircuitBreaker_() {
       consecutiveErrors: 0,
       lastError: '',
       lastErrorAt: null,
-      pausedAt: null,
+      pausedAt: null
     };
   }
   try {
     return JSON.parse(raw);
   } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset circuit breaker
+    logPipeline_(
+      'warn',
+      'getCircuitBreaker_: JSON.parse ล้มเหลว — reset to 0 errors. raw="' +
+        String(raw).substring(0, 200) +
+        '", error=' +
+        e.message
+    );
     return {
       consecutiveErrors: 0,
       lastError: '',
       lastErrorAt: null,
-      pausedAt: null,
+      pausedAt: null
     };
   }
 }
@@ -391,14 +427,18 @@ function recordBatchError_(errorMsg) {
   if (cb.consecutiveErrors >= PIPELINE_CONFIG.MAX_CONSECUTIVE_ERRORS) {
     cb.pausedAt = new Date().toISOString();
     setCircuitBreaker_(cb);
-    logPipeline_('error', 'Circuit Breaker TRIGGERED — ' + cb.consecutiveErrors +
-      ' consecutive errors. Last: ' + errorMsg);
+    logPipeline_(
+      'error',
+      'Circuit Breaker TRIGGERED — ' + cb.consecutiveErrors + ' consecutive errors. Last: ' + errorMsg
+    );
     return true; // ถูก trigger — ควรหยุด
   }
 
   setCircuitBreaker_(cb);
-  logPipeline_('warn', 'Batch error ' + cb.consecutiveErrors + '/' +
-    PIPELINE_CONFIG.MAX_CONSECUTIVE_ERRORS + ': ' + errorMsg);
+  logPipeline_(
+    'warn',
+    'Batch error ' + cb.consecutiveErrors + '/' + PIPELINE_CONFIG.MAX_CONSECUTIVE_ERRORS + ': ' + errorMsg
+  );
   return false;
 }
 
@@ -421,7 +461,7 @@ function resetCircuitBreaker_() {
     consecutiveErrors: 0,
     lastError: '',
     lastErrorAt: null,
-    pausedAt: null,
+    pausedAt: null
   });
   logPipeline_('info', 'Circuit Breaker reset by admin');
 }
@@ -449,21 +489,22 @@ function installPipelineTriggers() {
     .timeBased()
     .everyHours(PIPELINE_CONFIG.BATCH_RUN_INTERVAL_HOURS)
     .atHour(PIPELINE_CONFIG.BATCH_RUN_START_HOUR)
-    .nearMinute(15)  // 08:15, 09:15, 10:15, ... (avoid 00:00 congestion)
+    .nearMinute(15) // 08:15, 09:15, 10:15, ... (avoid 00:00 congestion)
     .create();
 
   // สร้าง trigger รีเซ็ต quota รายวัน — 00:05 น. ทุกวัน
-  ScriptApp.newTrigger('resetDailyQuotaJob')
-    .timeBased()
-    .atHour(0)
-    .nearMinute(5)
-    .everyDays(1)
-    .create();
+  ScriptApp.newTrigger('resetDailyQuotaJob').timeBased().atHour(0).nearMinute(5).everyDays(1).create();
 
-  logPipeline_('info', 'Pipeline triggers installed — every ' +
-    PIPELINE_CONFIG.BATCH_RUN_INTERVAL_HOURS + 'h, ' +
-    PIPELINE_CONFIG.BATCH_RUN_START_HOUR + ':00-' +
-    PIPELINE_CONFIG.BATCH_RUN_END_HOUR + ':00');
+  logPipeline_(
+    'info',
+    'Pipeline triggers installed — every ' +
+      PIPELINE_CONFIG.BATCH_RUN_INTERVAL_HOURS +
+      'h, ' +
+      PIPELINE_CONFIG.BATCH_RUN_START_HOUR +
+      ':00-' +
+      PIPELINE_CONFIG.BATCH_RUN_END_HOUR +
+      ':00'
+  );
 
   return { installed: true, count: 2 };
 }
@@ -479,7 +520,7 @@ function removeAllPipelineTriggers_() {
   let deleted = 0;
   const pipelineHandlers = ['runPipelineBatch', 'resetDailyQuotaJob'];
 
-  triggers.forEach(function(t) {
+  triggers.forEach(function (t) {
     if (pipelineHandlers.indexOf(t.getHandlerFunction()) !== -1) {
       ScriptApp.deleteTrigger(t);
       deleted++;
@@ -506,7 +547,7 @@ function removeMatchEngineAutoResumeTriggers_() {
   // MatchEngine ใช้ handler ชื่อ 'runMatchEngine' สำหรับ auto-resume
   const matchEngineHandlers = ['runMatchEngine'];
 
-  triggers.forEach(function(t) {
+  triggers.forEach(function (t) {
     if (matchEngineHandlers.indexOf(t.getHandlerFunction()) !== -1) {
       ScriptApp.deleteTrigger(t);
       deleted++;
@@ -532,7 +573,7 @@ function getPipelineTriggerCount_() {
   let pipelineCount = 0;
   let matchEngineCount = 0;
 
-  triggers.forEach(function(t) {
+  triggers.forEach(function (t) {
     const handler = t.getHandlerFunction();
     if (pipelineHandlers.indexOf(handler) !== -1) {
       pipelineCount++;
@@ -544,7 +585,7 @@ function getPipelineTriggerCount_() {
   return {
     pipelineTriggers: pipelineCount,
     matchEngineTriggers: matchEngineCount,
-    total: triggers.length,
+    total: triggers.length
   };
 }
 
@@ -568,6 +609,28 @@ function getPipelineTriggerCount_() {
  */
 function runPipelineBatch() {
   const batchStart = new Date();
+
+  // [FIX BUG-PM-005 V5.5.041] Enforce BATCH_RUN_END_HOUR at runtime
+  //   สาเหตุ: GAS .everyHours(1).atHour(8) จะ trigger ทุกชม ไม่หยุดที่ 22:00
+  //   → ถ้า quota ถูกรีเซ็ตที่ 00:05 แล้ว trigger 01:15, 02:15, ... จะรันต่อ
+  //   แม้ quota cap (15 runs/day) จะช่วยกัน cross-day run แต่ก็ยังมี window
+  //   23:15 ที่รันได้ (หลัง 22:00) ก่อน reset 00:05
+  //   ป้องกันโดยตรวจชั่วโมงปัจจุบันที่ runtime — ถ้านอกช่วง 08:00-22:59 ให้ SKIP
+  const currentHour = batchStart.getHours();
+  if (currentHour < PIPELINE_CONFIG.BATCH_RUN_START_HOUR || currentHour > PIPELINE_CONFIG.BATCH_RUN_END_HOUR) {
+    logPipeline_(
+      'info',
+      'Outside business hours (' +
+        currentHour +
+        ':00) — skip (window: ' +
+        PIPELINE_CONFIG.BATCH_RUN_START_HOUR +
+        ':00-' +
+        PIPELINE_CONFIG.BATCH_RUN_END_HOUR +
+        ':59)'
+    );
+    return { action: 'SKIP', reason: 'OUTSIDE_BUSINESS_HOURS' };
+  }
+
   logPipeline_('info', '=== Pipeline Batch START ===');
 
   // ─── Step 1: ตรวจ state ───
@@ -600,8 +663,16 @@ function runPipelineBatch() {
   const quotaCheck = isQuotaAvailable_();
   if (quotaCheck.available === false) {
     setPipelineState_(PIPELINE_STATES.PAUSED_QUOTA, quotaCheck.reason);
-    logPipeline_('warn', 'Quota limit reached — pausing (reason: ' + quotaCheck.reason +
-      ', remaining: ' + quotaCheck.remainingMs + 'ms, ' + quotaCheck.remainingRuns + ' runs)');
+    logPipeline_(
+      'warn',
+      'Quota limit reached — pausing (reason: ' +
+        quotaCheck.reason +
+        ', remaining: ' +
+        quotaCheck.remainingMs +
+        'ms, ' +
+        quotaCheck.remainingRuns +
+        ' runs)'
+    );
     return { action: 'PAUSE', reason: 'QUOTA_' + quotaCheck.reason };
   }
 
@@ -609,6 +680,13 @@ function runPipelineBatch() {
   if (isCircuitBreakerTripped_()) {
     setPipelineState_(PIPELINE_STATES.PAUSED_ERRORS, 'Circuit breaker tripped');
     logPipeline_('error', 'Circuit breaker tripped — pausing');
+    // [NEW v5.5.047 Failure Alert 5.1] แจ้งเตือนเมื่อ circuit breaker ตัด
+    sendPipelineAlert_(
+      'Circuit Breaker ตัดการทำงาน — error ติดกันเกิน ' +
+        PIPELINE_CONFIG.MAX_CONSECUTIVE_ERRORS +
+        ' ครั้ง\nต้องรีเซ็ตด้วยเมนู resetCircuitBreakerMenu() หรือ resumePipeline()',
+      'ERROR'
+    );
     return { action: 'PAUSE', reason: 'CIRCUIT_BREAKER' };
   }
 
@@ -645,6 +723,27 @@ function runPipelineBatch() {
     // ─── Step 7: บันทึก quota + checkpoint ───
     incrementQuotaUsage_(runtimeMs);
 
+    // [NEW v5.5.047 — Failure Alert 5.1] เช็ค Q_REVIEW backlog ทุกรอบ batch
+    //   ถ้า pending เกินเกณฑ์ → ส่ง alert (WARN) ให้ admin เข้าไปตรวจสอบ
+    try {
+      if (typeof getReviewStats === 'function') {
+        const reviewStats = getReviewStats();
+        if (reviewStats.pending > PIPELINE_ALERT_CONFIG.Q_REVIEW_BACKLOG_THRESHOLD) {
+          sendPipelineAlert_(
+            'Q_REVIEW มีรายการค้าง ' +
+              reviewStats.pending +
+              ' แถว (เกินเกณฑ์ ' +
+              PIPELINE_ALERT_CONFIG.Q_REVIEW_BACKLOG_THRESHOLD +
+              ')\nควรเข้าไปตรวจสอบและอนุมัติที่เมนู Q_REVIEW',
+            'WARN'
+          );
+        }
+      }
+    } catch (alertErr) {
+      // [Rule 12] ไม่ให้ alert check ทำ pipeline พัง
+      logError('PipelineManager', 'Q_REVIEW backlog check ล้มเหลว: ' + alertErr.message, alertErr);
+    }
+
     const checkpoint = getPipelineCheckpoint_();
     if (checkpoint.startedAt === null) {
       checkpoint.startedAt = batchStart.toISOString();
@@ -658,17 +757,28 @@ function runPipelineBatch() {
     removeMatchEngineAutoResumeTriggers_();
 
     // ─── Step 9: ตรวจผล ───
-    if (batchError !== null) {
+    // [FIX BUG-PM-001 V5.5.041] เปลี่ยนจาก !== null เป็น truthy check
+    //   สาเหตุ: V5.5.035 ลบ `let batchError = null;` ออกตามคำแนะนำ CodeQL
+    //   js/useless-assignment-to-local ทำให้ batchError เริ่มเป็น undefined
+    //   แต่ check `!== null` ของ undefined คืน true → เรียก recordBatchError_
+    //   ทุกครั้งที่ batch สำเร็จ → TypeError ใน logs + state machine พัง
+    if (batchError) {
       const tripped = recordBatchError_(batchError.message);
       if (tripped) {
         setPipelineState_(PIPELINE_STATES.PAUSED_ERRORS, 'Circuit breaker tripped');
-        logPipeline_('error', '=== Pipeline Batch END (PAUSED_ERRORS) — ' +
-          formatDuration_(runtimeMs) + ' ===');
+        logPipeline_('error', '=== Pipeline Batch END (PAUSED_ERRORS) — ' + formatDuration_(runtimeMs) + ' ===');
+        // [NEW v5.5.047 Failure Alert 5.1] แจ้งเตือนเมื่อ batch error จน trip
+        sendPipelineAlert_(
+          'Pipeline หยุดทำงาน (PAUSED_ERRORS) หลัง batch error:\n' +
+            batchError.message +
+            '\nRuntime: ' +
+            formatDuration_(runtimeMs),
+          'ERROR'
+        );
         return { action: 'PAUSE', reason: 'CIRCUIT_BREAKER', error: batchError.message };
       }
       setPipelineState_(PIPELINE_STATES.RUNNING, 'Batch error but continuing');
-      logPipeline_('warn', '=== Pipeline Batch END (ERROR but continuing) — ' +
-        formatDuration_(runtimeMs) + ' ===');
+      logPipeline_('warn', '=== Pipeline Batch END (ERROR but continuing) — ' + formatDuration_(runtimeMs) + ' ===');
       return { action: 'CONTINUE', reason: 'ERROR_RECOVERED', error: batchError.message };
     }
 
@@ -680,16 +790,13 @@ function runPipelineBatch() {
 
     if (hasMoreWork === false) {
       completePipeline_();
-      logPipeline_('info', '=== Pipeline Batch END (COMPLETED) — ' +
-        formatDuration_(runtimeMs) + ' ===');
+      logPipeline_('info', '=== Pipeline Batch END (COMPLETED) — ' + formatDuration_(runtimeMs) + ' ===');
       return { action: 'COMPLETE', reason: 'NO_MORE_WORK' };
     }
 
     setPipelineState_(PIPELINE_STATES.RUNNING, 'Batch completed, more work remaining');
-    logPipeline_('info', '=== Pipeline Batch END (CONTINUE) — ' +
-      formatDuration_(runtimeMs) + ' ===');
+    logPipeline_('info', '=== Pipeline Batch END (CONTINUE) — ' + formatDuration_(runtimeMs) + ' ===');
     return { action: 'CONTINUE', reason: 'MORE_WORK' };
-
   } finally {
     lock.releaseLock();
   }
@@ -707,9 +814,7 @@ function checkHasMoreWork_() {
     if (ss === null) return false;
 
     // ใช้ SHEET constant จาก 01_Config ถ้ามี — ไม่งั้น hardcode
-    const sourceSheetName = (typeof SHEET !== 'undefined' && SHEET.SOURCE)
-      ? SHEET.SOURCE
-      : 'SCGนครหลวงJWDภูมิภาค';
+    const sourceSheetName = typeof SHEET !== 'undefined' && SHEET.SOURCE ? SHEET.SOURCE : 'SCGนครหลวงJWDภูมิภาค';
 
     const sheet = ss.getSheetByName(sourceSheetName);
     if (sheet === null) {
@@ -722,9 +827,8 @@ function checkHasMoreWork_() {
 
     // [FIX Static Audit Issue 3] ใช้ SRC_IDX.SYNC_STATUS แทน hardcoded 37
     //   กรณี standalone (ไม่มี SRC_IDX) ใช้ fallback 37 (1-based, index 36)
-    const syncStatusCol = (typeof SRC_IDX !== 'undefined' && typeof SRC_IDX.SYNC_STATUS === 'number')
-      ? SRC_IDX.SYNC_STATUS + 1
-      : 37;
+    const syncStatusCol =
+      typeof SRC_IDX !== 'undefined' && typeof SRC_IDX.SYNC_STATUS === 'number' ? SRC_IDX.SYNC_STATUS + 1 : 37;
     const data = sheet.getRange(2, syncStatusCol, lastRow - 1, 1).getValues();
 
     // นับแถวที่ SYNC_STATUS != SUCCESS
@@ -738,7 +842,6 @@ function checkHasMoreWork_() {
 
     logPipeline_('info', 'checkHasMoreWork: ' + pendingCount + ' pending rows');
     return pendingCount > 0;
-
   } catch (e) {
     logPipeline_('warn', 'checkHasMoreWork_ error: ' + e.message + ' — assume yes');
     return true; // ถ้าตรวจไม่ได้ → assume ยังมีงาน (ปลอดภัยกว่า)
@@ -774,7 +877,7 @@ function resetDailyQuotaJob() {
     date: today,
     runtimeMs: 0,
     runCount: 0,
-    lastResetAt: new Date().toISOString(),
+    lastResetAt: new Date().toISOString()
   });
 
   // ถ้า pipeline อยู่ในสถานะ PAUSED_QUOTA → เปลี่ยนเป็น IDLE
@@ -814,7 +917,7 @@ function startPipeline() {
     date: today,
     runtimeMs: 0,
     runCount: 0,
-    lastResetAt: new Date().toISOString(),
+    lastResetAt: new Date().toISOString()
   });
 
   // ติดตั้ง triggers ถ้ายังไม่มี
@@ -832,10 +935,14 @@ function startPipeline() {
   return {
     action: 'STARTED',
     result: result,
-    message: 'Pipeline started — will run every ' +
-      PIPELINE_CONFIG.BATCH_RUN_INTERVAL_HOURS + 'h, ' +
-      PIPELINE_CONFIG.BATCH_RUN_START_HOUR + ':00-' +
-      PIPELINE_CONFIG.BATCH_RUN_END_HOUR + ':00',
+    message:
+      'Pipeline started — will run every ' +
+      PIPELINE_CONFIG.BATCH_RUN_INTERVAL_HOURS +
+      'h, ' +
+      PIPELINE_CONFIG.BATCH_RUN_START_HOUR +
+      ':00-' +
+      PIPELINE_CONFIG.BATCH_RUN_END_HOUR +
+      ':00'
   };
 }
 
@@ -850,7 +957,7 @@ function pausePipeline() {
   removeMatchEngineAutoResumeTriggers_();
   return {
     action: 'PAUSED',
-    message: 'Pipeline paused — current batch will finish, no new batches will start',
+    message: 'Pipeline paused — current batch will finish, no new batches will start'
   };
 }
 
@@ -876,7 +983,7 @@ function resumePipeline() {
   return {
     action: 'RESUMED',
     result: result,
-    message: 'Pipeline resumed',
+    message: 'Pipeline resumed'
   };
 }
 
@@ -899,7 +1006,7 @@ function resetPipeline() {
 
   return {
     action: 'RESET',
-    message: 'Pipeline reset complete — call startPipeline() to begin fresh',
+    message: 'Pipeline reset complete — call startPipeline() to begin fresh'
   };
 }
 
@@ -923,7 +1030,7 @@ function showPipelineStatus() {
       totalRuntimeMs: checkpoint.totalRuntimeMs || 0,
       totalRuntimeFormatted: formatDuration_(checkpoint.totalRuntimeMs || 0),
       startedAt: checkpoint.startedAt,
-      lastRunAt: checkpoint.lastRunAt,
+      lastRunAt: checkpoint.lastRunAt
     },
     quota: {
       date: quota.date,
@@ -933,41 +1040,63 @@ function showPipelineStatus() {
       remainingMs: PIPELINE_CONFIG.MAX_RUNTIME_MS_PER_DAY - (quota.runtimeMs || 0),
       remainingRuns: PIPELINE_CONFIG.MAX_RUNS_PER_DAY - (quota.runCount || 0),
       limitMs: PIPELINE_CONFIG.MAX_RUNTIME_MS_PER_DAY,
-      limitRuns: PIPELINE_CONFIG.MAX_RUNS_PER_DAY,
+      limitRuns: PIPELINE_CONFIG.MAX_RUNS_PER_DAY
     },
     circuitBreaker: {
       consecutiveErrors: cb.consecutiveErrors || 0,
       lastError: cb.lastError || '',
       lastErrorAt: cb.lastErrorAt,
       pausedAt: cb.pausedAt,
-      isTripped: cb.pausedAt !== null && cb.pausedAt !== undefined,
+      isTripped: cb.pausedAt !== null && cb.pausedAt !== undefined
     },
     triggers: triggers,
     config: {
       maxRuntimePerDay: formatDuration_(PIPELINE_CONFIG.MAX_RUNTIME_MS_PER_DAY),
       maxRuntimePerRun: formatDuration_(PIPELINE_CONFIG.MAX_RUNTIME_MS_PER_RUN),
       maxRunsPerDay: PIPELINE_CONFIG.MAX_RUNS_PER_DAY,
-      scheduleHours: PIPELINE_CONFIG.BATCH_RUN_START_HOUR + ':00-' +
-        PIPELINE_CONFIG.BATCH_RUN_END_HOUR + ':00 every ' +
-        PIPELINE_CONFIG.BATCH_RUN_INTERVAL_HOURS + 'h',
-      maxConsecutiveErrors: PIPELINE_CONFIG.MAX_CONSECUTIVE_ERRORS,
-    },
+      scheduleHours:
+        PIPELINE_CONFIG.BATCH_RUN_START_HOUR +
+        ':00-' +
+        PIPELINE_CONFIG.BATCH_RUN_END_HOUR +
+        ':00 every ' +
+        PIPELINE_CONFIG.BATCH_RUN_INTERVAL_HOURS +
+        'h',
+      maxConsecutiveErrors: PIPELINE_CONFIG.MAX_CONSECUTIVE_ERRORS
+    }
   };
 
   // Log สรุปสถานะ
   logPipeline_('info', '=== PIPELINE STATUS ===');
   logPipeline_('info', 'State: ' + state.state + (state.message ? ' — ' + state.message : ''));
   logPipeline_('info', 'Runs today: ' + quota.runCount + '/' + PIPELINE_CONFIG.MAX_RUNS_PER_DAY);
-  logPipeline_('info', 'Runtime today: ' + formatDuration_(quota.runtimeMs || 0) +
-    ' / ' + formatDuration_(PIPELINE_CONFIG.MAX_RUNTIME_MS_PER_DAY));
-  logPipeline_('info', 'Total runs: ' + checkpoint.runCount +
-    ' (total time: ' + formatDuration_(checkpoint.totalRuntimeMs || 0) + ')');
-  logPipeline_('info', 'Circuit breaker errors: ' + cb.consecutiveErrors +
-    '/' + PIPELINE_CONFIG.MAX_CONSECUTIVE_ERRORS +
-    (cb.pausedAt ? ' [TRIPPED]' : ''));
-  logPipeline_('info', 'Triggers: pipeline=' + triggers.pipelineTriggers +
-    ', matchEngine=' + triggers.matchEngineTriggers +
-    ', total=' + triggers.total);
+  logPipeline_(
+    'info',
+    'Runtime today: ' +
+      formatDuration_(quota.runtimeMs || 0) +
+      ' / ' +
+      formatDuration_(PIPELINE_CONFIG.MAX_RUNTIME_MS_PER_DAY)
+  );
+  logPipeline_(
+    'info',
+    'Total runs: ' + checkpoint.runCount + ' (total time: ' + formatDuration_(checkpoint.totalRuntimeMs || 0) + ')'
+  );
+  logPipeline_(
+    'info',
+    'Circuit breaker errors: ' +
+      cb.consecutiveErrors +
+      '/' +
+      PIPELINE_CONFIG.MAX_CONSECUTIVE_ERRORS +
+      (cb.pausedAt ? ' [TRIPPED]' : '')
+  );
+  logPipeline_(
+    'info',
+    'Triggers: pipeline=' +
+      triggers.pipelineTriggers +
+      ', matchEngine=' +
+      triggers.matchEngineTriggers +
+      ', total=' +
+      triggers.total
+  );
 
   return status;
 }
@@ -988,7 +1117,7 @@ function resetCircuitBreakerMenu() {
 
   return {
     action: 'CIRCUIT_BREAKER_RESET',
-    message: 'Circuit breaker reset — call resumePipeline() to continue',
+    message: 'Circuit breaker reset — call resumePipeline() to continue'
   };
 }
 
@@ -1003,7 +1132,7 @@ function uninstallPipelineTriggers() {
   return {
     action: 'UNINSTALLED',
     deleted: deleted,
-    message: 'Removed ' + deleted + ' pipeline trigger(s)',
+    message: 'Removed ' + deleted + ' pipeline trigger(s)'
   };
 }
 
@@ -1023,6 +1152,14 @@ function savePipelineHistory_(checkpoint) {
   try {
     if (raw) history = JSON.parse(raw) || [];
   } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset history
+    logPipeline_(
+      'warn',
+      'savePipelineHistory_: JSON.parse ล้มเหลว — reset to []. raw="' +
+        String(raw).substring(0, 200) +
+        '", error=' +
+        e.message
+    );
     history = [];
   }
 
@@ -1032,7 +1169,7 @@ function savePipelineHistory_(checkpoint) {
     runCount: checkpoint.runCount,
     totalRuntimeMs: checkpoint.totalRuntimeMs,
     startedAt: checkpoint.startedAt,
-    lastRunAt: checkpoint.lastRunAt,
+    lastRunAt: checkpoint.lastRunAt
   });
 
   // เก็บแค่ 7 รายการล่าสุด
@@ -1054,6 +1191,14 @@ function getPipelineHistory() {
   try {
     return JSON.parse(raw) || [];
   } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน return empty
+    logPipeline_(
+      'warn',
+      'getPipelineHistory: JSON.parse ล้มเหลว — return []. raw="' +
+        String(raw).substring(0, 200) +
+        '", error=' +
+        e.message
+    );
     return [];
   }
 }
@@ -1123,4 +1268,64 @@ function formatDuration_(ms) {
     return minutes + 'm ' + remainingSeconds + 's';
   }
   return seconds + 's';
+}
+
+// ============================================================
+// SECTION 9: [NEW v5.5.047] Failure Alert via Telegram (5.1)
+// ============================================================
+
+/**
+ * sendPipelineAlert_ — [NEW v5.5.047] ส่งแจ้งเตือนผ่าน Telegram Bot
+ *   Fail-safe: ส่งไม่สำเร็จ → log error แต่ไม่ throw (ห้ามให้ alert ทำ pipeline พัง — Rule 12)
+ *
+ *   Setup: ตั้งค่า Script Properties (Project Settings → Script Properties):
+ *     - TELEGRAM_BOT_TOKEN: token จาก @BotFather
+ *     - TELEGRAM_CHAT_ID: chat id ที่จะรับ alert (ใช้ Bot เดียวกับ Billing ได้)
+ *
+ * @param {string} message - ข้อความ alert (ไม่ต้องมี icon — ใส่ให้อัตโนมัติ)
+ * @param {'INFO'|'WARN'|'ERROR'} [severity='WARN'] - ระดับความรุนแรง (กำหนด icon)
+ * @private
+ */
+function sendPipelineAlert_(message, severity) {
+  const level = severity || 'WARN';
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const token = props.getProperty('TELEGRAM_BOT_TOKEN');
+    const chatId = props.getProperty('TELEGRAM_CHAT_ID');
+    if (!token || !chatId) {
+      // ไม่ตั้งค่า → ข้ามแบบเงียบ (ไม่ใช่ error — เป็น optional feature)
+      logDebug(
+        'PipelineManager',
+        'sendPipelineAlert_: ยังไม่ตั้งค่า TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID — ข้ามการแจ้งเตือน'
+      );
+      return;
+    }
+    let icon;
+    if (level === 'ERROR') {
+      icon = '🔴';
+    } else if (level === 'WARN') {
+      icon = '🟡';
+    } else {
+      icon = 'ℹ️';
+    }
+    const text = icon + ' *LMDS Pipeline Alert*\n' + message;
+
+    const response = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+      method: 'post',
+      contentType: 'application/json',
+      muteHttpExceptions: true,
+      payload: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'Markdown' })
+    });
+
+    const respCode = response.getResponseCode();
+    if (respCode !== 200) {
+      logWarn(
+        'PipelineManager',
+        'sendPipelineAlert_: Telegram API ตอบ ' + respCode + ' — ' + response.getContentText().substring(0, 200)
+      );
+    }
+  } catch (err) {
+    // [Rule 12] ห้ามให้ alert ทำ pipeline พัง — log แล้ว continue
+    logError('PipelineManager', 'sendPipelineAlert_ ล้มเหลว: ' + err.message, err);
+  }
 }

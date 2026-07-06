@@ -1,141 +1,169 @@
 <script>
-/**
- * views/FactDelivery.html — FACT_DELIVERY view (Phase 2.3)
- * ===================================================
- * ตารางรายการจัดส่งทั้งหมดใน FACT_DELIVERY sheet
- *   - Server pagination (50 rows/page)
- *   - Filter tabs: All / FULL_MATCH / GEO_ANCHOR / FUZZY_MATCH / CREATE_NEW / NEEDS_REVIEW / ERROR
- *   - แสดงข้อมูลสำคัญ: วันที่, Invoice, คนขับ, ชื่อปลายทาง, พิกัด, Match Status, Score
- *   - คลิก row → expand detail panel (เหมือน Q_REVIEW)
- *
- * Backend functions (ใน 22_WebApp.gs):
- *   - getFactDeliveryPage(offset, limit, filter) → { rows, total, statusCounts, ... }
- * ===================================================
- */
-globalThis.FactDeliveryView = (function () {
-  'use strict';
+  /**
+   * views/FactDelivery.html — FACT_DELIVERY view (Phase 2.3)
+   * ===================================================
+   * ตารางรายการจัดส่งทั้งหมดใน FACT_DELIVERY sheet
+   *   - Server pagination (50 rows/page)
+   *   - Filter tabs: All / FULL_MATCH / GEO_ANCHOR / FUZZY_MATCH / CREATE_NEW / NEEDS_REVIEW / ERROR
+   *   - แสดงข้อมูลสำคัญ: วันที่, Invoice, คนขับ, ชื่อปลายทาง, พิกัด, Match Status, Score
+   *   - คลิก row → expand detail panel (เหมือน Q_REVIEW)
+   *
+   * Backend functions (ใน 22_WebApp.gs):
+   *   - getFactDeliveryPage(offset, limit, filter) → { rows, total, statusCounts, ... }
+   * ===================================================
+   */
+  globalThis.FactDeliveryView = (function () {
+    'use strict';
 
-  // ────────────────────────────────────────────────────────────
-  // State
-  // ────────────────────────────────────────────────────────────
-  const PAGE_SIZE = 50;
-  let currentOffset = 0;
-  let currentStatusFilter = 'all';
-  let isLoading = false;
+    // ────────────────────────────────────────────────────────────
+    // State
+    // ────────────────────────────────────────────────────────────
+    const PAGE_SIZE = 50;
+    let currentOffset = 0;
+    let currentStatusFilter = 'all';
+    let isLoading = false;
 
-  // ────────────────────────────────────────────────────────────
-  // Constants
-  // ────────────────────────────────────────────────────────────
-  const STATUS_TABS = [
-    { key: 'all',           label: 'ทั้งหมด',     color: 'blue' },
-    { key: 'FULL_MATCH',    label: 'FULL_MATCH',    color: 'green' },
-    { key: 'GEO_ANCHOR',    label: 'GEO_ANCHOR',    color: 'blue' },
-    { key: 'FUZZY_MATCH',   label: 'FUZZY_MATCH',   color: 'cyan' },
-    { key: 'CREATE_NEW',    label: 'CREATE_NEW',    color: 'yellow' },
-    { key: 'NEEDS_REVIEW',  label: 'NEEDS_REVIEW',  color: 'orange' },
-    { key: 'ERROR',         label: 'ERROR',         color: 'red' },
-  ];
+    // ────────────────────────────────────────────────────────────
+    // Constants
+    // ────────────────────────────────────────────────────────────
+    const STATUS_TABS = [
+      { key: 'all', label: 'ทั้งหมด', color: 'blue' },
+      { key: 'FULL_MATCH', label: 'FULL_MATCH', color: 'green' },
+      { key: 'GEO_ANCHOR', label: 'GEO_ANCHOR', color: 'blue' },
+      { key: 'FUZZY_MATCH', label: 'FUZZY_MATCH', color: 'cyan' },
+      { key: 'CREATE_NEW', label: 'CREATE_NEW', color: 'yellow' },
+      { key: 'NEEDS_REVIEW', label: 'NEEDS_REVIEW', color: 'orange' },
+      { key: 'ERROR', label: 'ERROR', color: 'red' }
+    ];
 
-  const STATUS_STYLES = {
-    'FULL_MATCH':   { bg: 'bg-green-100',   text: 'text-green-700',   icon: '✓' },
-    'GEO_ANCHOR':   { bg: 'bg-blue-100',    text: 'text-blue-700',    icon: '📍' },
-    'FUZZY_MATCH':  { bg: 'bg-cyan-100',    text: 'text-cyan-700',    icon: '≈' },
-    'CREATE_NEW':   { bg: 'bg-yellow-100',  text: 'text-yellow-700',  icon: '🆕' },
-    'NEEDS_REVIEW': { bg: 'bg-orange-100',  text: 'text-orange-700',  icon: '⚠' },
-    'ERROR':        { bg: 'bg-red-100',     text: 'text-red-700',     icon: '✗' },
-  };
+    const STATUS_STYLES = {
+      FULL_MATCH: { bg: 'bg-green-100', text: 'text-green-700', icon: '✓' },
+      GEO_ANCHOR: { bg: 'bg-blue-100', text: 'text-blue-700', icon: '📍' },
+      FUZZY_MATCH: { bg: 'bg-cyan-100', text: 'text-cyan-700', icon: '≈' },
+      CREATE_NEW: { bg: 'bg-yellow-100', text: 'text-yellow-700', icon: '🆕' },
+      NEEDS_REVIEW: { bg: 'bg-orange-100', text: 'text-orange-700', icon: '⚠' },
+      ERROR: { bg: 'bg-red-100', text: 'text-red-700', icon: '✗' }
+    };
 
-  // ────────────────────────────────────────────────────────────
-  // Public: render(container)
-  // ────────────────────────────────────────────────────────────
-  function render(data, container) {
-    if (container === null) return;
+    // ────────────────────────────────────────────────────────────
+    // Public: render(container)
+    // ────────────────────────────────────────────────────────────
+    function render(data, container) {
+      if (container === null) return;
 
-    let html = '';
-    html += buildHeaderHtml_();
-    html += buildFilterTabsHtml_();
-    html += '<div id="factTableContainer">กำลังโหลด...</div>';
-    container.innerHTML = html;
+      let html = '';
+      html += buildHeaderHtml_();
+      html += buildFilterTabsHtml_();
+      html += '<div id="factTableContainer">กำลังโหลด...</div>';
+      container.innerHTML = html;
 
-    bindFilterTabs_(container);
-    loadPage_(0);
-  }
-
-  // ────────────────────────────────────────────────────────────
-  // Builders
-  // ────────────────────────────────────────────────────────────
-  function buildHeaderHtml_() {
-    return '<div class="mb-6">' +
-      '<h2 class="text-2xl font-bold text-gray-900">📦 FACT_DELIVERY</h2>' +
-      '<p class="text-sm text-gray-500 mt-1">รายการจัดส่งทั้งหมดที่ประมวลผลแล้ว — คลิก row เพื่อดูรายละเอียด</p>' +
-    '</div>';
-  }
-
-  function buildFilterTabsHtml_() {
-    let html = '<div class="mb-4 flex flex-wrap gap-2" id="factFilterTabs">';
-    STATUS_TABS.forEach(function(tab) {
-      const isActive = (tab.key === currentStatusFilter);
-      const activeClass = isActive
-        ? 'bg-blue-600 text-white border-blue-600'
-        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50';
-      html += '<button type="button" data-status="' + tab.key + '" ' +
-        'class="filter-tab px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ' + activeClass + '">' +
-        escapeHtml_(tab.label) +
-        ' <span class="ml-1 text-xs opacity-75" data-count="' + tab.key + '">0</span>' +
-      '</button>';
-    });
-    html += '</div>';
-    return html;
-  }
-
-  function buildPaginationHtml_(offset, total, limit) {
-    limit = limit || PAGE_SIZE;
-    const totalPages = Math.ceil(total / limit) || 1;
-    const currentPage = Math.floor(offset / limit) + 1;
-    const startIdx = total === 0 ? 0 : offset + 1;
-    const endIdx = Math.min(offset + limit, total);
-
-    return '<div class="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between text-xs">' +
-      '<div class="text-gray-500">' +
-        'แสดง <span class="font-medium">' + startIdx + '</span>–<span class="font-medium">' + endIdx + '</span> ' +
-        'จาก <span class="font-medium">' + total.toLocaleString() + '</span> รายการ' +
-      '</div>' +
-      '<div class="flex items-center gap-1">' +
-        buildPageButton_(offset - limit, '← ก่อนหน้า', offset <= 0) +
-        '<span class="px-3 py-1 text-gray-600">หน้า ' + currentPage + ' / ' + totalPages + '</span>' +
-        buildPageButton_(offset + limit, 'ถัดไป →', offset + limit >= total) +
-      '</div>' +
-    '</div>';
-  }
-
-  function buildPageButton_(targetOffset, label, disabled) {
-    const stateClass = disabled
-      ? 'text-gray-300 cursor-not-allowed'
-      : 'text-gray-600 hover:bg-white cursor-pointer';
-    return '<button type="button" data-offset="' + targetOffset + '" ' +
-      (disabled ? 'disabled' : '') +
-      ' class="fact-page-btn px-3 py-1.5 rounded border border-gray-200 ' + stateClass + '">' + label + '</button>';
-  }
-
-  function buildTableHtml_(rows) {
-    if (!rows || rows.length === 0) {
-      return buildEmptyState_();
+      bindFilterTabs_(container);
+      loadPage_(0);
     }
 
-    let html = '<div class="bg-white border border-gray-200 rounded-lg overflow-hidden">';
-    html += '<div class="overflow-x-auto">';
-    html += '<table class="w-full text-sm">';
-    html += buildTableHeader_();
-    html += buildTableBody_(rows);
-    html += '</table>';
-    html += '</div>';
-    html += '</div>';
-    return html;
-  }
+    // ────────────────────────────────────────────────────────────
+    // Builders
+    // ────────────────────────────────────────────────────────────
+    function buildHeaderHtml_() {
+      return (
+        '<div class="mb-6">' +
+        '<h2 class="text-2xl font-bold text-gray-900">📦 FACT_DELIVERY</h2>' +
+        '<p class="text-sm text-gray-500 mt-1">รายการจัดส่งทั้งหมดที่ประมวลผลแล้ว — คลิก row เพื่อดูรายละเอียด</p>' +
+        '</div>'
+      );
+    }
 
-  function buildTableHeader_() {
-    return '<thead class="bg-gray-50 border-b border-gray-200">' +
-      '<tr>' +
+    function buildFilterTabsHtml_() {
+      let html = '<div class="mb-4 flex flex-wrap gap-2" id="factFilterTabs">';
+      STATUS_TABS.forEach(function (tab) {
+        const isActive = tab.key === currentStatusFilter;
+        const activeClass = isActive
+          ? 'bg-blue-600 text-white border-blue-600'
+          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50';
+        html +=
+          '<button type="button" data-status="' +
+          tab.key +
+          '" ' +
+          'class="filter-tab px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ' +
+          activeClass +
+          '">' +
+          escapeHtml_(tab.label) +
+          ' <span class="ml-1 text-xs opacity-75" data-count="' +
+          tab.key +
+          '">0</span>' +
+          '</button>';
+      });
+      html += '</div>';
+      return html;
+    }
+
+    function buildPaginationHtml_(offset, total, limit) {
+      limit = limit || PAGE_SIZE;
+      const totalPages = Math.ceil(total / limit) || 1;
+      const currentPage = Math.floor(offset / limit) + 1;
+      const startIdx = total === 0 ? 0 : offset + 1;
+      const endIdx = Math.min(offset + limit, total);
+
+      return (
+        '<div class="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between text-xs">' +
+        '<div class="text-gray-500">' +
+        'แสดง <span class="font-medium">' +
+        startIdx +
+        '</span>–<span class="font-medium">' +
+        endIdx +
+        '</span> ' +
+        'จาก <span class="font-medium">' +
+        total.toLocaleString() +
+        '</span> รายการ' +
+        '</div>' +
+        '<div class="flex items-center gap-1">' +
+        buildPageButton_(offset - limit, '← ก่อนหน้า', offset <= 0) +
+        '<span class="px-3 py-1 text-gray-600">หน้า ' +
+        currentPage +
+        ' / ' +
+        totalPages +
+        '</span>' +
+        buildPageButton_(offset + limit, 'ถัดไป →', offset + limit >= total) +
+        '</div>' +
+        '</div>'
+      );
+    }
+
+    function buildPageButton_(targetOffset, label, disabled) {
+      const stateClass = disabled ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600 hover:bg-white cursor-pointer';
+      return (
+        '<button type="button" data-offset="' +
+        targetOffset +
+        '" ' +
+        (disabled ? 'disabled' : '') +
+        ' class="fact-page-btn px-3 py-1.5 rounded border border-gray-200 ' +
+        stateClass +
+        '">' +
+        label +
+        '</button>'
+      );
+    }
+
+    function buildTableHtml_(rows) {
+      if (!rows || rows.length === 0) {
+        return buildEmptyState_();
+      }
+
+      let html = '<div class="bg-white border border-gray-200 rounded-lg overflow-hidden">';
+      html += '<div class="overflow-x-auto">';
+      html += '<table class="w-full text-sm">';
+      html += buildTableHeader_();
+      html += buildTableBody_(rows);
+      html += '</table>';
+      html += '</div>';
+      html += '</div>';
+      return html;
+    }
+
+    function buildTableHeader_() {
+      return (
+        '<thead class="bg-gray-50 border-b border-gray-200">' +
+        '<tr>' +
         '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">วันที่ส่ง</th>' +
         '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Invoice</th>' +
         '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">คนขับ</th>' +
@@ -144,372 +172,453 @@ globalThis.FactDeliveryView = (function () {
         '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">พิกัด</th>' +
         '<th class="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Status</th>' +
         '<th class="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Score</th>' +
-      '</tr>' +
-    '</thead>';
-  }
+        '</tr>' +
+        '</thead>'
+      );
+    }
 
-  function buildTableBody_(rows) {
-    let html = '<tbody class="divide-y divide-gray-100">';
-    rows.forEach(function(row) {
-      html += buildRowHtml_(row);
-      html += buildDetailRowHtml_(row);
-    });
-    html += '</tbody>';
-    return html;
-  }
+    function buildTableBody_(rows) {
+      let html = '<tbody class="divide-y divide-gray-100">';
+      rows.forEach(function (row) {
+        html += buildRowHtml_(row);
+        html += buildDetailRowHtml_(row);
+      });
+      html += '</tbody>';
+      return html;
+    }
 
-  function buildRowHtml_(row) {
-    const status = STATUS_STYLES[row.matchStatus] || { bg: 'bg-gray-100', text: 'text-gray-600', icon: '?' };
-    const dateStr = formatDateShort_(row.deliveryDate);
-    const timeStr = row.deliveryTime ? ' <span class="text-gray-400 text-xs">' + escapeHtml_(row.deliveryTime) + '</span>' : '';
-    const latLngStr = (row.rawLat && row.rawLng)
-      ? '<span class="font-mono text-xs text-gray-600">' + row.rawLat.toFixed(4) + ', ' + row.rawLng.toFixed(4) + '</span>'
-      : '<span class="text-gray-300">—</span>';
-    const scoreBadge = buildScoreBadge_(row.matchConfidence);
-    const displayName = row.driverVerifiedName || row.shipToName || row.soldToName || '—';
+    function buildRowHtml_(row) {
+      const status = STATUS_STYLES[row.matchStatus] || { bg: 'bg-gray-100', text: 'text-gray-600', icon: '?' };
+      const dateStr = formatDateShort_(row.deliveryDate);
+      const timeStr = row.deliveryTime
+        ? ' <span class="text-gray-400 text-xs">' + escapeHtml_(row.deliveryTime) + '</span>'
+        : '';
+      const latLngStr =
+        row.rawLat && row.rawLng
+          ? '<span class="font-mono text-xs text-gray-600">' +
+            row.rawLat.toFixed(4) +
+            ', ' +
+            row.rawLng.toFixed(4) +
+            '</span>'
+          : '<span class="text-gray-300">—</span>';
+      const scoreBadge = buildScoreBadge_(row.matchConfidence);
+      const displayName = row.driverVerifiedName || row.shipToName || row.soldToName || '—';
 
-    return '<tr class="hover:bg-gray-50 cursor-pointer fact-row" data-tx-id="' + escapeHtml_(row.txId) + '">' +
-      '<td class="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">' + escapeHtml_(dateStr) + timeStr + '</td>' +
-      '<td class="px-3 py-2 font-mono text-xs text-gray-700">' + escapeHtml_(row.invoiceNo || '—') + '</td>' +
-      '<td class="px-3 py-2 text-xs text-gray-700">' +
-        '<div>' + escapeHtml_(row.driverName || '—') + '</div>' +
+      return (
+        '<tr class="hover:bg-gray-50 cursor-pointer fact-row" data-tx-id="' +
+        escapeHtml_(row.txId) +
+        '">' +
+        '<td class="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">' +
+        escapeHtml_(dateStr) +
+        timeStr +
+        '</td>' +
+        '<td class="px-3 py-2 font-mono text-xs text-gray-700">' +
+        escapeHtml_(row.invoiceNo || '—') +
+        '</td>' +
+        '<td class="px-3 py-2 text-xs text-gray-700">' +
+        '<div>' +
+        escapeHtml_(row.driverName || '—') +
+        '</div>' +
         (row.truckLicense ? '<div class="text-gray-400 text-xs">' + escapeHtml_(row.truckLicense) + '</div>' : '') +
-      '</td>' +
-      '<td class="px-3 py-2 text-xs text-gray-900 font-medium">' + escapeHtml_(displayName) + '</td>' +
-      '<td class="px-3 py-2 text-xs text-gray-600 max-w-xs truncate" title="' + escapeHtml_(row.shipToAddress || '') + '">' +
+        '</td>' +
+        '<td class="px-3 py-2 text-xs text-gray-900 font-medium">' +
+        escapeHtml_(displayName) +
+        '</td>' +
+        '<td class="px-3 py-2 text-xs text-gray-600 max-w-xs truncate" title="' +
+        escapeHtml_(row.shipToAddress || '') +
+        '">' +
         escapeHtml_(row.shipToAddress || row.geoResolvedAddr || '—') +
-      '</td>' +
-      '<td class="px-3 py-2">' + latLngStr + '</td>' +
-      '<td class="px-3 py-2 text-center">' +
-        '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ' + status.bg + ' ' + status.text + '" title="' + escapeHtml_(row.matchReason || '') + '">' +
-          status.icon + ' ' + escapeHtml_(row.matchStatus || '—') +
+        '</td>' +
+        '<td class="px-3 py-2">' +
+        latLngStr +
+        '</td>' +
+        '<td class="px-3 py-2 text-center">' +
+        '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ' +
+        status.bg +
+        ' ' +
+        status.text +
+        '" title="' +
+        escapeHtml_(row.matchReason || '') +
+        '">' +
+        status.icon +
+        ' ' +
+        escapeHtml_(row.matchStatus || '—') +
         '</span>' +
-      '</td>' +
-      '<td class="px-3 py-2 text-center">' + scoreBadge + '</td>' +
-    '</tr>';
-  }
-
-  function buildDetailRowHtml_(row) {
-    return '<tr class="detail-row hidden" data-detail-for="' + escapeHtml_(row.txId) + '">' +
-      '<td colspan="8" class="px-3 py-0 bg-gray-50">' +
-        '<div class="detail-container py-4" data-tx-id="' + escapeHtml_(row.txId) + '">' +
-          buildDetailContentHtml_(row) +
-        '</div>' +
-      '</td>' +
-    '</tr>';
-  }
-
-  function buildDetailContentHtml_(row) {
-    // Detail แสดงข้อมูลเต็มของ transaction (ไม่ต้อง fetch เพิ่ม เพราะมีครบแล้ว)
-    let html = '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">';
-
-    // ─── Column 1: ข้อมูลการจัดส่ง ───
-    html += '<div class="bg-white border border-gray-200 rounded-lg p-4">';
-    html += '<h4 class="text-sm font-semibold text-gray-800 mb-3">🚚 ข้อมูลการจัดส่ง</h4>';
-    const deliveryRows = [
-      ['TX ID', row.txId],
-      ['วันที่ส่ง', formatDateFull_(row.deliveryDate) + (row.deliveryTime ? ' ' + row.deliveryTime : '')],
-      ['Invoice', row.invoiceNo],
-      ['Shipment', row.shipmentNo],
-      ['คนขับ', row.driverName + (row.truckLicense ? ' (' + row.truckLicense + ')' : '')],
-      ['บริษัทผู้ขาย (Sold To)', row.soldToName],
-      ['ชื่อปลายทาง (Ship To)', row.shipToName],
-      ['ชื่อที่คนขับยืนยัน', row.driverVerifiedName],
-      ['ที่อยู่ปลายทาง', row.shipToAddress],
-      ['ที่อยู่ที่คนขับยืนยัน', row.driverVerifiedAddr],
-      ['ที่อยู่จาก Geo', row.geoResolvedAddr],
-      ['คลังสินค้า', row.warehouse],
-    ];
-    html += buildDefListHtml_(deliveryRows);
-    html += '</div>';
-
-    // ─── Column 2: ข้อมูลการ Match + Entity IDs ───
-    html += '<div class="bg-white border border-gray-200 rounded-lg p-4">';
-    html += '<h4 class="text-sm font-semibold text-gray-800 mb-3">🎯 ข้อมูลการ Match</h4>';
-    const status = STATUS_STYLES[row.matchStatus] || { bg: 'bg-gray-100', text: 'text-gray-600' };
-    const matchRows = [
-      ['Match Status', '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ' + status.bg + ' ' + status.text + '">' + escapeHtml_(row.matchStatus || '—') + '</span>'],
-      ['Match Score', row.matchConfidence ? row.matchConfidence + '/100' : '—'],
-      ['Match Reason', row.matchReason],
-      ['Match Action', row.matchAction],
-      ['Person ID', row.personId ? '<span class="font-mono">' + escapeHtml_(row.personId) + '</span>' : '—'],
-      ['Place ID', row.placeId ? '<span class="font-mono">' + escapeHtml_(row.placeId) + '</span>' : '—'],
-      ['Destination ID', row.destId ? '<span class="font-mono">' + escapeHtml_(row.destId) + '</span>' : '—'],
-    ];
-    html += buildDefListHtml_(matchRows);
-
-    // พิกัด + ปุ่ม Google Maps
-    if (row.rawLat && row.rawLng) {
-      const mapsUrl = 'https://www.google.com/maps?q=' + row.rawLat + ',' + row.rawLng + '&z=17';
-      html += '<div class="mt-3">' +
-        '<p class="text-xs text-gray-500 mb-1">พิกัดดิบ:</p>' +
-        '<div class="flex items-center gap-2">' +
-          '<span class="font-mono text-xs text-gray-700">' + row.rawLat.toFixed(6) + ', ' + row.rawLng.toFixed(6) + '</span>' +
-          '<a href="' + mapsUrl + '" target="_blank" rel="noopener" ' +
-            'class="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">🗺️ ดูใน Maps</a>' +
-        '</div>' +
-      '</div>';
+        '</td>' +
+        '<td class="px-3 py-2 text-center">' +
+        scoreBadge +
+        '</td>' +
+        '</tr>'
+      );
     }
-    if (row.resolvedLat && row.resolvedLng) {
-      const mapsUrl = 'https://www.google.com/maps?q=' + row.resolvedLat + ',' + row.resolvedLng + '&z=17';
-      html += '<div class="mt-2">' +
-        '<p class="text-xs text-gray-500 mb-1">พิกัดที่ resolve แล้ว:</p>' +
-        '<div class="flex items-center gap-2">' +
-          '<span class="font-mono text-xs text-gray-700">' + row.resolvedLat.toFixed(6) + ', ' + row.resolvedLng.toFixed(6) + '</span>' +
-          '<a href="' + mapsUrl + '" target="_blank" rel="noopener" ' +
-            'class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">🗺️ ดูใน Maps</a>' +
+
+    function buildDetailRowHtml_(row) {
+      return (
+        '<tr class="detail-row hidden" data-detail-for="' +
+        escapeHtml_(row.txId) +
+        '">' +
+        '<td colspan="8" class="px-3 py-0 bg-gray-50">' +
+        '<div class="detail-container py-4" data-tx-id="' +
+        escapeHtml_(row.txId) +
+        '">' +
+        buildDetailContentHtml_(row) +
         '</div>' +
-      '</div>';
+        '</td>' +
+        '</tr>'
+      );
     }
-    html += '</div>';
 
-    html += '</div>'; // close grid
-    return html;
-  }
+    function buildDetailContentHtml_(row) {
+      // Detail แสดงข้อมูลเต็มของ transaction (ไม่ต้อง fetch เพิ่ม เพราะมีครบแล้ว)
+      let html = '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">';
 
-  function buildDefListHtml_(rows) {
-    let html = '<dl class="text-xs space-y-1.5">';
-    rows.forEach(function(r) {
-      if (!r[1] && r[1] !== 0) return;
-      html += '<div class="flex gap-2">' +
-        '<dt class="text-gray-500 w-44 flex-shrink-0">' + escapeHtml_(r[0]) + '</dt>' +
-        '<dd class="text-gray-800 flex-1">' + r[1] + '</dd>' +
-      '</div>';
-    });
-    html += '</dl>';
-    return html;
-  }
+      // ─── Column 1: ข้อมูลการจัดส่ง ───
+      html += '<div class="bg-white border border-gray-200 rounded-lg p-4">';
+      html += '<h4 class="text-sm font-semibold text-gray-800 mb-3">🚚 ข้อมูลการจัดส่ง</h4>';
+      const deliveryRows = [
+        ['TX ID', row.txId],
+        ['วันที่ส่ง', formatDateFull_(row.deliveryDate) + (row.deliveryTime ? ' ' + row.deliveryTime : '')],
+        ['Invoice', row.invoiceNo],
+        ['Shipment', row.shipmentNo],
+        ['คนขับ', row.driverName + (row.truckLicense ? ' (' + row.truckLicense + ')' : '')],
+        ['บริษัทผู้ขาย (Sold To)', row.soldToName],
+        ['ชื่อปลายทาง (Ship To)', row.shipToName],
+        ['ชื่อที่คนขับยืนยัน', row.driverVerifiedName],
+        ['ที่อยู่ปลายทาง', row.shipToAddress],
+        ['ที่อยู่ที่คนขับยืนยัน', row.driverVerifiedAddr],
+        ['ที่อยู่จาก Geo', row.geoResolvedAddr],
+        ['คลังสินค้า', row.warehouse]
+      ];
+      html += buildDefListHtml_(deliveryRows);
+      html += '</div>';
 
-  function buildScoreBadge_(score) {
-    if (!score || score === 0) return '<span class="text-gray-300">—</span>';
-    // [SonarCloud S1854] แยก logic เลือกสีออกเป็น helper function แทน reassign
-    const color = chooseScoreColor_(score);
-    return '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ' + color + '">' + score + '</span>';
-  }
+      // ─── Column 2: ข้อมูลการ Match + Entity IDs ───
+      html += '<div class="bg-white border border-gray-200 rounded-lg p-4">';
+      html += '<h4 class="text-sm font-semibold text-gray-800 mb-3">🎯 ข้อมูลการ Match</h4>';
+      const status = STATUS_STYLES[row.matchStatus] || { bg: 'bg-gray-100', text: 'text-gray-600' };
+      const matchRows = [
+        [
+          'Match Status',
+          '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ' +
+            status.bg +
+            ' ' +
+            status.text +
+            '">' +
+            escapeHtml_(row.matchStatus || '—') +
+            '</span>'
+        ],
+        ['Match Score', row.matchConfidence ? row.matchConfidence + '/100' : '—'],
+        ['Match Reason', row.matchReason],
+        ['Match Action', row.matchAction],
+        ['Person ID', row.personId ? '<span class="font-mono">' + escapeHtml_(row.personId) + '</span>' : '—'],
+        ['Place ID', row.placeId ? '<span class="font-mono">' + escapeHtml_(row.placeId) + '</span>' : '—'],
+        ['Destination ID', row.destId ? '<span class="font-mono">' + escapeHtml_(row.destId) + '</span>' : '—']
+      ];
+      html += buildDefListHtml_(matchRows);
 
-  /**
-   * chooseScoreColor_ — เลือกสี badge ตาม score
-   *   [SonarCloud S1854] แยกออกจาก buildScoreBadge_ เพื่อหลีกเลี่ยง reassignment
-   * @param {number} score
-   * @return {string} CSS class string
-   * @private
-   */
-  function chooseScoreColor_(score) {
-    if (score >= 80) return 'bg-green-100 text-green-700';
-    if (score >= 50) return 'bg-yellow-100 text-yellow-700';
-    return 'bg-red-100 text-red-700';
-  }
+      // พิกัด + ปุ่ม Google Maps
+      if (row.rawLat && row.rawLng) {
+        const mapsUrl = 'https://www.google.com/maps?q=' + row.rawLat + ',' + row.rawLng + '&z=17';
+        html +=
+          '<div class="mt-3">' +
+          '<p class="text-xs text-gray-500 mb-1">พิกัดดิบ:</p>' +
+          '<div class="flex items-center gap-2">' +
+          '<span class="font-mono text-xs text-gray-700">' +
+          row.rawLat.toFixed(6) +
+          ', ' +
+          row.rawLng.toFixed(6) +
+          '</span>' +
+          '<a href="' +
+          mapsUrl +
+          '" target="_blank" rel="noopener" ' +
+          'class="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">🗺️ ดูใน Maps</a>' +
+          '</div>' +
+          '</div>';
+      }
+      if (row.resolvedLat && row.resolvedLng) {
+        const mapsUrl = 'https://www.google.com/maps?q=' + row.resolvedLat + ',' + row.resolvedLng + '&z=17';
+        html +=
+          '<div class="mt-2">' +
+          '<p class="text-xs text-gray-500 mb-1">พิกัดที่ resolve แล้ว:</p>' +
+          '<div class="flex items-center gap-2">' +
+          '<span class="font-mono text-xs text-gray-700">' +
+          row.resolvedLat.toFixed(6) +
+          ', ' +
+          row.resolvedLng.toFixed(6) +
+          '</span>' +
+          '<a href="' +
+          mapsUrl +
+          '" target="_blank" rel="noopener" ' +
+          'class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">🗺️ ดูใน Maps</a>' +
+          '</div>' +
+          '</div>';
+      }
+      html += '</div>';
 
-  function buildEmptyState_() {
-    return '<div class="bg-white border border-gray-200 rounded-lg p-12 text-center">' +
-      '<div class="text-4xl mb-3">📭</div>' +
-      '<h3 class="text-lg font-semibold text-gray-700 mb-1">ไม่มีรายการใน FACT_DELIVERY</h3>' +
-      '<p class="text-sm text-gray-500">ลองเปลี่ยน filter หรือรอให้ Daily Job ประมวลผลรายการใหม่</p>' +
-    '</div>';
-  }
+      html += '</div>'; // close grid
+      return html;
+    }
 
-  function buildLoadingHtml_() {
-    return '<div class="bg-white border border-gray-200 rounded-lg p-8 text-center">' +
-      '<div class="inline-block w-6 h-6 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>' +
-      '<p class="mt-2 text-sm text-gray-500">กำลังโหลด...</p>' +
-    '</div>';
-  }
-
-  function buildErrorHtml_(message) {
-    return '<div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">' +
-      '<div class="text-2xl mb-2">❌</div>' +
-      '<p class="text-sm text-red-700">' + escapeHtml_(message || 'Unknown error') + '</p>' +
-      '<button type="button" onclick="globalThis.FactDeliveryView && globalThis.FactDeliveryView.retry()" class="mt-3 px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700">ลองใหม่</button>' +
-    '</div>';
-  }
-
-  // ────────────────────────────────────────────────────────────
-  // Event binding
-  // ────────────────────────────────────────────────────────────
-  function bindFilterTabs_(container) {
-    const tabs = container.querySelectorAll('.filter-tab');
-    tabs.forEach(function(btn) {
-      btn.addEventListener('click', handleFilterTabClick_.bind(null, btn, tabs));
-    });
-  }
-
-  /**
-   * handleFilterTabClick_ — จัดการ click บน filter tab
-   *   [SonarCloud S2004] แยก handler ออกจาก forEach เพื่อลด nesting level
-   * @param {HTMLElement} btn - ปุ่มที่ถูก click
-   * @param {NodeList} tabs - ทุก tab (สำหรับ toggle active class)
-   * @private
-   */
-  function handleFilterTabClick_(btn, tabs) {
-    const newStatus = btn.dataset.status;
-    if (newStatus === currentStatusFilter || isLoading) return;
-    currentStatusFilter = newStatus;
-    currentOffset = 0;
-    tabs.forEach(function(t) {
-      t.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
-      t.classList.add('bg-white', 'text-gray-700', 'border-gray-300', 'hover:bg-gray-50');
-    });
-    btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
-    btn.classList.remove('bg-white', 'text-gray-700', 'border-gray-300', 'hover:bg-gray-50');
-    loadPage_(0);
-  }
-
-  function bindRowClicksAndPagination_(container) {
-    // Row click → toggle detail
-    container.querySelectorAll('.fact-row').forEach(function(tr) {
-      tr.addEventListener('click', function() {
-        toggleDetailRow_(tr.dataset.txId);
+    function buildDefListHtml_(rows) {
+      let html = '<dl class="text-xs space-y-1.5">';
+      rows.forEach(function (r) {
+        if (!r[1] && r[1] !== 0) return;
+        html +=
+          '<div class="flex gap-2">' +
+          '<dt class="text-gray-500 w-44 flex-shrink-0">' +
+          escapeHtml_(r[0]) +
+          '</dt>' +
+          '<dd class="text-gray-800 flex-1">' +
+          r[1] +
+          '</dd>' +
+          '</div>';
       });
-    });
-
-    // Pagination buttons
-    container.querySelectorAll('.fact-page-btn').forEach(function(btn) {
-      if (btn.disabled) return;
-      btn.addEventListener('click', function() {
-        const offset = Number.parseInt(btn.dataset.offset, 10) || 0;
-        if (offset < 0) return;
-        loadPage_(offset);
-      });
-    });
-  }
-
-  function toggleDetailRow_(txId) {
-    const detailRow = document.querySelector('.detail-row[data-detail-for="' + CSS.escape(txId) + '"]');
-    if (!detailRow) return;
-
-    const isHidden = detailRow.classList.contains('hidden');
-
-    // ปิด detail row อื่นที่เปิดอยู่ (เปิดทีละอัน)
-    document.querySelectorAll('.detail-row:not(.hidden)').forEach(function(r) {
-      if (r !== detailRow) r.classList.add('hidden');
-    });
-
-    if (isHidden) {
-      detailRow.classList.remove('hidden');
-    } else {
-      detailRow.classList.add('hidden');
-    }
-  }
-
-  // ────────────────────────────────────────────────────────────
-  // Actions
-  // ────────────────────────────────────────────────────────────
-  async function loadPage_(offset) {
-    if (isLoading) return;
-    if (!globalThis.api || typeof globalThis.api.getFactDeliveryPage !== 'function') {
-      const c = document.getElementById('factTableContainer');
-      if (c) c.innerHTML = buildErrorHtml_('API ไม่พร้อมใช้งาน');
-      return;
+      html += '</dl>';
+      return html;
     }
 
-    isLoading = true;
-    currentOffset = offset;
-    const container = document.getElementById('factTableContainer');
-    if (container) container.innerHTML = buildLoadingHtml_();
-
-    try {
-      const filter = { status: currentStatusFilter };
-      const data = await globalThis.api.getFactDeliveryPage(offset, PAGE_SIZE, filter);
-      renderData_(data);
-    } catch (err) {
-      console.error('[FactDeliveryView] loadPage_ failed:', err);
-      if (container) container.innerHTML = buildErrorHtml_(err.message);
-      showToast_('โหลดรายการล้มเหลว', err.message, 'error', 5000);
-    } finally {
-      isLoading = false;
+    function buildScoreBadge_(score) {
+      if (!score || score === 0) return '<span class="text-gray-300">—</span>';
+      // [SonarCloud S1854] แยก logic เลือกสีออกเป็น helper function แทน reassign
+      const color = chooseScoreColor_(score);
+      return (
+        '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ' + color + '">' + score + '</span>'
+      );
     }
-  }
 
-  function renderData_(data) {
-    const container = document.getElementById('factTableContainer');
-    if (!container) return;
+    /**
+     * chooseScoreColor_ — เลือกสี badge ตาม score
+     *   [SonarCloud S1854] แยกออกจาก buildScoreBadge_ เพื่อหลีกเลี่ยง reassignment
+     * @param {number} score
+     * @return {string} CSS class string
+     * @private
+     */
+    function chooseScoreColor_(score) {
+      if (score >= 80) return 'bg-green-100 text-green-700';
+      if (score >= 50) return 'bg-yellow-100 text-yellow-700';
+      return 'bg-red-100 text-red-700';
+    }
 
-    // Update filter tab counts
-    if (data.statusCounts) {
-      // "all" = sum ของทุก status
-      let total = 0;
-      Object.keys(data.statusCounts).forEach(function(k) { total += data.statusCounts[k]; });
-      const allEl = document.querySelector('[data-count="all"]');
-      if (allEl) allEl.textContent = total;
+    function buildEmptyState_() {
+      return (
+        '<div class="bg-white border border-gray-200 rounded-lg p-12 text-center">' +
+        '<div class="text-4xl mb-3">📭</div>' +
+        '<h3 class="text-lg font-semibold text-gray-700 mb-1">ไม่มีรายการใน FACT_DELIVERY</h3>' +
+        '<p class="text-sm text-gray-500">ลองเปลี่ยน filter หรือรอให้ Daily Job ประมวลผลรายการใหม่</p>' +
+        '</div>'
+      );
+    }
 
-      Object.keys(data.statusCounts).forEach(function(key) {
-        const el = document.querySelector('[data-count="' + key + '"]');
-        if (el) el.textContent = data.statusCounts[key];
+    function buildLoadingHtml_() {
+      return (
+        '<div class="bg-white border border-gray-200 rounded-lg p-8 text-center">' +
+        '<div class="inline-block w-6 h-6 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>' +
+        '<p class="mt-2 text-sm text-gray-500">กำลังโหลด...</p>' +
+        '</div>'
+      );
+    }
+
+    function buildErrorHtml_(message) {
+      return (
+        '<div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">' +
+        '<div class="text-2xl mb-2">❌</div>' +
+        '<p class="text-sm text-red-700">' +
+        escapeHtml_(message || 'Unknown error') +
+        '</p>' +
+        '<button type="button" onclick="globalThis.FactDeliveryView && globalThis.FactDeliveryView.retry()" class="mt-3 px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700">ลองใหม่</button>' +
+        '</div>'
+      );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Event binding
+    // ────────────────────────────────────────────────────────────
+    function bindFilterTabs_(container) {
+      const tabs = container.querySelectorAll('.filter-tab');
+      tabs.forEach(function (btn) {
+        btn.addEventListener('click', handleFilterTabClick_.bind(null, btn, tabs));
       });
     }
 
-    container.innerHTML = buildTableHtml_(data.rows);
+    /**
+     * handleFilterTabClick_ — จัดการ click บน filter tab
+     *   [SonarCloud S2004] แยก handler ออกจาก forEach เพื่อลด nesting level
+     * @param {HTMLElement} btn - ปุ่มที่ถูก click
+     * @param {NodeList} tabs - ทุก tab (สำหรับ toggle active class)
+     * @private
+     */
+    function handleFilterTabClick_(btn, tabs) {
+      const newStatus = btn.dataset.status;
+      if (newStatus === currentStatusFilter || isLoading) return;
+      currentStatusFilter = newStatus;
+      currentOffset = 0;
+      tabs.forEach(function (t) {
+        t.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
+        t.classList.add('bg-white', 'text-gray-700', 'border-gray-300', 'hover:bg-gray-50');
+      });
+      btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+      btn.classList.remove('bg-white', 'text-gray-700', 'border-gray-300', 'hover:bg-gray-50');
+      loadPage_(0);
+    }
 
-    // Add pagination below table
-    if (data.rows && data.rows.length > 0) {
-      const wrapper = document.createElement('div');
-      wrapper.innerHTML = buildPaginationHtml_(data.offset, data.total, data.limit);
-      const newPagination = wrapper.firstElementChild;
-      if (newPagination) {
-        container.appendChild(newPagination);
+    function bindRowClicksAndPagination_(container) {
+      // Row click → toggle detail
+      container.querySelectorAll('.fact-row').forEach(function (tr) {
+        tr.addEventListener('click', function () {
+          toggleDetailRow_(tr.dataset.txId);
+        });
+      });
+
+      // Pagination buttons
+      container.querySelectorAll('.fact-page-btn').forEach(function (btn) {
+        if (btn.disabled) return;
+        btn.addEventListener('click', function () {
+          const offset = Number.parseInt(btn.dataset.offset, 10) || 0;
+          if (offset < 0) return;
+          loadPage_(offset);
+        });
+      });
+    }
+
+    function toggleDetailRow_(txId) {
+      const detailRow = document.querySelector('.detail-row[data-detail-for="' + CSS.escape(txId) + '"]');
+      if (!detailRow) return;
+
+      const isHidden = detailRow.classList.contains('hidden');
+
+      // ปิด detail row อื่นที่เปิดอยู่ (เปิดทีละอัน)
+      document.querySelectorAll('.detail-row:not(.hidden)').forEach(function (r) {
+        if (r !== detailRow) r.classList.add('hidden');
+      });
+
+      if (isHidden) {
+        detailRow.classList.remove('hidden');
+      } else {
+        detailRow.classList.add('hidden');
       }
     }
 
-    bindRowClicksAndPagination_(container);
+    // ────────────────────────────────────────────────────────────
+    // Actions
+    // ────────────────────────────────────────────────────────────
+    async function loadPage_(offset) {
+      if (isLoading) return;
+      if (!globalThis.api || typeof globalThis.api.getFactDeliveryPage !== 'function') {
+        const c = document.getElementById('factTableContainer');
+        if (c) c.innerHTML = buildErrorHtml_('API ไม่พร้อมใช้งาน');
+        return;
+      }
 
-    if (globalThis.lucide && typeof globalThis.lucide.createIcons === 'function') {
-      globalThis.lucide.createIcons();
+      isLoading = true;
+      currentOffset = offset;
+      const container = document.getElementById('factTableContainer');
+      if (container) container.innerHTML = buildLoadingHtml_();
+
+      try {
+        const filter = { status: currentStatusFilter };
+        const data = await globalThis.api.getFactDeliveryPage(offset, PAGE_SIZE, filter);
+        renderData_(data);
+      } catch (err) {
+        console.error('[FactDeliveryView] loadPage_ failed:', err);
+        if (container) container.innerHTML = buildErrorHtml_(err.message);
+        showToast_('โหลดรายการล้มเหลว', err.message, 'error', 5000);
+      } finally {
+        isLoading = false;
+      }
     }
-  }
 
-  function retry() {
-    loadPage_(currentOffset || 0);
-  }
+    function renderData_(data) {
+      const container = document.getElementById('factTableContainer');
+      if (!container) return;
 
-  // ────────────────────────────────────────────────────────────
-  // Helpers
-  // ────────────────────────────────────────────────────────────
-  function formatDateShort_(isoString) {
-    if (!isoString) return '—';
-    try {
-      const d = new Date(isoString);
-      if (Number.isNaN(d.getTime())) return String(isoString);
-      return d.toLocaleDateString('th-TH', { dateStyle: 'short' });
-    } catch (e) {
-      // [SonarCloud S2486] log warning เพื่อ debug
-      console.warn('[FactDeliveryView] formatDateShort_ failed:', e.message);
-      return String(isoString);
+      // Update filter tab counts
+      if (data.statusCounts) {
+        // "all" = sum ของทุก status
+        let total = 0;
+        Object.keys(data.statusCounts).forEach(function (k) {
+          total += data.statusCounts[k];
+        });
+        const allEl = document.querySelector('[data-count="all"]');
+        if (allEl) allEl.textContent = total;
+
+        Object.keys(data.statusCounts).forEach(function (key) {
+          const el = document.querySelector('[data-count="' + key + '"]');
+          if (el) el.textContent = data.statusCounts[key];
+        });
+      }
+
+      container.innerHTML = buildTableHtml_(data.rows);
+
+      // Add pagination below table
+      if (data.rows && data.rows.length > 0) {
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = buildPaginationHtml_(data.offset, data.total, data.limit);
+        const newPagination = wrapper.firstElementChild;
+        if (newPagination) {
+          container.appendChild(newPagination);
+        }
+      }
+
+      bindRowClicksAndPagination_(container);
+
+      if (globalThis.lucide && typeof globalThis.lucide.createIcons === 'function') {
+        globalThis.lucide.createIcons();
+      }
     }
-  }
 
-  function formatDateFull_(isoString) {
-    if (!isoString) return '—';
-    try {
-      const d = new Date(isoString);
-      if (Number.isNaN(d.getTime())) return String(isoString);
-      return d.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
-    } catch (e) {
-      // [SonarCloud S2486] log warning เพื่อ debug
-      console.warn('[FactDeliveryView] formatDateFull_ failed:', e.message);
-      return String(isoString);
+    function retry() {
+      loadPage_(currentOffset || 0);
     }
-  }
 
-  function escapeHtml_(str) {
-    return String(str == null ? '' : str)
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#039;');
-  }
-
-  function showToast_(title, message, type, duration) {
-    if (globalThis.LMDSApp && typeof globalThis.LMDSApp.showToast === 'function') {
-      globalThis.LMDSApp.showToast(title, message, type, duration);
+    // ────────────────────────────────────────────────────────────
+    // Helpers
+    // ────────────────────────────────────────────────────────────
+    function formatDateShort_(isoString) {
+      if (!isoString) return '—';
+      try {
+        const d = new Date(isoString);
+        if (Number.isNaN(d.getTime())) return String(isoString);
+        return d.toLocaleDateString('th-TH', { dateStyle: 'short' });
+      } catch (e) {
+        // [SonarCloud S2486] log warning เพื่อ debug
+        console.warn('[FactDeliveryView] formatDateShort_ failed:', e.message);
+        return String(isoString);
+      }
     }
-  }
 
-  return {
-    render: render,
-    retry: retry,
-  };
-})();
+    function formatDateFull_(isoString) {
+      if (!isoString) return '—';
+      try {
+        const d = new Date(isoString);
+        if (Number.isNaN(d.getTime())) return String(isoString);
+        return d.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+      } catch (e) {
+        // [SonarCloud S2486] log warning เพื่อ debug
+        console.warn('[FactDeliveryView] formatDateFull_ failed:', e.message);
+        return String(isoString);
+      }
+    }
 
-console.log('[FactDeliveryView] view loaded');
+    function escapeHtml_(str) {
+      return String(str == null ? '' : str)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    function showToast_(title, message, type, duration) {
+      if (globalThis.LMDSApp && typeof globalThis.LMDSApp.showToast === 'function') {
+        globalThis.LMDSApp.showToast(title, message, type, duration);
+      }
+    }
+
+    return {
+      render: render,
+      retry: retry
+    };
+  })();
+
+  console.log('[FactDeliveryView] view loaded');
 </script>

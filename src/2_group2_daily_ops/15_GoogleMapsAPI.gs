@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.040
+ * VERSION: 6.0.002
  * FILE: 15_GoogleMapsAPI.gs
  * LMDS V5.5 — Google Maps Custom Functions (@customFunction)
  * ===================================================
@@ -54,11 +54,11 @@
  * _mapsMd5 — สร้าง MD5 hash สำหรับ cache key
  * ทำให้ "New York" และ "new york  " มี key เดียวกัน
  */
-const _mapsMd5 = (key = "") => {
-  const code = key.toLowerCase().replace(/\s/g, "");
+const _mapsMd5 = (key = '') => {
+  const code = key.toLowerCase().replace(/\s/g, '');
   return Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, code)
     .map((char) => (char + 256).toString(16).slice(-2))
-    .join("");
+    .join('');
 };
 
 /**
@@ -84,7 +84,6 @@ const _mapsSetCache = (key, value) => {
   }
 };
 
-
 // ============================================================
 // SECTION 2: @customFunction — สูตรสำหรับพิมพ์ใน Google Sheet
 // ============================================================
@@ -101,15 +100,15 @@ const _mapsSetCache = (key, value) => {
  * @return {String} ระยะทาง (เช่น "15.2 km")
  * @customFunction
  */
-const GOOGLEMAPS_DISTANCE = (origin, destination, mode = "driving") => {
+const GOOGLEMAPS_DISTANCE = (origin, destination, mode = 'driving') => {
   if (!origin || !destination) {
-    return "ต้องระบุจุดเริ่มต้นและปลายทาง";
+    return 'ต้องระบุจุดเริ่มต้นและปลายทาง';
   }
   if (origin.map) {
-    return origin.map(o => GOOGLEMAPS_DISTANCE(o, destination, mode));
+    return origin.map((o) => GOOGLEMAPS_DISTANCE(o, destination, mode));
   }
 
-  const key = ["distance", origin, destination, mode].join(",");
+  const key = ['distance', origin, destination, mode].join(',');
   const value = _mapsGetCache(key);
   if (value !== null) return value;
 
@@ -120,14 +119,13 @@ const GOOGLEMAPS_DISTANCE = (origin, destination, mode = "driving") => {
     .getDirections();
 
   if (!data) {
-    return "ไม่พบเส้นทาง";
+    return 'ไม่พบเส้นทาง';
   }
 
   const { legs: [{ distance: { text: distance } } = {}] = [] } = data;
   _mapsSetCache(key, distance);
   return distance;
 };
-
 
 /**
  * GOOGLEMAPS_DURATION — คำนวณเวลาเดินทางระหว่าง 2 จุด
@@ -141,15 +139,15 @@ const GOOGLEMAPS_DISTANCE = (origin, destination, mode = "driving") => {
  * @return {String} เวลาเดินทาง (เช่น "25 mins")
  * @customFunction
  */
-const GOOGLEMAPS_DURATION = (origin, destination, mode = "driving") => {
+const GOOGLEMAPS_DURATION = (origin, destination, mode = 'driving') => {
   if (!origin || !destination) {
-    return "ต้องระบุจุดเริ่มต้นและปลายทาง";
+    return 'ต้องระบุจุดเริ่มต้นและปลายทาง';
   }
   if (origin.map) {
-    return origin.map(o => GOOGLEMAPS_DURATION(o, destination, mode));
+    return origin.map((o) => GOOGLEMAPS_DURATION(o, destination, mode));
   }
 
-  const key = ["duration", origin, destination, mode].join(",");
+  const key = ['duration', origin, destination, mode].join(',');
   const value = _mapsGetCache(key);
   if (value !== null) return value;
 
@@ -160,14 +158,13 @@ const GOOGLEMAPS_DURATION = (origin, destination, mode = "driving") => {
     .getDirections();
 
   if (!data) {
-    return "ไม่พบเส้นทาง";
+    return 'ไม่พบเส้นทาง';
   }
 
   const { legs: [{ duration: { text: time } } = {}] = [] } = data;
   _mapsSetCache(key, time);
   return time;
 };
-
 
 /**
  * GOOGLEMAPS_LATLONG — แปลงที่อยู่เป็นพิกัด lat,lng
@@ -181,19 +178,19 @@ const GOOGLEMAPS_DURATION = (origin, destination, mode = "driving") => {
  */
 const GOOGLEMAPS_LATLONG = (address) => {
   if (!address) {
-    return "ต้องระบุที่อยู่";
+    return 'ต้องระบุที่อยู่';
   }
   if (address.map) {
-    return address.map(a => GOOGLEMAPS_LATLONG(a));
+    return address.map((a) => GOOGLEMAPS_LATLONG(a));
   }
 
-  const key = ["latlong", address].join(",");
+  const key = ['latlong', address].join(',');
   const value = _mapsGetCache(key);
   if (value !== null) return value;
 
   const { results: [data = null] = [] } = Maps.newGeocoder().geocode(address);
   if (data === null) {
-    return "ไม่พบที่อยู่";
+    return 'ไม่พบที่อยู่';
   }
 
   const { geometry: { location: { lat, lng } } = {} } = data;
@@ -201,7 +198,6 @@ const GOOGLEMAPS_LATLONG = (address) => {
   _mapsSetCache(key, answer);
   return answer;
 };
-
 
 /**
  * GOOGLEMAPS_ADDRESS — แปลงรหัสไปรษณีย์/ที่อยู่บางส่วนเป็นที่อยู่เต็ม
@@ -215,26 +211,25 @@ const GOOGLEMAPS_LATLONG = (address) => {
  */
 const GOOGLEMAPS_ADDRESS = (address) => {
   if (!address) {
-    return "ต้องระบุที่อยู่";
+    return 'ต้องระบุที่อยู่';
   }
   if (address.map) {
-    return address.map(a => GOOGLEMAPS_ADDRESS(a));
+    return address.map((a) => GOOGLEMAPS_ADDRESS(a));
   }
 
-  const key = ["address", address].join(",");
+  const key = ['address', address].join(',');
   const value = _mapsGetCache(key);
   if (value !== null) return value;
 
   const { results: [data = null] = [] } = Maps.newGeocoder().geocode(address);
   if (data === null) {
-    return "ไม่พบที่อยู่";
+    return 'ไม่พบที่อยู่';
   }
 
   const { formatted_address } = data;
   _mapsSetCache(key, formatted_address);
   return formatted_address;
 };
-
 
 /**
  * GOOGLEMAPS_REVERSEGEOCODE — แปลงพิกัด lat,lng เป็นที่อยู่
@@ -249,21 +244,19 @@ const GOOGLEMAPS_ADDRESS = (address) => {
  */
 const GOOGLEMAPS_REVERSEGEOCODE = (latitude, longitude) => {
   if (!latitude || !longitude) {
-    return "ต้องระบุละติจูดและลองจิจูด";
+    return 'ต้องระบุละติจูดและลองจิจูด';
   }
 
-  const key = ["reverse", latitude, longitude].join(",");
+  const key = ['reverse', latitude, longitude].join(',');
   const value = _mapsGetCache(key);
   if (value !== null) return value;
 
-  const { results: [data = {}] = [] } = Maps.newGeocoder()
-    .reverseGeocode(latitude, longitude);
+  const { results: [data = {}] = [] } = Maps.newGeocoder().reverseGeocode(latitude, longitude);
 
   const { formatted_address } = data;
   _mapsSetCache(key, formatted_address);
   return formatted_address;
 };
-
 
 /**
  * GOOGLEMAPS_COUNTRY — ดึงชื่อประเทศจากที่อยู่
@@ -276,34 +269,31 @@ const GOOGLEMAPS_REVERSEGEOCODE = (latitude, longitude) => {
  */
 const GOOGLEMAPS_COUNTRY = (address) => {
   if (!address) {
-    return "ต้องระบุที่อยู่";
+    return 'ต้องระบุที่อยู่';
   }
   if (address.map) {
-    return address.map(a => GOOGLEMAPS_COUNTRY(a));
+    return address.map((a) => GOOGLEMAPS_COUNTRY(a));
   }
 
-  const key = ["country", address].join(",");
+  const key = ['country', address].join(',');
   const value = _mapsGetCache(key);
   if (value !== null) return value;
 
   const { results: [data = null] = [] } = Maps.newGeocoder().geocode(address);
   if (data === null) {
-    return "ไม่พบที่อยู่";
+    return 'ไม่พบที่อยู่';
   }
 
-  const [{ short_name, long_name } = {}] = data.address_components.filter(
-    ({ types: [level] }) => level === "country"
-  );
+  const [{ short_name, long_name } = {}] = data.address_components.filter(({ types: [level] }) => level === 'country');
 
   if (!short_name) {
-    return "ไม่พบประเทศ";
+    return 'ไม่พบประเทศ';
   }
 
   const answer = `${long_name} (${short_name})`;
   _mapsSetCache(key, answer);
   return answer;
 };
-
 
 /**
  * GOOGLEMAPS_DIRECTIONS — แสดงเส้นทางขับขี่ระหว่าง 2 จุด
@@ -316,12 +306,12 @@ const GOOGLEMAPS_COUNTRY = (address) => {
  * @return {String} เส้นทางขับขี่ทีละขั้นตอน
  * @customFunction
  */
-const GOOGLEMAPS_DIRECTIONS = (origin, destination, mode = "driving") => {
+const GOOGLEMAPS_DIRECTIONS = (origin, destination, mode = 'driving') => {
   if (!origin || !destination) {
-    return "ต้องระบุจุดเริ่มต้นและปลายทาง";
+    return 'ต้องระบุจุดเริ่มต้นและปลายทาง';
   }
 
-  const key = ["directions", origin, destination, mode].join(",");
+  const key = ['directions', origin, destination, mode].join(',');
   const value = _mapsGetCache(key);
   if (value !== null) return value;
 
@@ -332,7 +322,7 @@ const GOOGLEMAPS_DIRECTIONS = (origin, destination, mode = "driving") => {
     .getDirections();
 
   if (!routes.length) {
-    return "ไม่พบเส้นทาง";
+    return 'ไม่พบเส้นทาง';
   }
 
   const directions = routes
@@ -357,7 +347,7 @@ const GOOGLEMAPS_DIRECTIONS = (origin, destination, mode = "driving") => {
         });
       });
     })
-    .join(", ");
+    .join(', ');
 
   _mapsSetCache(key, directions);
   return directions;

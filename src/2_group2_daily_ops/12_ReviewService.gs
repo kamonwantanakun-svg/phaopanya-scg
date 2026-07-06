@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.040
+ * VERSION: 6.0.002
  * FILE: 12_ReviewService.gs
  * LMDS V5.5 — Review Queue Service
  * [FIX BUG-B2] v5.4.003: updateReviewRowStatus_() helper — 1 setValues แทน 5× setValue
@@ -39,7 +39,7 @@
  *   applyAllPendingDecisions to enrich M_ALIAS from newly-approved FACTs) [V5.5.007 P0 #3]
  * - maskReviewerEmail_() → Local security helper
  * - logError/logInfo/logWarn/logDebug() → 03_SetupSheets
- * 
+ *
  * NOTE: ไม่เรียก Group 1 CRUD functions โดยตรงอีกต่อไป
  * ใช้ resolveAndPersist_() gateway แทน (REF-001)
  * EXPORTS TO:
@@ -91,18 +91,16 @@ function enqueueReview(srcObj, decision, personResult, placeResult, geoResult) {
     const sheet = ss.getSheetByName(SHEET.Q_REVIEW);
     if (!sheet) {
       // [FIX R13-03 REVIEW15] Rule 13: ส่ง Error object เพื่อ stack trace ชี้ตำแหน่งที่เกิด
-      logError('ReviewService',
-        'ไม่พบชีต ' + SHEET.Q_REVIEW,
-        new Error('SHEET_NOT_FOUND'));
+      logError('ReviewService', 'ไม่พบชีต ' + SHEET.Q_REVIEW, new Error('SHEET_NOT_FOUND'));
       return null;
     }
 
     // [FIX CodeQL js/unused-local-variable V5.5.035] now ไม่ถูกใช้ในฟังก์ชันนี้ — ลบทิ้ง
     const newId = generateShortId('R');
-    const candPersonIds = personResult && personResult.personId
-      ? JSON.stringify([personResult.personId]) : JSON.stringify([]);
-    const candPlaceIds = placeResult && placeResult.placeId
-      ? JSON.stringify([placeResult.placeId]) : JSON.stringify([]);
+    const candPersonIds =
+      personResult && personResult.personId ? JSON.stringify([personResult.personId]) : JSON.stringify([]);
+    const candPlaceIds =
+      placeResult && placeResult.placeId ? JSON.stringify([placeResult.placeId]) : JSON.stringify([]);
 
     let candGeoIds = JSON.stringify([]);
     if (geoResult) {
@@ -116,7 +114,7 @@ function enqueueReview(srcObj, decision, personResult, placeResult, geoResult) {
     const newRow = new Array(SCHEMA[SHEET.Q_REVIEW].length).fill('');
     newRow[REVIEW_IDX.REVIEW_ID] = newId;
     newRow[REVIEW_IDX.ISSUE_TYPE] = decision ? decision.reason : 'UNKNOWN';
-    newRow[REVIEW_IDX.PRIORITY] = decision ? (decision.priority || 2) : 2;
+    newRow[REVIEW_IDX.PRIORITY] = decision ? decision.priority || 2 : 2;
     newRow[REVIEW_IDX.SOURCE_REC_ID] = srcObj.sourceId || '';
     newRow[REVIEW_IDX.SOURCE_ROW] = srcObj.sourceRow || 0;
     newRow[REVIEW_IDX.INVOICE_NO] = srcObj.invoiceNo || '';
@@ -147,7 +145,7 @@ function enqueueReview(srcObj, decision, personResult, placeResult, geoResult) {
     newRow[REVIEW_IDX.CAND_PLACES] = candPlaceIds;
     newRow[REVIEW_IDX.CAND_GEOS] = candGeoIds;
     newRow[REVIEW_IDX.CAND_DESTS] = JSON.stringify([]);
-    newRow[REVIEW_IDX.MATCH_SCORE] = decision ? (decision.confidence || 0) : 0;
+    newRow[REVIEW_IDX.MATCH_SCORE] = decision ? decision.confidence || 0 : 0;
     // [V5.5.011] สร้าง recommended_action ที่มี ID จริง เพื่อให้ผู้ review คลิกแล้วนำทางได้
     //   ก่อนหน้านี้ใส่ค่าคงที่ 'MANUAL_REVIEW' ทำให้ Smart Navigation ไม่สามารถ parse ID และนำทางได้
     //   ตอนนี้ระบบจะแนะนำ action ที่เหมาะสมตามข้อมูลที่มี:
@@ -159,10 +157,9 @@ function enqueueReview(srcObj, decision, personResult, placeResult, geoResult) {
     newRow[REVIEW_IDX.REVIEWER] = '';
     newRow[REVIEW_IDX.REVIEWED_AT] = '';
     newRow[REVIEW_IDX.DECISION] = '';
-    newRow[REVIEW_IDX.NOTE] = decision ? (decision.reason || '') : '';
+    newRow[REVIEW_IDX.NOTE] = decision ? decision.reason || '' : '';
 
     return { reviewId: newId, rowData: newRow };
-
   } catch (e) {
     // [FIX R13-04 REVIEW15] Rule 13: ส่ง e เพื่อรักษา stack trace ของ error จริง
     logError('ReviewService', 'enqueueReview ล้มเหลว: ' + e.message, e);
@@ -197,10 +194,8 @@ function enqueueReview(srcObj, decision, personResult, placeResult, geoResult) {
 function buildRecommendedAction_(personResult, placeResult, geoResult, decision) {
   try {
     // ดึง ID จาก candidate results
-    var personId = personResult && personResult.personId
-      ? String(personResult.personId).trim() : '';
-    var placeId = placeResult && placeResult.placeId
-      ? String(placeResult.placeId).trim() : '';
+    const personId = personResult && personResult.personId ? String(personResult.personId).trim() : '';
+    const placeId = placeResult && placeResult.placeId ? String(placeResult.placeId).trim() : '';
 
     // กรณี 1: มี candidate Person → แนะนำ MERGE_TO_CANDIDATE พร้อม Person ID
     if (personId) {
@@ -252,10 +247,9 @@ function applyAllPendingDecisions() {
 
     // [FIX BUG-B2] Time Guard
     const startTime = new Date();
-    const timeLimit = AI_CONFIG.TIME_LIMIT_MS || (5 * 60 * 1000);
+    const timeLimit = AI_CONFIG.TIME_LIMIT_MS || 5 * 60 * 1000;
 
-    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1,
-      SCHEMA[SHEET.Q_REVIEW].length).getValues();
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, SCHEMA[SHEET.Q_REVIEW].length).getValues();
 
     let processed = 0;
     let timedOut = false;
@@ -276,7 +270,7 @@ function applyAllPendingDecisions() {
 
     for (let i = 0; i < data.length; i++) {
       // [FIX BUG-B2] Time Guard ทุก 20 แถว
-      if (i % 20 === 0 && i > 0 && (new Date() - startTime) > timeLimit) {
+      if (i % 20 === 0 && i > 0 && new Date() - startTime > timeLimit) {
         logWarn('ReviewService', 'applyAllPendingDecisions: Time Guard หยุดที่แถว ' + i + '/' + data.length);
         timedOut = true;
         break;
@@ -295,29 +289,49 @@ function applyAllPendingDecisions() {
 
     // [PERF-002] Flush batch FACT_DELIVERY writes — เขียนทั้งหมดครั้งเดียวหลังลูป
     if (pendingFactRows.length > 0) {
-      var factSheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
+      const factSheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
       if (factSheet) {
-        factSheet.getRange(factSheet.getLastRow() + 1, 1, pendingFactRows.length, pendingFactRows[0].length)
-          .setValues(pendingFactRows);
+        // [FIX BUG-PM-004 V5.5.041] เพิ่ม Math.min guard สำหรับ INSERT path
+        //   mirror BUG-M03 fix ใน 11_TransactionService.upsertFactDelivery (UPDATE path)
+        //   สาเหตุ: pendingFactRows[0].length = SCHEMA.length (34) แต่ถ้าชีตจริงมีคอลัมน์
+        //   น้อยกว่า (เช่น pre-V5.5.014 ที่ยังไม่มี DRIVER_VERIFIED cols) getRange จะ throw
+        //   "The coordinates or dimensions of the range are invalid"
+        //   แนวทาง: ใช้คอลัมน์ที่น้อยกว่า + trim แต่ละ row ให้ตรง
+        const factSchemaLen = SCHEMA[SHEET.FACT_DELIVERY].length;
+        const factSheetCols = Math.min(factSchemaLen, factSheet.getLastColumn());
+        const rowsToWrite =
+          factSheetCols === factSchemaLen
+            ? pendingFactRows
+            : pendingFactRows.map(function (row) {
+                return row.slice(0, factSheetCols);
+              });
+        factSheet.getRange(factSheet.getLastRow() + 1, 1, rowsToWrite.length, factSheetCols).setValues(rowsToWrite);
         if (typeof invalidateFactInvoiceCache_ === 'function') invalidateFactInvoiceCache_();
-        // [FIX v5.5.007 P0 #3] เพิ่ม invalidations ที่ขาดหายไป ให้ตรงกับ persistResult_ ของ MatchEngine
-        // เดิมลืม invalidate same-day dest cache และ alias enrichment สำหรับ Review-approved FACT rows
-        // ทำให้ cache เก่าและ M_ALIAS ไม่ถูก enrich หลัง Review
-        if (typeof invalidateSameDayDestCache_ === 'function') invalidateSameDayDestCache_();
+        // [REMOVED V5.5.044] invalidateSameDayDestCache_ — ลบ dead code (ดู comment ใน 10_MatchEngine SECTION 5)
+        // [FIX v5.5.007 P0 #3] alias enrichment สำหรับ Review-approved FACT rows
         try {
           if (typeof autoEnrichAliasesFromFactBatch_ === 'function') {
             autoEnrichAliasesFromFactBatch_(pendingFactRows);
           }
         } catch (enrichErr) {
-          logError('ReviewService', 'autoEnrichAliasesFromFactBatch_ ล้มเหลว (ไม่บล็อกการทำงานหลัก): ' + enrichErr.message, enrichErr);
+          logError(
+            'ReviewService',
+            'autoEnrichAliasesFromFactBatch_ ล้มเหลว (ไม่บล็อกการทำงานหลัก): ' + enrichErr.message,
+            enrichErr
+          );
         }
       }
     }
 
-    logInfo('ReviewService',
-      'applyAllPendingDecisions: ประมวลผล ' + processed + ' รายการ' +
-      ' (batch status: ' + pendingStatusUpdates.length + ')' +
-      (timedOut ? ' (หยุดก่อนครบ — Time Guard)' : '')
+    logInfo(
+      'ReviewService',
+      'applyAllPendingDecisions: ประมวลผล ' +
+        processed +
+        ' รายการ' +
+        ' (batch status: ' +
+        pendingStatusUpdates.length +
+        ')' +
+        (timedOut ? ' (หยุดก่อนครบ — Time Guard)' : '')
     );
 
     if (timedOut) {
@@ -325,7 +339,6 @@ function applyAllPendingDecisions() {
     }
 
     return processed;
-
   } catch (err) {
     logError('ReviewService', 'applyAllPendingDecisions: ' + err.message, err);
     safeUiAlert_('❌ เกิดข้อผิดพลาด: ' + err.message);
@@ -360,8 +373,12 @@ function reviewProcessOneRow_(rowData, rowIndex, reviewer, batchNow) {
     if (decision === 'IGNORE') {
       return {
         statusUpdate: {
-          targetRow: rowIndex, status: 'Done', reviewer: reviewer, now: batchNow,
-          decisionVal: decision, note: ''
+          targetRow: rowIndex,
+          status: 'Done',
+          reviewer: reviewer,
+          now: batchNow,
+          decisionVal: decision,
+          note: ''
         },
         factRow: null,
         processed: 1,
@@ -370,8 +387,12 @@ function reviewProcessOneRow_(rowData, rowIndex, reviewer, batchNow) {
     } else if (decision === 'ESCALATE') {
       return {
         statusUpdate: {
-          targetRow: rowIndex, status: 'Escalated', reviewer: reviewer, now: batchNow,
-          decisionVal: decision, note: ''
+          targetRow: rowIndex,
+          status: 'Escalated',
+          reviewer: reviewer,
+          now: batchNow,
+          decisionVal: decision,
+          note: ''
         },
         factRow: null,
         processed: 1,
@@ -380,8 +401,8 @@ function reviewProcessOneRow_(rowData, rowIndex, reviewer, batchNow) {
     } else {
       // CREATE_NEW / MERGE_TO_CANDIDATE — have side effects, call normally
       // [PERF-002] เก็บ factData ที่ส่งคืนมาเพื่อเขียน batch ทีเดียวหลังลูป
-      var reviewResult = applyReviewDecision(reviewId, decision, rowData, rowIndex);
-      var factRow = (reviewResult && reviewResult.factRowData) ? reviewResult.factRowData : null;
+      const reviewResult = applyReviewDecision(reviewId, decision, rowData, rowIndex);
+      const factRow = reviewResult && reviewResult.factRowData ? reviewResult.factRowData : null;
       return {
         statusUpdate: null,
         factRow: factRow,
@@ -405,25 +426,21 @@ function reviewProcessOneRow_(rowData, rowIndex, reviewer, batchNow) {
 function batchUpdateReviewStatus_(sheet, updates) {
   if (!updates || updates.length === 0) return;
 
-  const minCol = Math.min(
-    REVIEW_IDX.STATUS, REVIEW_IDX.REVIEWER, REVIEW_IDX.REVIEWED_AT,
-    REVIEW_IDX.DECISION, REVIEW_IDX.NOTE
-  ) + 1;
+  const minCol =
+    Math.min(REVIEW_IDX.STATUS, REVIEW_IDX.REVIEWER, REVIEW_IDX.REVIEWED_AT, REVIEW_IDX.DECISION, REVIEW_IDX.NOTE) + 1;
 
-  const maxCol = Math.max(
-    REVIEW_IDX.STATUS, REVIEW_IDX.REVIEWER, REVIEW_IDX.REVIEWED_AT,
-    REVIEW_IDX.DECISION, REVIEW_IDX.NOTE
-  ) + 1;
+  const maxCol =
+    Math.max(REVIEW_IDX.STATUS, REVIEW_IDX.REVIEWER, REVIEW_IDX.REVIEWED_AT, REVIEW_IDX.DECISION, REVIEW_IDX.NOTE) + 1;
 
   const numCols = maxCol - minCol + 1;
-  const minRow = Math.min(...updates.map(u => u.targetRow));
-  const maxRow = Math.max(...updates.map(u => u.targetRow));
+  const minRow = Math.min(...updates.map((u) => u.targetRow));
+  const maxRow = Math.max(...updates.map((u) => u.targetRow));
   const rowCount = maxRow - minRow + 1;
 
   const range = sheet.getRange(minRow, minCol, rowCount, numCols);
   const allVals = range.getValues();
 
-  updates.forEach(function(u) {
+  updates.forEach(function (u) {
     const rowIdx = u.targetRow - minRow;
     if (rowIdx < 0 || rowIdx >= rowCount) return;
     allVals[rowIdx][REVIEW_IDX.STATUS - (minCol - 1)] = u.status;
@@ -472,8 +489,7 @@ function applyReviewDecision(reviewId, decisionVal, rowData, optTargetRow) {
     let rowArr = rowData;
 
     if (targetRow === -1 || !rowArr) {
-      const data = sheet.getRange(2, 1, sheet.getLastRow() - 1,
-        SCHEMA[SHEET.Q_REVIEW].length).getValues();
+      const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, SCHEMA[SHEET.Q_REVIEW].length).getValues();
       for (let i = 0; i < data.length; i++) {
         if (String(data[i][REVIEW_IDX.REVIEW_ID]).trim() === reviewId) {
           targetRow = i + 2;
@@ -514,7 +530,6 @@ function applyReviewDecision(reviewId, decisionVal, rowData, optTargetRow) {
 
     // [FIX v5.5.005] return result เพื่อให้ caller ได้ factRowData
     return result;
-
   } catch (e) {
     logError('ReviewService', 'applyReviewDecision ล้มเหลว: ' + e.message, e);
     safeUiAlert_('เกิดข้อผิดพลาดในการประมวลผล Review: ' + e.message);
@@ -540,11 +555,21 @@ function parseCandidatesFromReview_(rowData) {
   let candPlaceIds = [];
 
   // [FIX BUG-H03 V5.5.022] เพิ่ม logWarn ใน catch — ละเมิด Rule 12 (No Silent Fail)
-  try { candPersonIds = JSON.parse(candPersonStr); } catch (e) {
-    logWarn('ReviewService', 'parseCandidatesFromReview_: candPersonIds JSON.parse ล้มเหลว — ' + candPersonStr.substring(0, 100));
+  try {
+    candPersonIds = JSON.parse(candPersonStr);
+  } catch (e) {
+    logWarn(
+      'ReviewService',
+      'parseCandidatesFromReview_: candPersonIds JSON.parse ล้มเหลว — ' + candPersonStr.substring(0, 100)
+    );
   }
-  try { candPlaceIds = JSON.parse(candPlaceStr); } catch (e) {
-    logWarn('ReviewService', 'parseCandidatesFromReview_: candPlaceIds JSON.parse ล้มเหลว — ' + candPlaceStr.substring(0, 100));
+  try {
+    candPlaceIds = JSON.parse(candPlaceStr);
+  } catch (e) {
+    logWarn(
+      'ReviewService',
+      'parseCandidatesFromReview_: candPlaceIds JSON.parse ล้มเหลว — ' + candPlaceStr.substring(0, 100)
+    );
   }
 
   return { candPersonIds: candPersonIds, candPlaceIds: candPlaceIds };
@@ -565,16 +590,21 @@ function buildSrcObjFromReview_(ss, rowData) {
   const rawLng = Number(rowData[REVIEW_IDX.RAW_LNG] || 0);
   const sourceRowIdx = Number(rowData[REVIEW_IDX.SOURCE_ROW] || 0);
 
-  let deliveryDate = '', deliveryTime = '';
-  let driverVerifiedName = '', driverVerifiedAddr = '';  // [FIX CRIT-002]
+  let deliveryDate = '',
+    deliveryTime = '';
+  let driverVerifiedName = '',
+    driverVerifiedAddr = ''; // [FIX CRIT-002]
 
   if (sourceRowIdx > 1) {
     const srcSheet = ss.getSheetByName(SHEET.SOURCE);
     if (srcSheet) {
       const srcData = srcSheet.getRange(sourceRowIdx, 1, 1, srcSheet.getLastColumn()).getValues()[0];
       if (srcData[SRC_IDX.DELIVERY_DATE]) {
-        try { deliveryDate = new Date(srcData[SRC_IDX.DELIVERY_DATE]).toISOString(); }
-        catch (e) { deliveryDate = String(srcData[SRC_IDX.DELIVERY_DATE]); }
+        try {
+          deliveryDate = new Date(srcData[SRC_IDX.DELIVERY_DATE]).toISOString();
+        } catch (e) {
+          deliveryDate = String(srcData[SRC_IDX.DELIVERY_DATE]);
+        }
       }
       deliveryTime = srcData[SRC_IDX.DELIVERY_TIME];
       // [FIX CRIT-002] อ่าน DRIVER_VERIFIED จาก Source sheet
@@ -587,16 +617,27 @@ function buildSrcObjFromReview_(ss, rowData) {
     invoiceNo: normalizeInvoiceNo(rowData[REVIEW_IDX.INVOICE_NO]),
     sourceRow: sourceRowIdx,
     sourceId: String(rowData[REVIEW_IDX.SOURCE_REC_ID] || '').trim(),
-    rawPersonName: rawPerson, rawPlaceName: rawPlace,
-    rawAddress: rawAddr, rawLat: rawLat, rawLng: rawLng,
+    rawPersonName: rawPerson,
+    rawPlaceName: rawPlace,
+    rawAddress: rawAddr,
+    rawLat: rawLat,
+    rawLng: rawLng,
     hasGeo: !isNaN(rawLat) && !isNaN(rawLng) && rawLat !== 0 && rawLng !== 0,
-    province: '', warehouse: '', driverName: '', truckLicense: '',
-    soldToCode: '', soldToName: '', carrierCode: '', carrierName: '',
-    shipmentNo: '', deliveryDate: deliveryDate, deliveryTime: deliveryTime,
+    province: '',
+    warehouse: '',
+    driverName: '',
+    truckLicense: '',
+    soldToCode: '',
+    soldToName: '',
+    carrierCode: '',
+    carrierName: '',
+    shipmentNo: '',
+    deliveryDate: deliveryDate,
+    deliveryTime: deliveryTime,
     sourceSheet: SHEET.Q_REVIEW,
     // [FIX CRIT-002] ส่ง DRIVER_VERIFIED ไปยัง upsertFactDelivery
     driverVerifiedName: driverVerifiedName,
-    driverVerifiedAddr: driverVerifiedAddr,
+    driverVerifiedAddr: driverVerifiedAddr
   };
 }
 
@@ -644,15 +685,11 @@ function executeMergeDecision_(ss, sheet, targetRow, rowArr, reviewer, now, deci
  */
 function updateReviewRowStatus_(sheet, targetRow, status, reviewer, now, decisionVal, note) {
   // อ่าน block คอลัมน์ที่ต้องอัปเดต (STATUS ถึง NOTE เป็น consecutive range)
-  const minCol = Math.min(
-    REVIEW_IDX.STATUS, REVIEW_IDX.REVIEWER, REVIEW_IDX.REVIEWED_AT,
-    REVIEW_IDX.DECISION, REVIEW_IDX.NOTE
-  ) + 1; // 1-based
+  const minCol =
+    Math.min(REVIEW_IDX.STATUS, REVIEW_IDX.REVIEWER, REVIEW_IDX.REVIEWED_AT, REVIEW_IDX.DECISION, REVIEW_IDX.NOTE) + 1; // 1-based
 
-  const maxCol = Math.max(
-    REVIEW_IDX.STATUS, REVIEW_IDX.REVIEWER, REVIEW_IDX.REVIEWED_AT,
-    REVIEW_IDX.DECISION, REVIEW_IDX.NOTE
-  ) + 1; // 1-based
+  const maxCol =
+    Math.max(REVIEW_IDX.STATUS, REVIEW_IDX.REVIEWER, REVIEW_IDX.REVIEWED_AT, REVIEW_IDX.DECISION, REVIEW_IDX.NOTE) + 1; // 1-based
 
   const numCols = maxCol - minCol + 1;
   const range = sheet.getRange(targetRow, minCol, 1, numCols);
@@ -720,7 +757,7 @@ function getReviewStats() {
   const totalRows = sheet.getLastRow() - 1;
   const statusData = sheet.getRange(2, statusCol, totalRows, 1).getValues();
 
-  statusData.forEach(r => {
+  statusData.forEach((r) => {
     const s = String(r[0] || '').trim();
     stats.total++;
     if (s === 'Done') stats.done++;
@@ -756,7 +793,7 @@ function highlightHighPriorityReviews(optTargetRow) {
     if (optTargetRow && optTargetRow >= 2) {
       const rowData = sheet.getRange(optTargetRow, 1, 1, totalCols).getValues()[0];
       const priority = Number(rowData[REVIEW_IDX.PRIORITY] || 0);
-      const status   = String(rowData[REVIEW_IDX.STATUS] || '').trim();
+      const status = String(rowData[REVIEW_IDX.STATUS] || '').trim();
 
       let color = null;
       if (status === 'Done') color = '#d9ead3';
@@ -773,7 +810,7 @@ function highlightHighPriorityReviews(optTargetRow) {
     const data = sheet.getRange(2, 1, totalRows, totalCols).getValues();
 
     const bgColors = [];
-    data.forEach(row => {
+    data.forEach((row) => {
       const priority = Number(row[REVIEW_IDX.PRIORITY] || 0);
       const status = String(row[REVIEW_IDX.STATUS] || '').trim();
       let color = null;
@@ -833,10 +870,10 @@ function extractFirstId_(jsonStr) {
   jsonStr = String(jsonStr).trim();
   if (jsonStr === '[]' || jsonStr === '') return null;
   try {
-    var arr = JSON.parse(jsonStr);
+    const arr = JSON.parse(jsonStr);
     if (arr && arr.length > 0) return String(arr[0]).replace(/"/g, '');
   } catch (e) {
-    var m = jsonStr.match(/["']([A-Za-z0-9]+)["']/);
+    const m = jsonStr.match(/["']([A-Za-z0-9]+)["']/);
     if (m) return m[1];
   }
   return null;
@@ -881,26 +918,25 @@ function reprocessReviewQueue() {
   //     - flushLogBuffer_: กัน log entries สูญหายเมื่อ Timeout
 
   // ─── STEP 1: LockService (idiomatic pattern เหมือน applyAllPendingDecisions) ───
-  var lock = LockService.getScriptLock();
+  const lock = LockService.getScriptLock();
   if (!lock.tryLock(APP_CONST.LOCK_TIMEOUT_MS)) {
     safeUiAlert_('⚠️ ระบบกำลังประมวลผล Review อยู่ กรุณารอสักครู่แล้วลองใหม่');
     return;
   }
 
-  var startTime = Date.now();
-  var timeLimit = AI_CONFIG.TIME_LIMIT_MS || (5 * 60 * 1000);
+  const startTime = Date.now();
+  const timeLimit = AI_CONFIG.TIME_LIMIT_MS || 5 * 60 * 1000;
 
   try {
     // PHASE 1+2: Prepare context (read sheets + checkpoint + build RI/FI maps + factLookup)
-    var ctx = reprocPrepareContext_(startTime, timeLimit);
-    if (!ctx) return;  // empty Q_REVIEW or sheet missing
+    const ctx = reprocPrepareContext_(startTime, timeLimit);
+    if (!ctx) return; // empty Q_REVIEW or sheet missing
 
     // PHASE 3: Loop through review rows, dispatch to group handlers
-    var stats = reprocProcessAllRows_(ctx, startTime, timeLimit);
+    const stats = reprocProcessAllRows_(ctx, startTime, timeLimit);
 
     // PHASE 4+5: Batch write + report message + log summary
     reprocBatchWriteAndReport_(ctx, stats, startTime);
-
   } catch (err) {
     logError('ReviewService', 'reprocessReviewQueue: ' + err.message, err);
     safeUiAlert_('❌ เกิดข้อผิดพลาด: ' + err.message);
@@ -929,20 +965,20 @@ function reprocPrepareContext_(startTime, timeLimit) {
   //   4. buildFactLookup_            — Build source_record_id → factIdx lookup
   //   Preserve Behavior 100% — same validation, same data, same checkpoint, same maps
 
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   // STEP 1: Validate sheets
-  var sheets = validateReprocSheets_(ss);
+  const sheets = validateReprocSheets_(ss);
   if (!sheets) return null;
-  var reviewSheet = sheets.reviewSheet;
-  var factSheet = sheets.factSheet;
+  const reviewSheet = sheets.reviewSheet;
+  const factSheet = sheets.factSheet;
 
   // STEP 2: Read sheet data into memory
-  var sheetData = loadReprocSheetData_(reviewSheet, factSheet);
+  const sheetData = loadReprocSheetData_(reviewSheet, factSheet);
 
   // STEP 3: Load checkpoint
-  var checkpoint = loadReprocessCheckpoint_();
-  var startIdx = checkpoint.startIdx || 0;
+  const checkpoint = loadReprocessCheckpoint_();
+  const startIdx = checkpoint.startIdx || 0;
 
   if (startIdx > 0) {
     ss.toast('🔄 Resume จากแถว ' + (startIdx + 1) + '...', APP_NAME, 5);
@@ -950,10 +986,10 @@ function reprocPrepareContext_(startTime, timeLimit) {
   }
 
   // STEP 4: Build column index maps
-  var maps = buildReprocColumnMaps_();
+  const maps = buildReprocColumnMaps_();
 
   // STEP 5: Build FACT_DELIVERY lookup
-  var factLookup = buildFactLookup_(sheetData.factData, maps.FI);
+  const factLookup = buildFactLookup_(sheetData.factData, maps.FI);
 
   return {
     ss: ss,
@@ -979,8 +1015,8 @@ function reprocPrepareContext_(startTime, timeLimit) {
  * @private
  */
 function validateReprocSheets_(ss) {
-  var reviewSheet = ss.getSheetByName(SHEET.Q_REVIEW);
-  var factSheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
+  const reviewSheet = ss.getSheetByName(SHEET.Q_REVIEW);
+  const factSheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
 
   if (!reviewSheet || reviewSheet.getLastRow() < 2) {
     safeUiAlert_('Q_REVIEW ว่าง — ไม่มีข้อมูลจัดการ');
@@ -1002,15 +1038,13 @@ function validateReprocSheets_(ss) {
  * @private
  */
 function loadReprocSheetData_(reviewSheet, factSheet) {
-  var reviewLastRow = reviewSheet.getLastRow();
-  var reviewCols = reviewSheet.getLastColumn();
-  var reviewData = reviewSheet.getRange(2, 1, reviewLastRow - 1, reviewCols).getValues();
+  const reviewLastRow = reviewSheet.getLastRow();
+  const reviewCols = reviewSheet.getLastColumn();
+  const reviewData = reviewSheet.getRange(2, 1, reviewLastRow - 1, reviewCols).getValues();
 
-  var factLastRow = factSheet.getLastRow();
-  var factCols = factSheet.getLastColumn();
-  var factData = factLastRow > 1
-    ? factSheet.getRange(2, 1, factLastRow - 1, factCols).getValues()
-    : [];
+  const factLastRow = factSheet.getLastRow();
+  const factCols = factSheet.getLastColumn();
+  const factData = factLastRow > 1 ? factSheet.getRange(2, 1, factLastRow - 1, factCols).getValues() : [];
 
   return {
     reviewData: reviewData,
@@ -1029,42 +1063,42 @@ function loadReprocSheetData_(reviewSheet, factSheet) {
  * @private
  */
 function buildReprocColumnMaps_() {
-  var RI = {
-    issueType:  REVIEW_IDX.ISSUE_TYPE,
-    srcRecId:   REVIEW_IDX.SOURCE_REC_ID,
-    invoiceNo:  REVIEW_IDX.INVOICE_NO,
-    rawPerson:  REVIEW_IDX.RAW_PERSON,
-    rawPlace:   REVIEW_IDX.RAW_PLACE,
-    rawAddr:    REVIEW_IDX.RAW_SYS_ADDR,
-    rawLat:     REVIEW_IDX.RAW_LAT,
-    rawLng:     REVIEW_IDX.RAW_LNG,
+  const RI = {
+    issueType: REVIEW_IDX.ISSUE_TYPE,
+    srcRecId: REVIEW_IDX.SOURCE_REC_ID,
+    invoiceNo: REVIEW_IDX.INVOICE_NO,
+    rawPerson: REVIEW_IDX.RAW_PERSON,
+    rawPlace: REVIEW_IDX.RAW_PLACE,
+    rawAddr: REVIEW_IDX.RAW_SYS_ADDR,
+    rawLat: REVIEW_IDX.RAW_LAT,
+    rawLng: REVIEW_IDX.RAW_LNG,
     candPerson: REVIEW_IDX.CAND_PERSONS,
-    candPlace:  REVIEW_IDX.CAND_PLACES,
-    candGeo:    REVIEW_IDX.CAND_GEOS,
-    candDest:   REVIEW_IDX.CAND_DESTS,
-    score:      REVIEW_IDX.MATCH_SCORE,
-    status:     REVIEW_IDX.STATUS,
-    reviewer:   REVIEW_IDX.REVIEWER,
+    candPlace: REVIEW_IDX.CAND_PLACES,
+    candGeo: REVIEW_IDX.CAND_GEOS,
+    candDest: REVIEW_IDX.CAND_DESTS,
+    score: REVIEW_IDX.MATCH_SCORE,
+    status: REVIEW_IDX.STATUS,
+    reviewer: REVIEW_IDX.REVIEWER,
     reviewedAt: REVIEW_IDX.REVIEWED_AT,
-    decision:   REVIEW_IDX.DECISION,
-    note:       REVIEW_IDX.NOTE
+    decision: REVIEW_IDX.DECISION,
+    note: REVIEW_IDX.NOTE
   };
 
-  var FI = {
-    srcRecId:        FACT_IDX.SOURCE_REC_ID,
-    deliveryDate:    FACT_IDX.DELIVERY_DATE,
-    personId:        FACT_IDX.PERSON_ID,
-    placeId:         FACT_IDX.PLACE_ID,
-    geoId:           FACT_IDX.GEO_ID,
-    destId:          FACT_IDX.DEST_ID,
-    matchStatus:     FACT_IDX.MATCH_STATUS,
+  const FI = {
+    srcRecId: FACT_IDX.SOURCE_REC_ID,
+    deliveryDate: FACT_IDX.DELIVERY_DATE,
+    personId: FACT_IDX.PERSON_ID,
+    placeId: FACT_IDX.PLACE_ID,
+    geoId: FACT_IDX.GEO_ID,
+    destId: FACT_IDX.DEST_ID,
+    matchStatus: FACT_IDX.MATCH_STATUS,
     matchConfidence: FACT_IDX.MATCH_CONF,
-    matchReason:     FACT_IDX.MATCH_REASON,
-    matchAction:     FACT_IDX.MATCH_ACTION,
-    matchEvidence:   FACT_IDX.EVIDENCE,
-    updatedAt:       FACT_IDX.UPDATED_AT,
-    rawLat:          FACT_IDX.RAW_LAT,
-    rawLng:          FACT_IDX.RAW_LNG
+    matchReason: FACT_IDX.MATCH_REASON,
+    matchAction: FACT_IDX.MATCH_ACTION,
+    matchEvidence: FACT_IDX.EVIDENCE,
+    updatedAt: FACT_IDX.UPDATED_AT,
+    rawLat: FACT_IDX.RAW_LAT,
+    rawLng: FACT_IDX.RAW_LNG
   };
 
   return { RI: RI, FI: FI };
@@ -1079,9 +1113,9 @@ function buildReprocColumnMaps_() {
  * @private
  */
 function buildFactLookup_(factData, FI) {
-  var factLookup = {};
-  for (var fi = 0; fi < factData.length; fi++) {
-    var sid = String(safeExtractArr_(factData[fi], FI.srcRecId)).trim();
+  const factLookup = {};
+  for (let fi = 0; fi < factData.length; fi++) {
+    const sid = String(safeExtractArr_(factData[fi], FI.srcRecId)).trim();
     if (sid) factLookup[sid] = fi;
   }
   return factLookup;
@@ -1100,11 +1134,11 @@ function reprocProcessAllRows_(ctx, startTime, timeLimit) {
   // ═══════════════════════════════════════
   // PHASE 3: ประมวลผลทีละรายการ
   // ═══════════════════════════════════════
-  var stats = {
-    groupA: 0,       // GEO_NEARBY_YELLOW + name → AUTO_MATCH
-    groupB: 0,       // NEW_RECORD_PENDING + geo → CREATE_NEW
-    groupC: 0,       // FUZZY_MATCH 85+ → AUTO_MATCH
-    destCreated: 0,  // จำนวน Destination ที่สร้าง
+  const stats = {
+    groupA: 0, // GEO_NEARBY_YELLOW + name → AUTO_MATCH
+    groupB: 0, // NEW_RECORD_PENDING + geo → CREATE_NEW
+    groupC: 0, // FUZZY_MATCH 85+ → AUTO_MATCH
+    destCreated: 0, // จำนวน Destination ที่สร้าง
     skipped: 0,
     notFound: 0,
     errors: 0,
@@ -1113,26 +1147,26 @@ function reprocProcessAllRows_(ctx, startTime, timeLimit) {
     lastIdx: 0
   };
 
-  var now = new Date();
-  var RI = ctx.RI;
-  var FI = ctx.FI;
-  var reviewData = ctx.reviewData;
-  var factData = ctx.factData;
-  var factLookup = ctx.factLookup;
-  var startIdx = ctx.startIdx;
+  const now = new Date();
+  const RI = ctx.RI;
+  const FI = ctx.FI;
+  const reviewData = ctx.reviewData;
+  const factData = ctx.factData;
+  const factLookup = ctx.factLookup;
+  const startIdx = ctx.startIdx;
 
   // [PERF-001] เริ่มลูปจาก startIdx (จาก checkpoint) แทน 0
   // NOTE: ประกาศ `var i` นอกลูปเพื่อให้ reference ใช้ใน finally/report ได้ (preserves var-scope semantics)
-  var i;
+  let i;
   for (i = startIdx; i < reviewData.length; i++) {
-    var r = reviewData[i];
+    const r = reviewData[i];
 
     // ─── STEP 2: Time Guard ทุก 20 แถว (เหมือน applyAllPendingDecisions) ───
     //   ใช้ hasTimePassed_() จาก 14_Utils.gs — ลดความเสี่ยง GAS Timeout 6 นาที
     //   บันทึก checkpoint ก่อน break → resume รอบถัดไปไม่ต้องเริ่มจาก 0
     if (i > startIdx && (i - startIdx) % 20 === 0 && hasTimePassed_(startTime, timeLimit)) {
       logWarn('ReviewService', 'reprocessReviewQueue: Time Guard หยุดที่แถว ' + i + '/' + reviewData.length);
-      saveReprocessCheckpoint_(i);  // STEP 3: save checkpoint ก่อน break
+      saveReprocessCheckpoint_(i); // STEP 3: save checkpoint ก่อน break
       stats.timedOut = true;
       stats.lastIdx = i;
       break;
@@ -1141,27 +1175,27 @@ function reprocProcessAllRows_(ctx, startTime, timeLimit) {
     // Skip non-pending
     if (String(safeExtractArr_(r, RI.status)).trim() !== 'Pending') continue;
 
-    var issueType = String(safeExtractArr_(r, RI.issueType)).trim();
-    var score = parseInt(safeExtractArr_(r, RI.score)) || 0;
-    var srcRecId = String(safeExtractArr_(r, RI.srcRecId)).trim();
-    var rawPerson = String(safeExtractArr_(r, RI.rawPerson)).trim();
-    var rawPlace  = String(safeExtractArr_(r, RI.rawPlace)).trim();
-    var rawAddr   = String(safeExtractArr_(r, RI.rawAddr)).trim();
-    var rawLat    = parseFloat(safeExtractArr_(r, RI.rawLat)) || 0;
-    var rawLng    = parseFloat(safeExtractArr_(r, RI.rawLng)) || 0;
-    var candPerson = String(safeExtractArr_(r, RI.candPerson) || '[]').trim();
-    var candPlace  = String(safeExtractArr_(r, RI.candPlace) || '[]').trim();
-    var candGeo    = String(safeExtractArr_(r, RI.candGeo) || '[]').trim();
+    const issueType = String(safeExtractArr_(r, RI.issueType)).trim();
+    const score = parseInt(safeExtractArr_(r, RI.score)) || 0;
+    const srcRecId = String(safeExtractArr_(r, RI.srcRecId)).trim();
+    const rawPerson = String(safeExtractArr_(r, RI.rawPerson)).trim();
+    const rawPlace = String(safeExtractArr_(r, RI.rawPlace)).trim();
+    const rawAddr = String(safeExtractArr_(r, RI.rawAddr)).trim();
+    const rawLat = parseFloat(safeExtractArr_(r, RI.rawLat)) || 0;
+    const rawLng = parseFloat(safeExtractArr_(r, RI.rawLng)) || 0;
+    const candPerson = String(safeExtractArr_(r, RI.candPerson) || '[]').trim();
+    const candPlace = String(safeExtractArr_(r, RI.candPlace) || '[]').trim();
+    const candGeo = String(safeExtractArr_(r, RI.candGeo) || '[]').trim();
 
     // หา FACT_DELIVERY row
-    var factIdx = factLookup[srcRecId];
+    const factIdx = factLookup[srcRecId];
     if (factIdx === undefined) {
       stats.notFound++;
       continue;
     }
 
     // Package rowData เพื่อส่งให้ group helpers
-    var rowData = {
+    const rowData = {
       issueType: issueType,
       score: score,
       srcRecId: srcRecId,
@@ -1221,17 +1255,17 @@ function reprocProcessAllRows_(ctx, startTime, timeLimit) {
  * @private
  */
 function reprocApplyFactUpdate_(factData, factIdx, FI, fields, now) {
-  var row = factData[factIdx];
-  if (fields.personId        && FI.personId        >= 0) row[FI.personId]        = fields.personId;
-  if (fields.placeId         && FI.placeId         >= 0) row[FI.placeId]         = fields.placeId;
-  if (fields.geoId           && FI.geoId           >= 0) row[FI.geoId]           = fields.geoId;
-  if (fields.destId          && FI.destId          >= 0) row[FI.destId]          = fields.destId;
-  if (FI.matchStatus         >= 0) row[FI.matchStatus]         = fields.matchStatus;
-  if (FI.matchConfidence     >= 0) row[FI.matchConfidence]     = fields.matchConfidence;
-  if (FI.matchReason         >= 0) row[FI.matchReason]         = fields.matchReason;
-  if (FI.matchAction         >= 0) row[FI.matchAction]         = fields.matchAction;
-  if (FI.matchEvidence       >= 0 && fields.evidence) row[FI.matchEvidence] = fields.evidence;
-  if (FI.updatedAt           >= 0) row[FI.updatedAt]           = now;
+  const row = factData[factIdx];
+  if (fields.personId && FI.personId >= 0) row[FI.personId] = fields.personId;
+  if (fields.placeId && FI.placeId >= 0) row[FI.placeId] = fields.placeId;
+  if (fields.geoId && FI.geoId >= 0) row[FI.geoId] = fields.geoId;
+  if (fields.destId && FI.destId >= 0) row[FI.destId] = fields.destId;
+  if (FI.matchStatus >= 0) row[FI.matchStatus] = fields.matchStatus;
+  if (FI.matchConfidence >= 0) row[FI.matchConfidence] = fields.matchConfidence;
+  if (FI.matchReason >= 0) row[FI.matchReason] = fields.matchReason;
+  if (FI.matchAction >= 0) row[FI.matchAction] = fields.matchAction;
+  if (FI.matchEvidence >= 0 && fields.evidence) row[FI.matchEvidence] = fields.evidence;
+  if (FI.updatedAt >= 0) row[FI.updatedAt] = now;
 }
 
 /**
@@ -1244,11 +1278,11 @@ function reprocApplyFactUpdate_(factData, factIdx, FI, fields, now) {
  * @private
  */
 function reprocApplyReviewUpdate_(r, RI, decision, note, now) {
-  if (RI.status     >= 0) r[RI.status]     = 'Auto_Resolved';
-  if (RI.reviewer   >= 0) r[RI.reviewer]   = 'SYSTEM_V55';
+  if (RI.status >= 0) r[RI.status] = 'Auto_Resolved';
+  if (RI.reviewer >= 0) r[RI.reviewer] = 'SYSTEM_V55';
   if (RI.reviewedAt >= 0) r[RI.reviewedAt] = now;
-  if (RI.decision   >= 0) r[RI.decision]   = decision;
-  if (RI.note       >= 0) r[RI.note]       = note;
+  if (RI.decision >= 0) r[RI.decision] = decision;
+  if (RI.note >= 0) r[RI.note] = note;
 }
 
 /**
@@ -1267,7 +1301,7 @@ function reprocApplyReviewUpdate_(r, RI, decision, note, now) {
  */
 function reprocCreateDestinationViaGateway_(rowData, personId, placeId, geoId, stats, groupId) {
   if (!((personId || placeId) && geoId)) return null;
-  var result = reprocCreateDestinationForReview_(personId, placeId, geoId, rowData.rawLat, rowData.rawLng);
+  const result = reprocCreateDestinationForReview_(personId, placeId, geoId, rowData.rawLat, rowData.rawLng);
   if (result.destId) {
     stats.destCreated++;
     return result.destId;
@@ -1294,25 +1328,35 @@ function reprocCreateDestinationViaGateway_(rowData, personId, placeId, geoId, s
  */
 function reprocGroupA_YellowWithName_(r, factData, factIdx, rowData, RI, FI, now, stats) {
   try {
-    var personId = extractFirstId_(rowData.candPerson);
-    var placeId  = extractFirstId_(rowData.candPlace);
-    var geoId    = extractFirstId_(rowData.candGeo);
+    const personId = extractFirstId_(rowData.candPerson);
+    const placeId = extractFirstId_(rowData.candPlace);
+    const geoId = extractFirstId_(rowData.candGeo);
 
-    var destId = reprocCreateDestinationViaGateway_(rowData, personId, placeId, geoId, stats, 'A');
+    const destId = reprocCreateDestinationViaGateway_(rowData, personId, placeId, geoId, stats, 'A');
 
-    var ev = 'geo_nearby_50_200m';
+    let ev = 'geo_nearby_50_200m';
     if (personId) ev += '|person_match';
     if (placeId) ev += '|place_match';
     ev += '|post_process_v55';
 
-    reprocApplyFactUpdate_(factData, factIdx, FI, {
-      personId: personId, placeId: placeId, geoId: geoId, destId: destId,
-      matchStatus: 'AUTO_MATCHED', matchConfidence: 82,
-      matchReason: 'GEO_ANCHOR_AUTO', matchAction: 'AUTO_MATCH',
-      evidence: ev
-    }, now);
-    reprocApplyReviewUpdate_(r, RI, 'AUTO_MATCH',
-      'GEO_NEARBY_YELLOW + name match → auto-resolved by v5.5.010', now);
+    reprocApplyFactUpdate_(
+      factData,
+      factIdx,
+      FI,
+      {
+        personId: personId,
+        placeId: placeId,
+        geoId: geoId,
+        destId: destId,
+        matchStatus: 'AUTO_MATCHED',
+        matchConfidence: 82,
+        matchReason: 'GEO_ANCHOR_AUTO',
+        matchAction: 'AUTO_MATCH',
+        evidence: ev
+      },
+      now
+    );
+    reprocApplyReviewUpdate_(r, RI, 'AUTO_MATCH', 'GEO_NEARBY_YELLOW + name match → auto-resolved by v5.5.010', now);
 
     stats.groupA++;
   } catch (e) {
@@ -1330,45 +1374,56 @@ function reprocGroupA_YellowWithName_(r, factData, factIdx, rowData, RI, FI, now
  */
 function reprocGroupB_NewRecordWithGeo_(r, factData, factIdx, rowData, RI, FI, now, stats) {
   try {
-    var geoId = extractFirstId_(rowData.candGeo);
-    var personId = null;
-    var placeId = null;
-    var destId = null;
+    const geoId = extractFirstId_(rowData.candGeo);
+    let personId = null;
+    let placeId = null;
+    let destId = null;
 
     // [REF-001] Person: resolve-or-create via Group 1 public helper (no direct createPerson)
     if (rowData.rawPerson) {
-      var pResult = reprocResolveOrCreatePersonForReview_(rowData.rawPerson);
+      const pResult = reprocResolveOrCreatePersonForReview_(rowData.rawPerson);
       personId = pResult.personId;
       if (pResult.error) stats.errorList.push('Person-B: ' + rowData.srcRecId + ' - ' + pResult.error);
     }
 
     // [REF-001] Place: resolve-or-create via Group 1 public helper (no direct createPlace)
-    var placeInput = rowData.rawPlace || rowData.rawAddr || '';
+    const placeInput = rowData.rawPlace || rowData.rawAddr || '';
     if (placeInput) {
-      var plResult = reprocResolveOrCreatePlaceForReview_(rowData.rawPlace, rowData.rawAddr);
+      const plResult = reprocResolveOrCreatePlaceForReview_(rowData.rawPlace, rowData.rawAddr);
       placeId = plResult.placeId;
       if (plResult.error) stats.errorList.push('Place-B: ' + rowData.srcRecId + ' - ' + plResult.error);
     }
 
     // [REF-001] Destination: create via Group 1 public helper (no direct createDestination)
     if ((personId || placeId) && geoId) {
-      var dResult = reprocCreateDestinationForReview_(personId, placeId, geoId, rowData.rawLat, rowData.rawLng);
+      const dResult = reprocCreateDestinationForReview_(personId, placeId, geoId, rowData.rawLat, rowData.rawLng);
       destId = dResult.destId;
       if (dResult.destId) stats.destCreated++;
       if (dResult.error) stats.errorList.push('Dest-B: ' + rowData.srcRecId + ' - ' + dResult.error);
     }
 
-    reprocApplyFactUpdate_(factData, factIdx, FI, {
-      personId: personId, placeId: placeId, geoId: geoId, destId: destId,
-      matchStatus: 'CREATED', matchConfidence: 75,
-      matchReason: 'GEO_ANCHOR_NEW', matchAction: 'CREATE_NEW',
-      evidence: 'geo_existing' +
-        (personId ? '|person_new' : '|person_na') +
-        (placeId ? '|place_new' : '|place_na') +
-        '|post_process_v55'
-    }, now);
-    reprocApplyReviewUpdate_(r, RI, 'CREATE_NEW',
-      'NEW_RECORD_PENDING + Geo match → auto-create by v5.5.010', now);
+    reprocApplyFactUpdate_(
+      factData,
+      factIdx,
+      FI,
+      {
+        personId: personId,
+        placeId: placeId,
+        geoId: geoId,
+        destId: destId,
+        matchStatus: 'CREATED',
+        matchConfidence: 75,
+        matchReason: 'GEO_ANCHOR_NEW',
+        matchAction: 'CREATE_NEW',
+        evidence:
+          'geo_existing' +
+          (personId ? '|person_new' : '|person_na') +
+          (placeId ? '|place_new' : '|place_na') +
+          '|post_process_v55'
+      },
+      now
+    );
+    reprocApplyReviewUpdate_(r, RI, 'CREATE_NEW', 'NEW_RECORD_PENDING + Geo match → auto-create by v5.5.010', now);
 
     stats.groupB++;
   } catch (e) {
@@ -1384,24 +1439,40 @@ function reprocGroupB_NewRecordWithGeo_(r, factData, factIdx, rowData, RI, FI, n
  */
 function reprocGroupC_FuzzyHighScore_(r, factData, factIdx, rowData, RI, FI, now, stats) {
   try {
-    var personId = extractFirstId_(rowData.candPerson);
-    var placeId  = extractFirstId_(rowData.candPlace);
-    var geoId    = extractFirstId_(rowData.candGeo);
+    const personId = extractFirstId_(rowData.candPerson);
+    const placeId = extractFirstId_(rowData.candPlace);
+    const geoId = extractFirstId_(rowData.candGeo);
 
-    var destId = reprocCreateDestinationViaGateway_(rowData, personId, placeId, geoId, stats, 'C');
+    const destId = reprocCreateDestinationViaGateway_(rowData, personId, placeId, geoId, stats, 'C');
 
-    var ev = 'fuzzy_score_' + rowData.score;
+    let ev = 'fuzzy_score_' + rowData.score;
     if (geoId) ev += '|geo_confirm';
     ev += '|post_process_v55';
 
-    reprocApplyFactUpdate_(factData, factIdx, FI, {
-      personId: personId, placeId: placeId, geoId: geoId, destId: destId,
-      matchStatus: 'AUTO_MATCHED', matchConfidence: rowData.score,
-      matchReason: 'FUZZY_HIGH_SCORE_AUTO', matchAction: 'AUTO_MATCH',
-      evidence: ev
-    }, now);
-    reprocApplyReviewUpdate_(r, RI, 'AUTO_MATCH',
-      'FUZZY_MATCH score ' + rowData.score + ' → auto-resolved by v5.5.010', now);
+    reprocApplyFactUpdate_(
+      factData,
+      factIdx,
+      FI,
+      {
+        personId: personId,
+        placeId: placeId,
+        geoId: geoId,
+        destId: destId,
+        matchStatus: 'AUTO_MATCHED',
+        matchConfidence: rowData.score,
+        matchReason: 'FUZZY_HIGH_SCORE_AUTO',
+        matchAction: 'AUTO_MATCH',
+        evidence: ev
+      },
+      now
+    );
+    reprocApplyReviewUpdate_(
+      r,
+      RI,
+      'AUTO_MATCH',
+      'FUZZY_MATCH score ' + rowData.score + ' → auto-resolved by v5.5.010',
+      now
+    );
 
     stats.groupC++;
   } catch (e) {
@@ -1418,14 +1489,14 @@ function reprocGroupC_FuzzyHighScore_(r, factData, factIdx, rowData, RI, FI, now
  * @param {number} startTime - timestamp เริ่มต้น (สำหรับ elapsed calculation)
  */
 function reprocBatchWriteAndReport_(ctx, stats, startTime) {
-  var reviewSheet = ctx.reviewSheet;
-  var factSheet = ctx.factSheet;
-  var reviewData = ctx.reviewData;
-  var factData = ctx.factData;
-  var reviewCols = ctx.reviewCols;
-  var factCols = ctx.factCols;
-  var reviewLastRow = ctx.reviewLastRow;
-  var startIdx = ctx.startIdx;
+  const reviewSheet = ctx.reviewSheet;
+  const factSheet = ctx.factSheet;
+  const reviewData = ctx.reviewData;
+  const factData = ctx.factData;
+  const reviewCols = ctx.reviewCols;
+  const factCols = ctx.factCols;
+  const reviewLastRow = ctx.reviewLastRow;
+  const startIdx = ctx.startIdx;
 
   // ═══════════════════════════════════════
   // PHASE 4: เขียนข้อมูลกลับ (Batch Write)
@@ -1451,30 +1522,52 @@ function reprocBatchWriteAndReport_(ctx, stats, startTime) {
   // ═══════════════════════════════════════
   // PHASE 5: รายงานผล
   // ═══════════════════════════════════════
-  var totalResolved = stats.groupA + stats.groupB + stats.groupC;
-  var elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  var remaining = (reviewLastRow - 1) - totalResolved - startIdx;
+  const totalResolved = stats.groupA + stats.groupB + stats.groupC;
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  const remaining = reviewLastRow - 1 - totalResolved - startIdx;
 
-  var msg =
-    '✅ Post-Processor ' + (stats.timedOut ? 'หยุดกลางคัน (Time Guard)' : 'เสร็จสมบูรณ์') + ' (' + elapsed + ' วินาที)\n\n' +
+  let msg =
+    '✅ Post-Processor ' +
+    (stats.timedOut ? 'หยุดกลางคัน (Time Guard)' : 'เสร็จสมบูรณ์') +
+    ' (' +
+    elapsed +
+    ' วินาที)\n\n' +
     (startIdx > 0 ? '🔄 Resume จากแถว ' + (startIdx + 1) + '\n\n' : '') +
     '━━━ ผลลัพธ์ ━━━\n' +
-    '🟢 GEO_NEARBY_YELLOW + name → AUTO_MATCH: ' + stats.groupA + ' รายการ\n' +
-    '🔵 NEW_RECORD_PENDING + Geo → CREATE_NEW: ' + stats.groupB + ' รายการ\n' +
-    '🟡 FUZZY_MATCH 85+ → AUTO_MATCH: ' + stats.groupC + ' รายการ\n' +
-    '🔗 Destination สร้างใหม่: ' + stats.destCreated + ' รายการ\n\n' +
-    '⏭️ ข้าม (ต้อง Review ต่อ): ' + stats.skipped + ' รายการ\n' +
-    '❌ ไม่พบใน FACT: ' + stats.notFound + ' รายการ\n' +
-    '⚠️ Errors: ' + stats.errors + ' รายการ\n\n' +
+    '🟢 GEO_NEARBY_YELLOW + name → AUTO_MATCH: ' +
+    stats.groupA +
+    ' รายการ\n' +
+    '🔵 NEW_RECORD_PENDING + Geo → CREATE_NEW: ' +
+    stats.groupB +
+    ' รายการ\n' +
+    '🟡 FUZZY_MATCH 85+ → AUTO_MATCH: ' +
+    stats.groupC +
+    ' รายการ\n' +
+    '🔗 Destination สร้างใหม่: ' +
+    stats.destCreated +
+    ' รายการ\n\n' +
+    '⏭️ ข้าม (ต้อง Review ต่อ): ' +
+    stats.skipped +
+    ' รายการ\n' +
+    '❌ ไม่พบใน FACT: ' +
+    stats.notFound +
+    ' รายการ\n' +
+    '⚠️ Errors: ' +
+    stats.errors +
+    ' รายการ\n\n' +
     '━━━ สรุป ━━━\n' +
-    'ลด Q_REVIEW: ' + totalResolved + ' → คงเหลือ: ~' + Math.max(0, remaining) + ' รายการ\n';
+    'ลด Q_REVIEW: ' +
+    totalResolved +
+    ' → คงเหลือ: ~' +
+    Math.max(0, remaining) +
+    ' รายการ\n';
 
   if (stats.timedOut) {
     msg += '\n💾 บันทึกตำแหน่งไว้แล้ว กด Run อีกครั้งจะทำต่อจากแถวที่ ' + (stats.lastIdx + 1);
   }
 
   if (stats.errorList.length > 0) {
-    var showErrors = stats.errorList.slice(0, 5);
+    const showErrors = stats.errorList.slice(0, 5);
     msg += '\n\n⚠️ Error ตัวอย่าง:\n' + showErrors.join('\n');
     if (stats.errorList.length > 5) {
       msg += '\n... และอีก ' + (stats.errorList.length - 5) + ' errors (ดูใน SYS_LOG)';
@@ -1482,11 +1575,25 @@ function reprocBatchWriteAndReport_(ctx, stats, startTime) {
   }
 
   safeUiAlert_(msg);
-  logInfo('ReviewService',
-    'reprocessReviewQueue ' + (stats.timedOut ? 'หยุดกลางคัน' : 'เสร็จ') + ' ' + elapsed + 's | A=' + stats.groupA + ' B=' + stats.groupB +
-    ' C=' + stats.groupC + ' Skip=' + stats.skipped +
-    ' Err=' + stats.errors + ' Dest=' + stats.destCreated +
-    (stats.timedOut ? ' (checkpoint@' + stats.lastIdx + ')' : '')
+  logInfo(
+    'ReviewService',
+    'reprocessReviewQueue ' +
+      (stats.timedOut ? 'หยุดกลางคัน' : 'เสร็จ') +
+      ' ' +
+      elapsed +
+      's | A=' +
+      stats.groupA +
+      ' B=' +
+      stats.groupB +
+      ' C=' +
+      stats.groupC +
+      ' Skip=' +
+      stats.skipped +
+      ' Err=' +
+      stats.errors +
+      ' Dest=' +
+      stats.destCreated +
+      (stats.timedOut ? ' (checkpoint@' + stats.lastIdx + ')' : '')
   );
 }
 
@@ -1513,17 +1620,26 @@ function saveReprocessCheckpoint_(idx) {
  * @return {{ startIdx: number, timestamp: number }}
  */
 function loadReprocessCheckpoint_() {
-  var raw = PropertiesService.getScriptProperties().getProperty(REPROCESS_REVIEW_CHECKPOINT_KEY);
+  const raw = PropertiesService.getScriptProperties().getProperty(REPROCESS_REVIEW_CHECKPOINT_KEY);
   if (!raw) return { startIdx: 0 };
   try {
-    var cp = JSON.parse(raw);
+    const cp = JSON.parse(raw);
     // Stale protection: เก่ากว่า 24 ชม. → clear
-    if (cp.timestamp && (Date.now() - cp.timestamp) > 24 * 60 * 60 * 1000) {
+    if (cp.timestamp && Date.now() - cp.timestamp > 24 * 60 * 60 * 1000) {
       clearReprocessCheckpoint_();
       return { startIdx: 0 };
     }
     return cp;
   } catch (e) {
+    // [FIX BUG-AUDIT-013 V5.5.043] log ก่อน reset checkpoint เพื่อให้วินิจฉัย corruption ได้
+    logWarn(
+      'ReviewService',
+      'loadReprocessCheckpoint_: JSON.parse ล้มเหลว — reset to startIdx=0. ' +
+        'raw="' +
+        String(raw).substring(0, 200) +
+        '", error=' +
+        e.message
+    );
     return { startIdx: 0 };
   }
 }
@@ -1535,107 +1651,5 @@ function clearReprocessCheckpoint_() {
   PropertiesService.getScriptProperties().deleteProperty(REPROCESS_REVIEW_CHECKPOINT_KEY);
 }
 
-/**
- * analyzeReviewPatterns — [V5.5.010] วิเคราะห์ Q_REVIEW ปัจจุบัน
- * แสดงสถิติแบบแบ่งตาม issue type และคาดการณ์จำนวนที่ auto-resolve ได้
- */
-function analyzeReviewPatterns() {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var reviewSheet = ss.getSheetByName(SHEET.Q_REVIEW);
-
-    if (!reviewSheet || reviewSheet.getLastRow() < 2) {
-      safeUiAlert_('Q_REVIEW ว่าง — ไม่มีข้อมูลวิเคราะห์');
-      return;
-    }
-
-    var totalRows = reviewSheet.getLastRow() - 1;
-    var totalCols = SCHEMA[SHEET.Q_REVIEW].length;
-
-    // [PERF-013] ใช้ REVIEW_IDX.* constants แทน headers.indexOf() — Single Source of Truth
-    //   เดิมอ่าน headers แล้ว indexOf ทำให้ละเมิด V5.5.012 anti-pattern rule
-    //   และเสี่ยง silent wrong data ถ้า sheet header เปลี่ยน
-    //   ตอนนี้อ้างอิงจาก REVIEW_IDX (01_Config.gs) โดยตรง + ลด 1 API call (no headers read)
-    var data = reviewSheet.getRange(2, 1, totalRows, totalCols).getValues();
-
-    var col = {
-      issueType:  REVIEW_IDX.ISSUE_TYPE,
-      score:      REVIEW_IDX.MATCH_SCORE,
-      status:     REVIEW_IDX.STATUS,
-      rawLat:     REVIEW_IDX.RAW_LAT,
-      candPerson: REVIEW_IDX.CAND_PERSONS,
-      candPlace:  REVIEW_IDX.CAND_PLACES,
-      candGeo:    REVIEW_IDX.CAND_GEOS
-    };
-
-    var patterns = {
-      NEW_GPS: 0, NEW_NO_GPS: 0,
-      FUZZY_85: 0, FUZZY_80: 0, FUZZY_70: 0,
-      GEO_Y_MATCH: 0, GEO_Y_NO: 0, GEO_O: 0,
-      total: 0
-    };
-
-    for (var i = 0; i < totalRows; i++) {
-      var st = String(safeExtractArr_(data[i], col.status)).trim();
-      if (st !== 'Pending') continue;
-      patterns.total++;
-
-      var it = String(safeExtractArr_(data[i], col.issueType)).trim();
-      var sc = parseInt(safeExtractArr_(data[i], col.score)) || 0;
-
-      if (it === 'NEW_RECORD_PENDING') {
-        var lat = safeExtractArr_(data[i], col.rawLat);
-        if (lat && parseFloat(lat) !== 0) {
-          patterns.NEW_GPS++;
-        } else {
-          patterns.NEW_NO_GPS++;
-        }
-      } else if (it === 'FUZZY_MATCH') {
-        if (sc >= 85) patterns.FUZZY_85++;
-        else if (sc >= 80) patterns.FUZZY_80++;
-        else patterns.FUZZY_70++;
-      } else if (it === 'GEO_NEARBY_YELLOW') {
-        var cp = String(safeExtractArr_(data[i], col.candPerson) || '[]').trim();
-        var cpl = String(safeExtractArr_(data[i], col.candPlace) || '[]').trim();
-        if (cp !== '[]' || cpl !== '[]') {
-          patterns.GEO_Y_MATCH++;
-        } else {
-          patterns.GEO_Y_NO++;
-        }
-      } else if (it === 'GEO_NEARBY_ORANGE') {
-        patterns.GEO_O++;
-      }
-    }
-
-    var expectedA = Math.round(patterns.GEO_Y_MATCH * 0.95);
-    var expectedB = Math.round(patterns.NEW_GPS * 0.14);
-    var expectedC = Math.round(patterns.FUZZY_85 * 1.0);
-    var totalExpected = expectedA + expectedB + expectedC;
-
-    var message =
-      '📊 วิเคราะห์ Q_REVIEW Pattern\n\n' +
-      'Q_Pending ทั้งหมด: ' + patterns.total + ' รายการ\n\n' +
-      '🟢 [Group A] GEO_NEARBY_YELLOW + ชื่อตรง: ' + patterns.GEO_Y_MATCH +
-      '\n   → Auto-resolve ได้ ~' + expectedA + ' รายการ\n\n' +
-      '🔵 [Group B] NEW_RECORD_PENDING (มี GPS): ' + patterns.NEW_GPS +
-      '\n   → ในจำนวนนี้ มี Geo candidate ~' + Math.round(patterns.NEW_GPS * 0.14) +
-      ' → Auto-create ได้ ~' + expectedB + ' รายการ\n\n' +
-      '🟡 [Group C] FUZZY_MATCH (score 85-89): ' + patterns.FUZZY_85 +
-      '\n   → Auto-resolve ได้ ~' + expectedC + ' รายการ\n\n' +
-      '📊 คาดการณ์ลด Q_REVIEW: ~' + totalExpected + ' รายการ (' +
-      Math.round(totalExpected / patterns.total * 100) + '%)\n' +
-      '   คงเหลือรอ Review: ~' + (patterns.total - totalExpected) + ' รายการ\n\n' +
-      '━━━ รายละเอียดเพิ่มเติม ━━━\n' +
-      'FUZZY_MATCH 80-84: ' + patterns.FUZZY_80 + '\n' +
-      'FUZZY_MATCH 70-79: ' + patterns.FUZZY_70 + '\n' +
-      'GEO_NEARBY_YELLOW (ไม่มีชื่อ): ' + patterns.GEO_Y_NO + '\n' +
-      'GEO_NEARBY_ORANGE: ' + patterns.GEO_O;
-
-    safeUiAlert_(message);
-    logInfo('ReviewService', 'analyzeReviewPatterns: ' + message.replace(/\n/g, ' | '));
-
-  } catch (err) {
-    logError('ReviewService', 'analyzeReviewPatterns ล้มเหลว: ' + err.message, err);
-    safeUiAlert_('วิเคราะห์ล้มเหลว: ' + err.message);
-  }
-}
+// [REMOVED V5.5.044] analyzeReviewPatterns — dead code (mark @deprecated ใน V5.5.043, ไม่มี caller ใน .gs ใด)
+//   หากมี external caller ที่ต้องการ restore → ดู git history ของ commit นี้

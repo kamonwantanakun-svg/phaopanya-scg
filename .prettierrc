@@ -25,3 +25,12 @@ arrowParens: "always"
 
 # จัดบรรทัด end-of-line แบบ LF (Unix)
 endOfLine: "lf"
+
+# บอกให้ Prettier ใช้ parser ที่เหมาะสมกับนามสกุลไฟล์
+overrides:
+  - files: "*.gs"
+    options:
+      parser: babel
+  - files: "*.html"
+    options:
+      parser: html

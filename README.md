@@ -4,13 +4,13 @@
 
 | รายการ | ค่า |
 |--------|-----|
-| **เวอร์ชัน** | 5.5.034 (DOC-CODE SYNC — โค้ด ↔ เอกสารตรง 100%) |
-| **Last Updated** | 2026-07-03 |
+| **เวอร์ชัน** | 5.5.048 (DOC-CODE SYNC — โค้ด ↔ เอกสารตรง 100%) |
+| **Last Updated** | 2026-07-06 |
 | **Platform** | Google Apps Script + Google Sheets |
 | **Core Engine** | MatchEngine V5.5 with Hybrid Alias Architecture |
-| **Total Files** | 25 `.gs` files (24 production + 1 legacy `99_Legacy.gs`) |
-| **Total Lines** | ~17,567 (non-blank) |
-| **Total Functions** | 435 |
+| **Total Files** | 26 `.gs` files (24 production + 1 legacy `99_Legacy.gs` + 1 investigation script under `scripts/`) |
+| **Total Lines** | ~19,259 (non-blank) |
+| **Total Functions** | 433 |
 | **Total Sheets** | 19 |
 | **Total IDX Sets** | 16 |
 | **SCHEMA Definitions** | 19 (ลบ MAPS_CACHE ใน V5.5.013) |
@@ -676,7 +676,7 @@ LMDS_V5.5_FINAL_PACKAGE/
 │   │   ├── 14_Utils.gs
 │   │   ├── 19_Hardening.gs
 │   │   ├── 22_WebApp.gs
-│   │   └── 99_Legacy.gs            ← deprecated functions (V5.5.034)
+│   │   └── 99_Legacy.gs            ← deprecated functions (V5.5.048)
 │   │
 │   ├── 1_group1_master_db/         ← Group 1 Master DB (9 ไฟล์)
 │   │   ├── 05_NormalizeService.gs
@@ -1136,6 +1136,6 @@ Match Engine Decision (8 Rules)
 
 ---
 
-*LMDS V5.5.034 — Logistics Master Data System — Last Updated: 2026-07-03*
+*LMDS V5.5.048 — Logistics Master Data System — Last Updated: 2026-07-06*
 *DOC-CODE SYNC — โค้ด ↔ เอกสารตรง 100% — 16/16 Immutable Laws COMPLIANT (100%)*
 *Production Readiness: 97% — GO (Security Hardened)*

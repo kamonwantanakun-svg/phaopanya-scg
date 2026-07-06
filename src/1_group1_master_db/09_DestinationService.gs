@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.040
+ * VERSION: 6.0.002
  * FILE: 09_DestinationService.gs
  * LMDS V5.5 — Destination Master Service
  * ===================================================
@@ -65,9 +65,9 @@ function resolveDestination(personId, placeId, geoId) {
   // Normalize กัน null/'' ปน
   // [FIX CodeQL js/trivial-conditional V5.5.035] หลัง guard clause ข้างบน ตัวแปรทั้ง 3 ตัวเป็น truthy แน่นอน
   //  จึงไม่จำเป็นต้องใช้ || '' fallback
-  const pId  = String(personId).trim();
+  const pId = String(personId).trim();
   const plId = String(placeId).trim();
-  const gId  = String(geoId).trim();
+  const gId = String(geoId).trim();
 
   if (!pId || !plId || !gId) {
     return { destId: null, status: 'INSUFFICIENT', isNew: false };
@@ -76,17 +76,13 @@ function resolveDestination(personId, placeId, geoId) {
   const allDests = loadAllDestinations_();
 
   // Exact Match ด้วย Trinity ทั้ง 3
-  const exactMatch = allDests.find(d =>
-    d.personId === pId && d.placeId === plId && d.geoId === gId
-  );
+  const exactMatch = allDests.find((d) => d.personId === pId && d.placeId === plId && d.geoId === gId);
   if (exactMatch) {
     return { destId: exactMatch.destId, status: 'FOUND', isNew: false };
   }
 
   // Partial Match (Person + Geo) — fallback กรณียังไม่รู้ Place
-  const partialMatch = allDests.find(d =>
-    d.personId === pId && d.geoId === gId
-  );
+  const partialMatch = allDests.find((d) => d.personId === pId && d.geoId === gId);
   if (partialMatch) {
     return { destId: partialMatch.destId, status: 'PARTIAL_MATCH', isNew: false };
   }
@@ -105,48 +101,47 @@ function resolveDestination(personId, placeId, geoId) {
  */
 function createDestination(personId, placeId, geoId, lat, lng, deliveryDate) {
   try {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEET.M_DESTINATION);
-  const now   = new Date();
-  const newId = generateShortId('D');
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.M_DESTINATION);
+    const now = new Date();
+    const newId = generateShortId('D');
 
-  // [FIX v003] Validate lat/lng เป็น Number
-  const numLat = Number(lat);
-  const numLng = Number(lng);
-  // [FIX v5.5.001] เก็บ '' แทน 0,0 เมื่อพิกัดไม่ถูกต้อง — 0,0 เป็นพิกัดที่ทำให้เสียใจ
-  const safeLat = !isNaN(numLat) && numLat !== 0 ? numLat : '';
-  const safeLng = !isNaN(numLng) && numLng !== 0 ? numLng : '';
+    // [FIX v003] Validate lat/lng เป็น Number
+    const numLat = Number(lat);
+    const numLng = Number(lng);
+    // [FIX v5.5.001] เก็บ '' แทน 0,0 เมื่อพิกัดไม่ถูกต้อง — 0,0 เป็นพิกัดที่ทำให้เสียใจ
+    const safeLat = !isNaN(numLat) && numLat !== 0 ? numLat : '';
+    const safeLng = !isNaN(numLng) && numLng !== 0 ? numLng : '';
 
-  // [FIX v003] deliveryDate instanceof Date check แทน || now
-  let safeDate = now;
-  if (deliveryDate instanceof Date && !isNaN(deliveryDate.getTime())) {
-    safeDate = deliveryDate;
-  } else if (deliveryDate) {
-    const parsed = new Date(deliveryDate);
-    safeDate = !isNaN(parsed.getTime()) ? parsed : now;
-  }
+    // [FIX v003] deliveryDate instanceof Date check แทน || now
+    let safeDate = now;
+    if (deliveryDate instanceof Date && !isNaN(deliveryDate.getTime())) {
+      safeDate = deliveryDate;
+    } else if (deliveryDate) {
+      const parsed = new Date(deliveryDate);
+      safeDate = !isNaN(parsed.getTime()) ? parsed : now;
+    }
 
-  const newRow = [
-    newId,
-    personId  || '',
-    placeId   || '',
-    geoId     || '',
-    safeLat,
-    safeLng,
-    '',
-    safeDate,
-    1,
-    now,
-    APP_CONST.STATUS_ACTIVE,
-  ];
+    const newRow = [
+      newId,
+      personId || '',
+      placeId || '',
+      geoId || '',
+      safeLat,
+      safeLng,
+      '',
+      safeDate,
+      1,
+      now,
+      APP_CONST.STATUS_ACTIVE
+    ];
 
-  // [FIX-05 v5.4.003] ใช้ getRange+setValues แทน appendRow เพื่อความเสถียร
-  const lastRow = sheet.getLastRow();
-  sheet.getRange(lastRow + 1, 1, 1, newRow.length).setValues([newRow]);
-  invalidateDestCache_();
-  logDebug('DestinationService',
-    `createDestination: ${newId} P:${personId} PL:${placeId} G:${geoId}`);
-  return newId;
+    // [FIX-05 v5.4.003] ใช้ getRange+setValues แทน appendRow เพื่อความเสถียร
+    const lastRow = sheet.getLastRow();
+    sheet.getRange(lastRow + 1, 1, 1, newRow.length).setValues([newRow]);
+    invalidateDestCache_();
+    logDebug('DestinationService', `createDestination: ${newId} P:${personId} PL:${placeId} G:${geoId}`);
+    return newId;
   } catch (err) {
     // [FIX B3 v5.5.002] เพิ่ม try-catch ตาม Rule 12
     logError('DestinationService', `createDestination ล้มเหลว: ${err.message}`, err);
@@ -162,18 +157,19 @@ function createDestination(personId, placeId, geoId, lat, lng, deliveryDate) {
 function updateDestinationStats(destId, deliveryDate) {
   if (!destId) return;
   try {
-    const ss      = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet   = ss.getSheetByName(SHEET.M_DESTINATION);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.M_DESTINATION);
     const lastRow = sheet.getLastRow();
     if (lastRow < 2) return;
 
-    const idCol   = DEST_IDX.DEST_ID + 1;
-    const idData  = sheet.getRange(2, idCol, lastRow - 1, 1).getValues();
+    const idCol = DEST_IDX.DEST_ID + 1;
+    const idData = sheet.getRange(2, idCol, lastRow - 1, 1).getValues();
     let targetRow = -1;
 
     for (let i = 0; i < idData.length; i++) {
       if (String(idData[i][0]).trim() === destId) {
-        targetRow = i + 2; break;
+        targetRow = i + 2;
+        break;
       }
     }
 
@@ -183,9 +179,9 @@ function updateDestinationStats(destId, deliveryDate) {
     }
 
     // [FIX v5.4.002] Batch write — อ่าน 3 คอลัมน์ แก้ 3 คอลัมน์ ในครั้งเดียว
-    const lastSeenCol    = DEST_IDX.LAST_SEEN      + 1;
-    const usageCountCol  = DEST_IDX.USAGE_COUNT    + 1;
-    const delivDateCol   = DEST_IDX.DELIVERY_DATE  + 1;
+    const lastSeenCol = DEST_IDX.LAST_SEEN + 1;
+    const usageCountCol = DEST_IDX.USAGE_COUNT + 1;
+    const delivDateCol = DEST_IDX.DELIVERY_DATE + 1;
 
     const now = new Date();
 
@@ -199,8 +195,8 @@ function updateDestinationStats(destId, deliveryDate) {
     const currUsageCount = Number(rowData[usageCountCol - minCol]) || 0;
 
     // แก้ไขค่าที่ต้องการ
-    rowData[lastSeenCol - minCol]    = now;
-    rowData[usageCountCol - minCol]  = currUsageCount + 1;
+    rowData[lastSeenCol - minCol] = now;
+    rowData[usageCountCol - minCol] = currUsageCount + 1;
 
     if (deliveryDate) {
       const safeDate = deliveryDate instanceof Date ? deliveryDate : new Date(deliveryDate);
@@ -213,7 +209,6 @@ function updateDestinationStats(destId, deliveryDate) {
     sheet.getRange(targetRow, minCol, 1, numCols).setValues([rowData]);
 
     invalidateDestCache_();
-
   } catch (err) {
     // [FIX LAW-13 v5.4.003] ส่ง err object เพื่อให้ stack trace เข้า SYS_LOG
     logError('DestinationService', `updateDestinationStats ล้มเหลว: ${err.message}`, err);
@@ -231,35 +226,20 @@ function updateDestinationStats(destId, deliveryDate) {
 function getDestsByPersonId(personId) {
   const allDests = loadAllDestinations_();
   return allDests
-    .filter(d => d.personId === personId && d.status === APP_CONST.STATUS_ACTIVE)
+    .filter((d) => d.personId === personId && d.status === APP_CONST.STATUS_ACTIVE)
     .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0));
 }
 
 function getDestsByPlaceId(placeId) {
   const allDests = loadAllDestinations_();
   return allDests
-    .filter(d => d.placeId === placeId && d.status === APP_CONST.STATUS_ACTIVE)
+    .filter((d) => d.placeId === placeId && d.status === APP_CONST.STATUS_ACTIVE)
     .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0));
 }
 
-function getDestsByPersonAndPlace(personId, placeId) {
-  const allDests = loadAllDestinations_();
-  return allDests
-    .filter(d =>
-      d.personId === personId &&
-      d.placeId  === placeId  &&
-      d.status   === APP_CONST.STATUS_ACTIVE
-    )
-    .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0));
-}
-
-function getDominantDestByGeo(geoId) {
-  const allDests  = loadAllDestinations_();
-  const filtered  = allDests
-    .filter(d => d.geoId === geoId && d.status === APP_CONST.STATUS_ACTIVE)
-    .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0));
-  return filtered.length > 0 ? filtered[0] : null;
-}
+// [REMOVED V5.5.044] getDestsByPersonAndPlace — dead code (mark @deprecated ใน V5.5.043, ไม่มี caller ใน .gs ใด)
+// [REMOVED V5.5.044] getDominantDestByGeo — dead code (mark @deprecated ใน V5.5.043, ไม่มี caller ใน .gs ใด)
+//   หากมี external caller ที่ต้องการ restore → ดู git history ของ commit นี้
 
 // ============================================================
 // SECTION 4: Data Loaders
@@ -267,12 +247,12 @@ function getDominantDestByGeo(geoId) {
 
 function loadAllDestinations_() {
   const cacheKey = 'M_DEST_ALL';
-  const cache    = CacheService.getScriptCache();
+  const cache = CacheService.getScriptCache();
   // [PERF-004] [REF-010] ใช้ centralized loadChunkedCache_ จาก 14_Utils.gs
-  var cachedData = loadChunkedCache_(cache, cacheKey);
+  const cachedData = loadChunkedCache_(cache, cacheKey);
   if (cachedData) return cachedData;
 
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET.M_DESTINATION);
   if (!sheet || sheet.getLastRow() < 2) return [];
 
@@ -283,24 +263,23 @@ function loadAllDestinations_() {
   const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, colsToRead).getValues();
 
   const result = rows
-    .filter(r => r[DEST_IDX.DEST_ID])
+    .filter((r) => r[DEST_IDX.DEST_ID])
     // [FIX v003] filter ก่อน map — กรอง ARCHIVED และ MERGED
-    .filter(r => r[DEST_IDX.STATUS] !== APP_CONST.STATUS_ARCHIVED &&
-                 r[DEST_IDX.STATUS] !== APP_CONST.STATUS_MERGED)
-    .map(r => ({
-      destId:     String(r[DEST_IDX.DEST_ID]      || ''),
-      personId:   String(r[DEST_IDX.PERSON_ID]    || ''),
-      placeId:    String(r[DEST_IDX.PLACE_ID]     || ''),
-      geoId:      String(r[DEST_IDX.GEO_ID]       || ''),
+    .filter((r) => r[DEST_IDX.STATUS] !== APP_CONST.STATUS_ARCHIVED && r[DEST_IDX.STATUS] !== APP_CONST.STATUS_MERGED)
+    .map((r) => ({
+      destId: String(r[DEST_IDX.DEST_ID] || ''),
+      personId: String(r[DEST_IDX.PERSON_ID] || ''),
+      placeId: String(r[DEST_IDX.PLACE_ID] || ''),
+      geoId: String(r[DEST_IDX.GEO_ID] || ''),
       // [FIX Phase-B #12] lat/lng: '' / null / undefined → null (NOT 0)
       //   เดิม: Number(r[DEST_IDX.LAT] || 0) → Number('' || 0) → Number(0) → 0 → marker ตก (0,0) ที่อ่าวเบนิน
       //   ตอนนี้: invalid lat/lng → null → consumer จะได้รู้ว่าไม่มีพิกัด และ skip marker / show warning
-      lat:        _safeParseLatLng_(r[DEST_IDX.LAT]),
-      lng:        _safeParseLatLng_(r[DEST_IDX.LNG]),
-      routeLabel: String(r[DEST_IDX.ROUTE_LABEL]  || ''),  // [FIX v003] เพิ่ม
-      usageCount: Number(r[DEST_IDX.USAGE_COUNT]  || 0),
-      lastSeen:   r[DEST_IDX.LAST_SEEN]            || '',
-      status:     String(r[DEST_IDX.STATUS]        || ''),
+      lat: _safeParseLatLng_(r[DEST_IDX.LAT]),
+      lng: _safeParseLatLng_(r[DEST_IDX.LNG]),
+      routeLabel: String(r[DEST_IDX.ROUTE_LABEL] || ''), // [FIX v003] เพิ่ม
+      usageCount: Number(r[DEST_IDX.USAGE_COUNT] || 0),
+      lastSeen: r[DEST_IDX.LAST_SEEN] || '',
+      status: String(r[DEST_IDX.STATUS] || '')
     }));
 
   // [PERF-004] [REF-010] ใช้ centralized saveChunkedCache_ จาก 14_Utils.gs
@@ -320,25 +299,25 @@ function loadAllDestinations_() {
 function batchUpdateDestinationStats_(destStatsQueue) {
   if (!destStatsQueue || destStatsQueue.length === 0) return;
   try {
-    var ss      = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet   = ss.getSheetByName(SHEET.M_DESTINATION);
-    var lastRow = sheet.getLastRow();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.M_DESTINATION);
+    const lastRow = sheet.getLastRow();
     if (lastRow < 2) return;
 
-    var idCol         = DEST_IDX.DEST_ID        + 1;
-    var lastSeenCol   = DEST_IDX.LAST_SEEN      + 1;
-    var usageCountCol = DEST_IDX.USAGE_COUNT    + 1;
-    var delivDateCol  = DEST_IDX.DELIVERY_DATE  + 1;
-    var minCol = Math.min(idCol, lastSeenCol, usageCountCol, delivDateCol);
-    var maxCol = Math.max(idCol, lastSeenCol, usageCountCol, delivDateCol);
-    var numCols = maxCol - minCol + 1;
+    const idCol = DEST_IDX.DEST_ID + 1;
+    const lastSeenCol = DEST_IDX.LAST_SEEN + 1;
+    const usageCountCol = DEST_IDX.USAGE_COUNT + 1;
+    const delivDateCol = DEST_IDX.DELIVERY_DATE + 1;
+    const minCol = Math.min(idCol, lastSeenCol, usageCountCol, delivDateCol);
+    const maxCol = Math.max(idCol, lastSeenCol, usageCountCol, delivDateCol);
+    const numCols = maxCol - minCol + 1;
 
-    var allData = sheet.getRange(2, minCol, lastRow - 1, numCols).getValues();
+    const allData = sheet.getRange(2, minCol, lastRow - 1, numCols).getValues();
 
     // Build a map from destId to {index, deliveryDate} for efficient lookup
-    var destIdMap = {};
-    destStatsQueue.forEach(function(item) {
-      var did = String(item.destId || '').trim();
+    const destIdMap = {};
+    destStatsQueue.forEach(function (item) {
+      const did = String(item.destId || '').trim();
       if (did) {
         // Keep the latest deliveryDate per destId
         if (!destIdMap[did]) {
@@ -348,19 +327,20 @@ function batchUpdateDestinationStats_(destStatsQueue) {
       }
     });
 
-    var now = new Date();
-    var updated = 0;
+    const now = new Date();
+    let updated = 0;
 
-    for (var i = 0; i < allData.length; i++) {
-      var did = String(allData[i][idCol - minCol] || '').trim();
+    for (let i = 0; i < allData.length; i++) {
+      const did = String(allData[i][idCol - minCol] || '').trim();
       if (destIdMap[did]) {
         allData[i][lastSeenCol - minCol] = now;
-        var currCount = Number(allData[i][usageCountCol - minCol]) || 0;
+        const currCount = Number(allData[i][usageCountCol - minCol]) || 0;
         allData[i][usageCountCol - minCol] = currCount + destIdMap[did].count;
         if (destIdMap[did].deliveryDate) {
-          var safeDate = destIdMap[did].deliveryDate instanceof Date
-            ? destIdMap[did].deliveryDate
-            : new Date(destIdMap[did].deliveryDate);
+          const safeDate =
+            destIdMap[did].deliveryDate instanceof Date
+              ? destIdMap[did].deliveryDate
+              : new Date(destIdMap[did].deliveryDate);
           if (!isNaN(safeDate.getTime())) {
             allData[i][delivDateCol - minCol] = safeDate;
           }

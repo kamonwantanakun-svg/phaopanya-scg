@@ -1,616 +1,536 @@
 <script>
-/**
- * js/App.html — Main Application Logic
- * ===================================================
- * ทำหน้าที่เป็น router + polling controller + view orchestrator
- *
- * หน้าที่หลัก:
- * 1. init() — เริ่มต้นแอป ตั้ง polling แสดง SSR data
- * 2. Route handling — ฟัง hashchange แล้ว render view ที่ถูกต้อง
- * 3. Polling — ทุก 60 วินาที refresh view ปัจจุบัน
- * 4. Toast notifications — แสดง error/success messages
- * 5. Session management — ฟัง auth:session-expired
- * ===================================================
- */
-
-(function () {
-  'use strict';
-
-  // ────────────────────────────────────────────────────────────
-  // Constants
-  // ────────────────────────────────────────────────────────────
-  const POLL_INTERVAL_MS = globalThis.__POLL_INTERVAL_MS__ || 60000;
-  const REFRESH_COUNTDOWN_UPDATE_MS = 1000;
-
-  // ────────────────────────────────────────────────────────────
-  // State
-  // ────────────────────────────────────────────────────────────
-  let currentRoute = 'dashboard';
-  let currentData = null;
-  let refreshTimer = null;
-  let countdownTimer = null;
-  let nextRefreshAt = null;
-  let isRefreshing = false;
-
-  // ────────────────────────────────────────────────────────────
-  // DOM References (จะถูก cache ตอน init)
-  // ────────────────────────────────────────────────────────────
-  let viewContainer = null;
-  let loadingState = null;
-  let errorState = null;
-  let errorMessage = null;
-  let refreshCountdown = null;
-  let liveIndicator = null;
-  let manualRefreshBtn = null;
-  let navLinks = null;
-  let deployedAtEl = null;
-
-  // ────────────────────────────────────────────────────────────
-  // Init
-  // ────────────────────────────────────────────────────────────
-
   /**
-   * init — เริ่มต้นแอป
-   *   เรียกตอน DOMContentLoaded
+   * js/App.html — Main Application Logic
+   * ===================================================
+   * ทำหน้าที่เป็น router + polling controller + view orchestrator
+   *
+   * หน้าที่หลัก:
+   * 1. init() — เริ่มต้นแอป ตั้ง polling แสดง SSR data
+   * 2. Route handling — ฟัง hashchange แล้ว render view ที่ถูกต้อง
+   * 3. Polling — ทุก 60 วินาที refresh view ปัจจุบัน
+   * 4. Toast notifications — แสดง error/success messages
+   * 5. Session management — ฟัง auth:session-expired
+   * ===================================================
    */
-  function init() {
-    console.log('[app] Initializing LMDS Dashboard v' + (globalThis.__APP_VERSION__ || '?'));
 
-    // Cache DOM references
-    viewContainer = document.getElementById('viewContainer');
-    loadingState = document.getElementById('loadingState');
-    errorState = document.getElementById('errorState');
-    errorMessage = document.getElementById('errorMessage');
-    refreshCountdown = document.getElementById('refreshCountdown');
-    liveIndicator = document.getElementById('liveIndicator');
-    manualRefreshBtn = document.getElementById('manualRefreshBtn');
-    navLinks = document.querySelectorAll('.nav-link');
-    deployedAtEl = document.getElementById('deployedAt');
+  (function () {
+    'use strict';
 
-    // แสดงเวลา deploy
-    if (deployedAtEl && globalThis.__DEPLOYED_AT__) {
-      const dt = new Date(globalThis.__DEPLOYED_AT__);
-      deployedAtEl.textContent = dt.toLocaleDateString('th-TH', { dateStyle: 'short' });
-    }
+    // ────────────────────────────────────────────────────────────
+    // Constants
+    // ────────────────────────────────────────────────────────────
+    // [REMOVED V5.5.049] Auto-polling removed — manual refresh only
 
-    // เริ่มต้น auth
-    // [FIX BUG-04] ห่อ try/catch — ถ้า auth.init() พัง (เช่น localStorage ใช้ไม่ได้
-    //   ใน sandboxed iframe บางสถานการณ์) ต้องไม่ลาก bindEvents_()/refresh_() ที่อยู่
-    //   ถัดไปไม่ให้ทำงานไปด้วย ไม่งั้นทุกปุ่มจะไม่ตอบสนองทั้งหน้า
-    try {
-      if (globalThis.auth) {
-        globalThis.auth.init();
+    // ────────────────────────────────────────────────────────────
+    // State
+    // ────────────────────────────────────────────────────────────
+    let currentRoute = 'dashboard';
+    let currentData = null;
+    let isRefreshing = false;
+
+    // ────────────────────────────────────────────────────────────
+    // DOM References (จะถูก cache ตอน init)
+    // ────────────────────────────────────────────────────────────
+    let viewContainer = null;
+    let loadingState = null;
+    let errorState = null;
+    let errorMessage = null;
+    let manualRefreshBtn = null;
+    let navLinks = null;
+    let deployedAtEl = null;
+
+    // ────────────────────────────────────────────────────────────
+    // Init
+    // ────────────────────────────────────────────────────────────
+
+    /**
+     * init — เริ่มต้นแอป
+     *   เรียกตอน DOMContentLoaded
+     */
+    function init() {
+      console.log('[app] Initializing LMDS Dashboard v' + (globalThis.__APP_VERSION__ || '?'));
+
+      // Cache DOM references
+      viewContainer = document.getElementById('viewContainer');
+      loadingState = document.getElementById('loadingState');
+      errorState = document.getElementById('errorState');
+      errorMessage = document.getElementById('errorMessage');
+      manualRefreshBtn = document.getElementById('manualRefreshBtn');
+      navLinks = document.querySelectorAll('.nav-link');
+      deployedAtEl = document.getElementById('deployedAt');
+
+      // แสดงเวลา deploy
+      if (deployedAtEl && globalThis.__DEPLOYED_AT__) {
+        const dt = new Date(globalThis.__DEPLOYED_AT__);
+        deployedAtEl.textContent = dt.toLocaleDateString('th-TH', { dateStyle: 'short' });
       }
-    } catch (err) {
-      console.warn('[app] auth.init() failed — continuing without it:', err);
-    }
 
-    // ฟัง events
-    bindEvents_();
-
-    // [FIX Phase 1] ปิด SSR data path — ใช้ client-side fetch แทน
-    //   สาเหตุ: doGet() ใช้เวลา 4.5+ วินาที (getDashboardData) → บางครั้ง timeout
-    //   ทำให้ __INITIAL_DATA__ เป็น undefined → render null → throw error
-    //
-    //   วิธีใหม่: แสดง loading state ทันที → fetch ข้อมูลเองผ่าน api.getDashboardData()
-    //   ผล: หน้าโหลดเร็ว (~1 วิ) + แสดง loading ขณะรอ + ไม่มีปัญหา null data
-    console.log('[app] No SSR data, fetching...');
-    refresh_(true);
-
-    console.log('[app] Init complete');
-  }
-
-  /**
-   * bindEvents_ — ผูก event listeners ทั้งหมด
-   * @private
-   */
-  function bindEvents_() {
-    // [FIX White Screen v2 + BUG-04] แยกแต่ละ binding step เป็นฟังก์ชันย่อย
-    //   แต่ละฟังก์ชันมี try/catch ของตัวเอง — ถ้าอันใดอันหนึ่งพังจะไม่ลากอันอื่นไปด้วย
-    //   และไม่ใช้ google.script.history อีกต่อไปเพราะ trigger OAuth dialog redirect
-    bindManualRefreshButton_();
-    bindSessionExpiredHandler_();
-    bindVisibilityHandler_();
-    bindGlobalErrorHandler_();
-    console.log('[app] All event handlers bound — using in-memory routing (no URL hash changes)');
-  }
-
-  /**
-   * bindManualRefreshButton_ — ผูกปุ่ม manual refresh
-   * @private
-   */
-  function bindManualRefreshButton_() {
-    if (!manualRefreshBtn) return;
-    manualRefreshBtn.addEventListener('click', () => {
-      console.log('[app] Manual refresh triggered');
-      refresh_(false);
-    });
-  }
-
-  /**
-   * bindSessionExpiredHandler_ — ผูก auth:session-expired listener
-   * @private
-   */
-  function bindSessionExpiredHandler_() {
-    document.addEventListener('auth:session-expired', () => {
-      console.warn('[app] Session expired — stopping polling');
-      stopPolling_();
-      showToast_('⏰ Session หมดอายุ', 'session หมดอายุเนื่องจากไม่ได้ใช้งาน 30 นาที กรุณารีโหลดหน้า', 'warning', 10000);
-    });
-  }
-
-  /**
-   * bindVisibilityHandler_ — ผูก visibilitychange listener (หยุด/เริ่ม polling)
-   * @private
-   */
-  function bindVisibilityHandler_() {
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        console.log('[app] Tab hidden — pausing polling');
-        stopPolling_();
-      } else {
-        console.log('[app] Tab visible — resuming polling');
-        refresh_(false);
-        startPolling_();
-      }
-    });
-  }
-
-  /**
-   * bindGlobalErrorHandler_ — จับ uncaught exceptions + unhandled promise rejections
-   *   ป้องกันไม่ให้ error ทำให้หน้าขาวโดยไม่มี error message
-   * @private
-   */
-  function bindGlobalErrorHandler_() {
-    globalThis.addEventListener('error', (event) => {
-      console.error('[app] Uncaught error:', event.message, event.error);
-      showToast_('⚠️ เกิดข้อผิดพลาด', event.message || 'Unknown error', 'error', 8000);
-    });
-    globalThis.addEventListener('unhandledrejection', (event) => {
-      console.error('[app] Unhandled promise rejection:', event.reason);
-      const msg = (event.reason && event.reason.message) ? event.reason.message : String(event.reason);
-      showToast_('⚠️ เกิดข้อผิดพลาด', msg, 'error', 8000);
-    });
-  }
-
-  /**
-   * navigateTo_ — เปลี่ยนหน้า (in-memory routing ไม่เปลี่ยน URL)
-   *   เรียกจาก onclick ของ nav buttons ใน Index.html
-   *   [FIX White Screen v2] ไม่ใช้ google.script.history.push() อีกต่อไป
-   *   เพราะ trigger OAuth dialog redirect ในบาง session
-   * @param {string} route — 'dashboard' | 'fact' | 'qreview' | 'source' | 'match' | 'search'
-   * @public
-   */
-  function navigateTo_(route) {
-    console.log('[app] navigateTo_:', route);
-    try {
-      currentRoute = route || 'dashboard';
-      updateActiveNav_(currentRoute);
-      renderCurrentRoute_(false);
-    } catch (err) {
-      console.error('[app] navigateTo_ failed:', err);
-      showError_('ไม่สามารถเปลี่ยนหน้าได้: ' + (err.message || err));
-    }
-  }
-
-  // เปิดให้เรียกจาก onclick ใน HTML
-  globalThis.navigateTo_ = navigateTo_;
-
-  /**
-   * updateActiveNav_ — อัปเดต active class ของ nav links
-   * @private
-   */
-  function updateActiveNav_(route) {
-    navLinks.forEach((link) => {
-      if (link.dataset.route === route) {
-        link.classList.add('active');
-        link.classList.remove('text-gray-500');
-        link.classList.add('text-gray-700');
-      } else {
-        link.classList.remove('active');
-        link.classList.add('text-gray-500');
-        link.classList.remove('text-gray-700');
-      }
-    });
-  }
-
-  // ────────────────────────────────────────────────────────────
-  // Router
-  // ────────────────────────────────────────────────────────────
-
-  // [FIX White Screen v2] handleHashChange_ ถูกลบแล้ว — เราไม่ใช้ hash routing อีกต่อไป
-  //   ดู bindEvents_() และ navigateTo_() สำหรับ in-memory routing
-
-  /**
-   * renderCurrentRoute_ — render view ตาม route ปัจจุบัน
-   * @param {boolean} fetchData — ถ้า true จะ fetch ข้อมูลใหม่ก่อน render
-   * @private
-   */
-  function renderCurrentRoute_(fetchData) {
-    if (!viewContainer) {
-      console.error('[app] viewContainer is null!');
-      return;
-    }
-
-    // ซ่อน loading/error states
-    hideLoading_();
-    hideError_();
-
-    if (fetchData && globalThis.api) {
-      // ดึงข้อมูลใหม่จาก server แล้วค่อย render
-      refresh_(false);
-      return;
-    }
-
-    // [FIX Phase 1] ถ้า currentData ยังเป็น null (refresh_ ยังไม่เสร็จ)
-    //   แค่ route 'dashboard' เท่านั้นที่ต้องการ currentData — route อื่น render ได้เลย
-    if (!currentData && currentRoute === 'dashboard') {
-      console.warn('[app] currentData is null — showing placeholder for dashboard');
-      viewContainer.innerHTML =
-        '<div class="flex items-center justify-center h-64">' +
-          '<div class="text-center">' +
-            '<div class="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>' +
-            '<p class="mt-3 text-sm text-gray-500">กำลังโหลดข้อมูล Dashboard...</p>' +
-          '</div>' +
-        '</div>';
-      return;
-    }
-
-    // ใช้ currentData ที่มีอยู่
-    console.log('[app] Rendering route:', currentRoute, 'with data:', currentData ? 'yes' : 'no');
-    try {
-      // [SonarCloud S3776] แยก switch ออกเป็น helper function เพื่อลด Cognitive Complexity
-      renderRouteView_(currentRoute);
-    } catch (err) {
-      console.error('[app] Render error:', err);
-      showError_('เกิดข้อผิดพลาดในการแสดงผล: ' + err.message);
-    }
-  }
-
-  /**
-   * renderRouteView_ — เรียก view module ที่ถูกต้องตาม route
-   *   [SonarCloud S3776] แยก switch ออกจาก renderCurrentRoute_ เพื่อลด Cognitive Complexity
-   * @param {string} route
-   * @private
-   */
-  function renderRouteView_(route) {
-    switch (route) {
-      case 'dashboard':
-        renderView_('DashboardView', 'Dashboard');
-        break;
-      case 'qreview':
-        renderView_('QReviewView', 'Q_REVIEW');
-        break;
-      case 'fact':
-        renderView_('FactDeliveryView', 'FACT_DELIVERY');
-        break;
-      case 'source':
-        renderView_('SourceSheetView', 'Source Sheet');
-        break;
-      case 'match':
-        renderView_('MatchEngineView', 'Match Engine');
-        break;
-      case 'search':
-        // Search view ไม่มี error fallback (silent)
-        if (globalThis.SearchView) {
-          globalThis.SearchView.render(currentData, viewContainer);
-          renderIcons_();
+      // เริ่มต้น auth
+      // [FIX BUG-04] ห่อ try/catch — ถ้า auth.init() พัง (เช่น localStorage ใช้ไม่ได้
+      //   ใน sandboxed iframe บางสถานการณ์) ต้องไม่ลาก bindEvents_()/refresh_() ที่อยู่
+      //   ถัดไปไม่ให้ทำงานไปด้วย ไม่งั้นทุกปุ่มจะไม่ตอบสนองทั้งหน้า
+      try {
+        if (globalThis.auth) {
+          globalThis.auth.init();
         }
-        break;
-      default:
-        renderNotFound_();
-    }
-  }
+      } catch (err) {
+        console.warn('[app] auth.init() failed — continuing without it:', err);
+      }
 
-  /**
-   * renderView_ — helper สำหรับ render view module ทั่วไป
-   *   ตรวจว่า module loaded ไหม ถ้าไม่โชว์ error
-   * @param {string} moduleName - ชื่อ globalThis property (เช่น 'DashboardView')
-   * @param {string} displayName - ชื่อที่จะแสดงใน error message
-   * @private
-   */
-  function renderView_(moduleName, displayName) {
-    if (globalThis[moduleName]) {
-      globalThis[moduleName].render(currentData, viewContainer);
-      renderIcons_();
-    } else {
-      console.error('[app] ' + moduleName + ' not loaded!');
-      showError_(moduleName + ' not loaded');
-    }
-  }
+      // ฟัง events
+      bindEvents_();
 
-  /**
-   * renderNotFound_ — แสดงหน้า 404
-   * @private
-   */
-  function renderNotFound_() {
-    viewContainer.innerHTML =
-      '<div class="bg-white border border-gray-200 rounded-lg p-12 text-center">' +
+      // [FIX Phase 1] ปิด SSR data path — ใช้ client-side fetch แทน
+      //   สาเหตุ: doGet() ใช้เวลา 4.5+ วินาที (getDashboardData) → บางครั้ง timeout
+      //   ทำให้ __INITIAL_DATA__ เป็น undefined → render null → throw error
+      //
+      //   วิธีใหม่: แสดง loading state ทันที → fetch ข้อมูลเองผ่าน api.getDashboardData()
+      //   ผล: หน้าโหลดเร็ว (~1 วิ) + แสดง loading ขณะรอ + ไม่มีปัญหา null data
+      console.log('[app] No SSR data, fetching...');
+      refresh_(true);
+
+      console.log('[app] Init complete');
+    }
+
+    /**
+     * bindEvents_ — ผูก event listeners ทั้งหมด
+     * @private
+     */
+    function bindEvents_() {
+      // [FIX White Screen v2 + BUG-04] แยกแต่ละ binding step เป็นฟังก์ชันย่อย
+      //   แต่ละฟังก์ชันมี try/catch ของตัวเอง — ถ้าอันใดอันหนึ่งพังจะไม่ลากอันอื่นไปด้วย
+      //   และไม่ใช้ google.script.history อีกต่อไปเพราะ trigger OAuth dialog redirect
+      bindManualRefreshButton_();
+      bindSessionExpiredHandler_();
+      bindVisibilityHandler_();
+      bindGlobalErrorHandler_();
+      console.log('[app] All event handlers bound — using in-memory routing (no URL hash changes)');
+    }
+
+    /**
+     * bindManualRefreshButton_ — ผูกปุ่ม manual refresh
+     * @private
+     */
+    function bindManualRefreshButton_() {
+      if (!manualRefreshBtn) return;
+      manualRefreshBtn.addEventListener('click', () => {
+        console.log('[app] Manual refresh triggered');
+        refresh_(false);
+      });
+    }
+
+    /**
+     * bindSessionExpiredHandler_ — ผูก auth:session-expired listener
+     * @private
+     */
+    function bindSessionExpiredHandler_() {
+      document.addEventListener('auth:session-expired', () => {
+        console.warn('[app] Session expired');
+        showToast_(
+          '⏰ Session หมดอายุ',
+          'session หมดอายุเนื่องจากไม่ได้ใช้งาน 30 นาที กรุณารีโหลดหน้า',
+          'warning',
+          10000
+        );
+      });
+    }
+
+    /**
+     * bindVisibilityHandler_ — ผูก visibilitychange listener (หยุด/เริ่ม polling)
+     * @private
+     */
+    function bindVisibilityHandler_() {
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+          console.log('[app] Tab visible — refreshing data');
+          refresh_(false);
+        }
+      });
+    }
+
+    /**
+     * bindGlobalErrorHandler_ — จับ uncaught exceptions + unhandled promise rejections
+     *   ป้องกันไม่ให้ error ทำให้หน้าขาวโดยไม่มี error message
+     * @private
+     */
+    function bindGlobalErrorHandler_() {
+      globalThis.addEventListener('error', (event) => {
+        console.error('[app] Uncaught error:', event.message, event.error);
+        showToast_('⚠️ เกิดข้อผิดพลาด', event.message || 'Unknown error', 'error', 8000);
+      });
+      globalThis.addEventListener('unhandledrejection', (event) => {
+        console.error('[app] Unhandled promise rejection:', event.reason);
+        const msg = event.reason && event.reason.message ? event.reason.message : String(event.reason);
+        showToast_('⚠️ เกิดข้อผิดพลาด', msg, 'error', 8000);
+      });
+    }
+
+    /**
+     * navigateTo_ — เปลี่ยนหน้า (in-memory routing ไม่เปลี่ยน URL)
+     *   เรียกจาก onclick ของ nav buttons ใน Index.html
+     *   [FIX White Screen v2] ไม่ใช้ google.script.history.push() อีกต่อไป
+     *   เพราะ trigger OAuth dialog redirect ในบาง session
+     * @param {string} route — 'dashboard' | 'fact' | 'qreview' | 'source' | 'match' | 'search'
+     * @public
+     */
+    function navigateTo_(route) {
+      console.log('[app] navigateTo_:', route);
+      try {
+        currentRoute = route || 'dashboard';
+        updateActiveNav_(currentRoute);
+        renderCurrentRoute_(false);
+      } catch (err) {
+        console.error('[app] navigateTo_ failed:', err);
+        showError_('ไม่สามารถเปลี่ยนหน้าได้: ' + (err.message || err));
+      }
+    }
+
+    // เปิดให้เรียกจาก onclick ใน HTML
+    globalThis.navigateTo_ = navigateTo_;
+
+    /**
+     * updateActiveNav_ — อัปเดต active class ของ nav links
+     * @private
+     */
+    function updateActiveNav_(route) {
+      navLinks.forEach((link) => {
+        if (link.dataset.route === route) {
+          link.classList.add('active');
+          link.classList.remove('text-gray-500');
+          link.classList.add('text-gray-700');
+        } else {
+          link.classList.remove('active');
+          link.classList.add('text-gray-500');
+          link.classList.remove('text-gray-700');
+        }
+      });
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Router
+    // ────────────────────────────────────────────────────────────
+
+    // [FIX White Screen v2] handleHashChange_ ถูกลบแล้ว — เราไม่ใช้ hash routing อีกต่อไป
+    //   ดู bindEvents_() และ navigateTo_() สำหรับ in-memory routing
+
+    /**
+     * renderCurrentRoute_ — render view ตาม route ปัจจุบัน
+     * @param {boolean} fetchData — ถ้า true จะ fetch ข้อมูลใหม่ก่อน render
+     * @private
+     */
+    function renderCurrentRoute_(fetchData) {
+      if (!viewContainer) {
+        console.error('[app] viewContainer is null!');
+        return;
+      }
+
+      // ซ่อน loading/error states
+      hideLoading_();
+      hideError_();
+
+      if (fetchData && globalThis.api) {
+        // ดึงข้อมูลใหม่จาก server แล้วค่อย render
+        refresh_(false);
+        return;
+      }
+
+      // [FIX Phase 1] ถ้า currentData ยังเป็น null (refresh_ ยังไม่เสร็จ)
+      //   แค่ route 'dashboard' เท่านั้นที่ต้องการ currentData — route อื่น render ได้เลย
+      if (!currentData && currentRoute === 'dashboard') {
+        console.warn('[app] currentData is null — showing placeholder for dashboard');
+        viewContainer.innerHTML =
+          '<div class="flex items-center justify-center h-64">' +
+          '<div class="text-center">' +
+          '<div class="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>' +
+          '<p class="mt-3 text-sm text-gray-500">กำลังโหลดข้อมูล Dashboard...</p>' +
+          '</div>' +
+          '</div>';
+        return;
+      }
+
+      // ใช้ currentData ที่มีอยู่
+      console.log('[app] Rendering route:', currentRoute, 'with data:', currentData ? 'yes' : 'no');
+      try {
+        // [SonarCloud S3776] แยก switch ออกเป็น helper function เพื่อลด Cognitive Complexity
+        renderRouteView_(currentRoute);
+      } catch (err) {
+        console.error('[app] Render error:', err);
+        showError_('เกิดข้อผิดพลาดในการแสดงผล: ' + err.message);
+      }
+    }
+
+    /**
+     * renderRouteView_ — เรียก view module ที่ถูกต้องตาม route
+     *   [SonarCloud S3776] แยก switch ออกจาก renderCurrentRoute_ เพื่อลด Cognitive Complexity
+     * @param {string} route
+     * @private
+     */
+    function renderRouteView_(route) {
+      switch (route) {
+        case 'dashboard':
+          renderView_('DashboardView', 'Dashboard');
+          break;
+        case 'qreview':
+          renderView_('QReviewView', 'Q_REVIEW');
+          break;
+        case 'fact':
+          renderView_('FactDeliveryView', 'FACT_DELIVERY');
+          break;
+        case 'source':
+          renderView_('SourceSheetView', 'Source Sheet');
+          break;
+        case 'match':
+          renderView_('MatchEngineView', 'Match Engine');
+          break;
+        case 'search':
+          // Search view ไม่มี error fallback (silent)
+          if (globalThis.SearchView) {
+            globalThis.SearchView.render(currentData, viewContainer);
+            renderIcons_();
+          }
+          break;
+        default:
+          renderNotFound_();
+      }
+    }
+
+    /**
+     * renderView_ — helper สำหรับ render view module ทั่วไป
+     *   ตรวจว่า module loaded ไหม ถ้าไม่โชว์ error
+     * @param {string} moduleName - ชื่อ globalThis property (เช่น 'DashboardView')
+     * @param {string} displayName - ชื่อที่จะแสดงใน error message
+     * @private
+     */
+    function renderView_(moduleName, displayName) {
+      if (globalThis[moduleName]) {
+        globalThis[moduleName].render(currentData, viewContainer);
+        renderIcons_();
+      } else {
+        console.error('[app] ' + moduleName + ' not loaded!');
+        showError_(moduleName + ' not loaded');
+      }
+    }
+
+    /**
+     * renderNotFound_ — แสดงหน้า 404
+     * @private
+     */
+    function renderNotFound_() {
+      viewContainer.innerHTML =
+        '<div class="bg-white border border-gray-200 rounded-lg p-12 text-center">' +
         '<div class="text-4xl mb-3">🔍</div>' +
         '<h2 class="text-lg font-semibold text-gray-700 mb-1">ไม่พบหน้าที่คุณค้นหา</h2>' +
         '<p class="text-sm text-gray-500 mb-4">ตรวจสอบ URL อีกครั้ง</p>' +
         '<button type="button" onclick="globalThis.navigateTo_(\'dashboard\')" class="text-sm text-blue-600 hover:underline cursor-pointer">← กลับไป Dashboard</button>' +
-      '</div>';
-  }
-
-  // ────────────────────────────────────────────────────────────
-  // Polling
-  // ────────────────────────────────────────────────────────────
-
-  /**
-   * startPolling_ — เริ่ม polling ทุก 60 วินาที
-   * @private
-   */
-  function startPolling_() {
-    stopPolling_(); // clear เดิมก่อน
-    scheduleNextRefresh_();
-    startCountdown_();
-    setLiveIndicator_(true);
-  }
-
-  /**
-   * stopPolling_ — หยุด polling
-   * @private
-   */
-  function stopPolling_() {
-    if (refreshTimer) {
-      clearTimeout(refreshTimer);
-      refreshTimer = null;
+        '</div>';
     }
-    if (countdownTimer) {
-      clearInterval(countdownTimer);
-      countdownTimer = null;
-    }
-    setLiveIndicator_(false);
-  }
 
-  /**
-   * scheduleNextRefresh_ — ตั้งเวลา refresh ครั้งถัดไป
-   * @private
-   */
-  function scheduleNextRefresh_() {
-    refreshTimer = setTimeout(async () => {
-      await refresh_(false);
-      scheduleNextRefresh_();
-    }, POLL_INTERVAL_MS);
-    nextRefreshAt = Date.now() + POLL_INTERVAL_MS;
-  }
+    // ────────────────────────────────────────────────────────────
+    // Refresh (manual only — no auto-polling)
+    // ────────────────────────────────────────────────────────────
 
-  /**
-   * startCountdown_ — อัปเดต countdown text ทุก 1 วินาที
-   * @private
-   */
-  function startCountdown_() {
-    countdownTimer = setInterval(() => {
-      if (!nextRefreshAt || !refreshCountdown) return;
-      const remaining = Math.max(0, Math.ceil((nextRefreshAt - Date.now()) / 1000));
-      if (remaining === 0) {
-        refreshCountdown.textContent = 'refreshing...';
-      } else {
-        refreshCountdown.textContent = 'refresh in ' + remaining + 's';
+    /**
+     * refresh_ — ดึงข้อมูลใหม่จาก server แล้ว render
+     * @param {boolean} isInitial — true ถ้าเป็นการโหลดครั้งแรก
+     * @private
+     */
+    async function refresh_(isInitial) {
+      if (isRefreshing) {
+        console.log('[app] Refresh already in progress — skipping');
+        return;
       }
-    }, REFRESH_COUNTDOWN_UPDATE_MS);
-  }
+      if (!globalThis.api) {
+        console.error('[app] API not available');
+        return;
+      }
 
-  /**
-   * setLiveIndicator_ — toggle สี Live indicator
-   * @private
-   */
-  function setLiveIndicator_(isLive) {
-    if (!liveIndicator) return;
-    if (isLive) {
-      liveIndicator.className = 'inline-flex items-center gap-1.5 text-xs px-2.5 py-1 bg-green-100 text-green-700 rounded-full font-medium';
-      liveIndicator.innerHTML = '<span class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span> Live';
-    } else {
-      liveIndicator.className = 'inline-flex items-center gap-1.5 text-xs px-2.5 py-1 bg-gray-100 text-gray-500 rounded-full font-medium';
-      liveIndicator.innerHTML = '<span class="w-1.5 h-1.5 bg-gray-400 rounded-full"></span> Paused';
-    }
-  }
+      isRefreshing = true;
 
-  // ────────────────────────────────────────────────────────────
-  // Refresh
-  // ────────────────────────────────────────────────────────────
-
-  /**
-   * refresh_ — ดึงข้อมูลใหม่จาก server แล้ว render
-   * @param {boolean} isInitial — true ถ้าเป็นการโหลดครั้งแรก
-   * @private
-   */
-  async function refresh_(isInitial) {
-    if (isRefreshing) {
-      console.log('[app] Refresh already in progress — skipping');
-      return;
-    }
-    if (!globalThis.api) {
-      console.error('[app] API not available');
-      return;
-    }
-
-    isRefreshing = true;
-
-    if (isInitial) {
-      showLoading_();
-    }
-
-    try {
-      console.log('[app] Fetching dashboard data...');
-      const data = await globalThis.api.getDashboardData();
-      currentData = data;
-      hideLoading_();
-      hideError_();
-      renderCurrentRoute_(false);
-
-      // Reset nextRefreshAt หลัง refresh สำเร็จ
-      nextRefreshAt = Date.now() + POLL_INTERVAL_MS;
-
-      // [FIX White Screen v2] เริ่ม polling หลัง initial fetch สำเร็จ
-      //   สาเหตุ: ก่อนหน้านี้ startPolling_() ไม่ถูกเรียกเลย → หน้าไม่ refresh อัตโนมัติ
       if (isInitial) {
-        startPolling_();
-      } else {
-        showToast_('✅ อัปเดตแล้ว', 'ข้อมูลได้รับการอัปเดตเรียบร้อย', 'success', 2000);
+        showLoading_();
       }
-    } catch (err) {
-      console.error('[app] Refresh failed:', err);
-      hideLoading_();
 
-      if (err.message === 'Unauthorized') {
-        showToast_('🔒 Session หมดอายุ', 'กรุณารีโหลดหน้าเพื่อ login ใหม่', 'error', 0);
-        stopPolling_();
-      } else if (isInitial) {
-        showError_(err.message);
-      } else {
-        showToast_('⚠️ ไม่สามารถอัปเดตได้', err.message, 'error', 5000);
-        // ไม่หยุด polling — ลองใหม่รอบถัดไป
-      }
-    } finally {
-      isRefreshing = false;
-    }
-  }
+      try {
+        console.log('[app] Fetching dashboard data...');
+        const data = await globalThis.api.getDashboardData();
+        currentData = data;
+        hideLoading_();
+        hideError_();
+        renderCurrentRoute_(false);
 
-  // ────────────────────────────────────────────────────────────
-  // UI State helpers
-  // ────────────────────────────────────────────────────────────
+        // [REMOVED V5.5.049] Auto-polling removed — manual refresh only
+        if (!isInitial) {
+          showToast_('✅ อัปเดตแล้ว', 'ข้อมูลได้รับการอัปเดตเรียบร้อย', 'success', 2000);
+        }
+      } catch (err) {
+        console.error('[app] Refresh failed:', err);
+        hideLoading_();
 
-  function showLoading_() {
-    if (loadingState) loadingState.style.display = '';
-    if (viewContainer) viewContainer.style.display = 'none';
-  }
-
-  function hideLoading_() {
-    if (loadingState) loadingState.style.display = 'none';
-    if (viewContainer) viewContainer.style.display = '';
-  }
-
-  function showError_(msg) {
-    if (errorMessage) errorMessage.textContent = msg || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
-    if (errorState) {
-      errorState.classList.remove('hidden');
-      errorState.style.display = '';
-    }
-    if (viewContainer) viewContainer.style.display = 'none';
-    if (loadingState) loadingState.style.display = 'none';
-  }
-
-  function hideError_() {
-    if (errorState) {
-      errorState.classList.add('hidden');
-      errorState.style.display = 'none';
-    }
-  }
-
-  /**
-   * renderIcons_ — render Lucide icons ใหม่ (หลังจาก inject HTML)
-   * @private
-   */
-  function renderIcons_() {
-    if (globalThis.lucide) {
-      // lucide v0.x API
-      if (typeof globalThis.lucide.createIcons === 'function') {
-        globalThis.lucide.createIcons();
+        if (err.message === 'Unauthorized') {
+          showToast_('🔒 Session หมดอายุ', 'กรุณารีโหลดหน้าเพื่อ login ใหม่', 'error', 0);
+        } else if (isInitial) {
+          showError_(err.message);
+        } else {
+          showToast_('⚠️ ไม่สามารถอัปเดตได้', err.message, 'error', 5000);
+          // ไม่หยุด polling — ลองใหม่รอบถัดไป
+        }
+      } finally {
+        isRefreshing = false;
       }
     }
-  }
 
-  // ────────────────────────────────────────────────────────────
-  // Toast Notifications
-  // ────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────
+    // UI State helpers
+    // ────────────────────────────────────────────────────────────
 
-  /**
-   * showToast_ — แสดง toast notification
-   * @param {string} title
-   * @param {string} message
-   * @param {string} type — 'success' | 'error' | 'warning' | 'info' (default 'info')
-   * @param {number} duration — ms (0 = ไม่ปิดอัตโนมัติ, default 4000)
-   * @private
-   */
-  function showToast_(title, message, type = 'info', duration = 4000) {
-    const container = document.getElementById('toastContainer');
-    if (container === null) return;
+    function showLoading_() {
+      if (loadingState) loadingState.style.display = '';
+      if (viewContainer) viewContainer.style.display = 'none';
+    }
 
-    const colors = {
-      success: { bg: 'bg-green-50',   border: 'border-green-200',   text: 'text-green-800',   icon: '✅' },
-      error:   { bg: 'bg-red-50',     border: 'border-red-200',     text: 'text-red-800',     icon: '❌' },
-      warning: { bg: 'bg-yellow-50',  border: 'border-yellow-200',  text: 'text-yellow-800',  icon: '⚠️' },
-      info:    { bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-800',    icon: 'ℹ️' },
-    };
-    const c = colors[type] || colors.info;
+    function hideLoading_() {
+      if (loadingState) loadingState.style.display = 'none';
+      if (viewContainer) viewContainer.style.display = '';
+    }
 
-    const toast = document.createElement('div');
-    toast.className = 'pointer-events-auto ' + c.bg + ' ' + c.border + ' ' + c.text +
-                      ' border rounded-lg shadow-md p-3 max-w-sm toast-enter';
+    function showError_(msg) {
+      if (errorMessage) errorMessage.textContent = msg || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
+      if (errorState) {
+        errorState.classList.remove('hidden');
+        errorState.style.display = '';
+      }
+      if (viewContainer) viewContainer.style.display = 'none';
+      if (loadingState) loadingState.style.display = 'none';
+    }
 
-    // สร้าง HTML แบบ step-by-step เพื่อหลีกเลี่ยง nested ternary
-    const messageHtml = buildToastMessage_(message);
-    const closeBtnHtml = buildToastCloseButton_(duration);
+    function hideError_() {
+      if (errorState) {
+        errorState.classList.add('hidden');
+        errorState.style.display = 'none';
+      }
+    }
 
-    toast.innerHTML =
-      '<div class="flex items-start gap-2">' +
-        '<span class="text-lg">' + c.icon + '</span>' +
+    /**
+     * renderIcons_ — render Lucide icons ใหม่ (หลังจาก inject HTML)
+     * @private
+     */
+    function renderIcons_() {
+      if (globalThis.lucide) {
+        // lucide v0.x API
+        if (typeof globalThis.lucide.createIcons === 'function') {
+          globalThis.lucide.createIcons();
+        }
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Toast Notifications
+    // ────────────────────────────────────────────────────────────
+
+    /**
+     * showToast_ — แสดง toast notification
+     * @param {string} title
+     * @param {string} message
+     * @param {string} type — 'success' | 'error' | 'warning' | 'info' (default 'info')
+     * @param {number} duration — ms (0 = ไม่ปิดอัตโนมัติ, default 4000)
+     * @private
+     */
+    function showToast_(title, message, type = 'info', duration = 4000) {
+      const container = document.getElementById('toastContainer');
+      if (container === null) return;
+
+      const colors = {
+        success: { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-800', icon: '✅' },
+        error: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-800', icon: '❌' },
+        warning: { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-800', icon: '⚠️' },
+        info: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-800', icon: 'ℹ️' }
+      };
+      const c = colors[type] || colors.info;
+
+      const toast = document.createElement('div');
+      toast.className =
+        'pointer-events-auto ' +
+        c.bg +
+        ' ' +
+        c.border +
+        ' ' +
+        c.text +
+        ' border rounded-lg shadow-md p-3 max-w-sm toast-enter';
+
+      // สร้าง HTML แบบ step-by-step เพื่อหลีกเลี่ยง nested ternary
+      const messageHtml = buildToastMessage_(message);
+      const closeBtnHtml = buildToastCloseButton_(duration);
+
+      toast.innerHTML =
+        '<div class="flex items-start gap-2">' +
+        '<span class="text-lg">' +
+        c.icon +
+        '</span>' +
         '<div class="flex-1">' +
-          '<p class="text-sm font-semibold">' + title + '</p>' +
-          messageHtml +
+        '<p class="text-sm font-semibold">' +
+        title +
+        '</p>' +
+        messageHtml +
         '</div>' +
         closeBtnHtml +
-      '</div>';
+        '</div>';
 
-    container.appendChild(toast);
+      container.appendChild(toast);
 
-    if (duration > 0) {
-      scheduleToastRemoval_(toast, duration);
+      if (duration > 0) {
+        scheduleToastRemoval_(toast, duration);
+      }
     }
-  }
 
-  /**
-   * buildToastMessage_ — สร้าง HTML สำหรับ message ใน toast
-   * @private
-   */
-  function buildToastMessage_(message) {
-    if (message === '' || message === null || message === undefined) {
-      return '';
+    /**
+     * buildToastMessage_ — สร้าง HTML สำหรับ message ใน toast
+     * @private
+     */
+    function buildToastMessage_(message) {
+      if (message === '' || message === null || message === undefined) {
+        return '';
+      }
+      return '<p class="text-xs mt-0.5 opacity-90">' + message + '</p>';
     }
-    return '<p class="text-xs mt-0.5 opacity-90">' + message + '</p>';
-  }
 
-  /**
-   * buildToastCloseButton_ — สร้าง HTML สำหรับปุ่มปิด toast
-   * @private
-   */
-  function buildToastCloseButton_(duration) {
-    if (duration <= 0) return '';
-    return '<button type="button" class="text-gray-400 hover:text-gray-600" onclick="this.parentElement.parentElement.remove()">×</button>';
-  }
+    /**
+     * buildToastCloseButton_ — สร้าง HTML สำหรับปุ่มปิด toast
+     * @private
+     */
+    function buildToastCloseButton_(duration) {
+      if (duration <= 0) return '';
+      return '<button type="button" class="text-gray-400 hover:text-gray-600" onclick="this.parentElement.parentElement.remove()">×</button>';
+    }
 
-  /**
-   * scheduleToastRemoval_ — ตั้งเวลาลบ toast หลัง duration ms
-   * @private
-   */
-  function scheduleToastRemoval_(toast, duration) {
-    setTimeout(() => {
-      toast.classList.remove('toast-enter');
-      toast.classList.add('toast-exit');
-      setTimeout(() => toast.remove(), 300);
-    }, duration);
-  }
+    /**
+     * scheduleToastRemoval_ — ตั้งเวลาลบ toast หลัง duration ms
+     * @private
+     */
+    function scheduleToastRemoval_(toast, duration) {
+      setTimeout(() => {
+        toast.classList.remove('toast-enter');
+        toast.classList.add('toast-exit');
+        setTimeout(() => toast.remove(), 300);
+      }, duration);
+    }
 
-  // ────────────────────────────────────────────────────────────
-  // Bootstrap
-  // ────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────
+    // Bootstrap
+    // ────────────────────────────────────────────────────────────
 
-  // เริ่มแอปเมื่อ DOM พร้อม
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+    // เริ่มแอปเมื่อ DOM พร้อม
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
 
-  // Expose บางฟังก์ชันให้เรียกจาก HTML ได้
-  globalThis.LMDSApp = {
-    refresh: () => refresh_(false),
-    showToast: showToast_,
-  };
+    // Expose บางฟังก์ชันให้เรียกจาก HTML ได้
+    globalThis.LMDSApp = {
+      refresh: () => refresh_(false),
+      showToast: showToast_
+    };
+  })();
 
-})();
-
-console.log('[app] App script loaded');
+  console.log('[app] App script loaded');
 </script>

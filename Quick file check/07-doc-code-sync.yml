@@ -1,0 +1,221 @@
+# 🔗 Doc-Code Sync Check (V2 — 11 Checks, Strict Mode)
+#
+# ตรวจสอบว่าโค้ด ↔ เอกสารยังตรงกัน 100% ทุกครั้งที่ PR แตะ src/ หรือ docs/
+# กัน regression ของ version drift, stat mismatch, dead paths, phantom deps,
+# missing headers, broken function refs, broken doc↔code cross-links
+#
+# Triggers:
+#   - pull_request: เมื่อมี PR แตะ src/ หรือ docs/
+#   - push to main: เมื่อ merge PR เข้า main
+#   - workflow_dispatch: รัน manual ได้
+#
+# Severity Model:
+#   CRITICAL (block PR): 1, 3, 4, 6, 7, 8, 9, 10, 11   → exit 1 = PR blocked
+#   WARNING  (advisory): 2, 5                          → exit 0 but warn
+#
+# ถ้า CRITICAL check ใด fail → PR จะถูก block ทันที (ห้าม merge จนกว่าจะแก้)
+
+name: 🔗 Doc-Code Sync Check V2
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'docs/**'
+      - '*.md'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/07-doc-code-sync.yml'
+      - '.github/scripts/doc-code-sync-checks/**'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'docs/**'
+      - '*.md'
+      - 'package.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  sync-check:
+    name: 🔗 Sync Verification (11 Checks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🛠️ Setup permissions
+        run: chmod +x .github/scripts/doc-code-sync-checks/*.sh
+
+      # ============================================================
+      # CRITICAL CHECKS — Block PR if any fails
+      # ============================================================
+
+      - name: 📋 Check 1 — Version Consistency
+        id: check1
+        continue-on-error: true
+        run: .github/scripts/doc-code-sync-checks/check_01_version.sh
+
+      - name: 📋 Check 3 — No file:/// Local Paths
+        id: check3
+        continue-on-error: true
+        run: .github/scripts/doc-code-sync-checks/check_03_local_paths.sh
+
+      - name: 📋 Check 4 — No Phantom Deps
+        id: check4
+        continue-on-error: true
+        run: .github/scripts/doc-code-sync-checks/check_04_phantom_deps.sh
+
+      - name: '📋 Check 6 — Required Headers (VERSION, FILE, PURPOSE, CHANGELOG, DEPENDENCIES, ARCHITECTURE)'
+        id: check6
+        continue-on-error: true
+        run: .github/scripts/doc-code-sync-checks/check_06_required_headers.sh
+
+      - name: '📋 Check 7 — Filename Consistency (FILE header ↔ actual filename)'
+        id: check7
+        continue-on-error: true
+        run: .github/scripts/doc-code-sync-checks/check_07_filename_consistency.sh
+
+      - name: '📋 Check 8 — CHANGELOG Sync (APP_VERSION must have entry)'
+        id: check8
+        continue-on-error: true
+        run: .github/scripts/doc-code-sync-checks/check_08_changelog_sync.sh
+
+      - name: '📋 Check 9 — Dependencies Resolve (DEPENDENCIES → real files)'
+        id: check9
+        continue-on-error: true
+        run: .github/scripts/doc-code-sync-checks/check_09_dependencies_resolve.sh
+
+      - name: '📋 Check 10 — Architecture Refs Resolve (functionName → real functions)'
+        id: check10
+        continue-on-error: true
+        run: .github/scripts/doc-code-sync-checks/check_10_architecture_refs.sh
+
+      - name: '📋 Check 11 — Doc ↔ Code Cross-Links (Direction 1 BLOCKING)'
+        id: check11
+        continue-on-error: true
+        run: .github/scripts/doc-code-sync-checks/check_11_doc_code_links.sh
+
+      # ============================================================
+      # WARNING CHECKS — Advisory only (don't block PR)
+      # ============================================================
+
+      - name: ⚠️ Check 2 — Stats Consistency (advisory)
+        id: check2
+        continue-on-error: true
+        run: .github/scripts/doc-code-sync-checks/check_02_stats.sh
+
+      - name: ⚠️ Check 5 — Internal Doc Links (advisory)
+        id: check5
+        continue-on-error: true
+        run: .github/scripts/doc-code-sync-checks/check_05_internal_links.sh
+
+      # ============================================================
+      # Summary Report (always runs)
+      # ============================================================
+
+      - name: 📊 Summary Report
+        if: always()
+        env:
+          C1: ${{ steps.check1.outcome }}
+          C2: ${{ steps.check2.outcome }}
+          C3: ${{ steps.check3.outcome }}
+          C4: ${{ steps.check4.outcome }}
+          C5: ${{ steps.check5.outcome }}
+          C6: ${{ steps.check6.outcome }}
+          C7: ${{ steps.check7.outcome }}
+          C8: ${{ steps.check8.outcome }}
+          C9: ${{ steps.check9.outcome }}
+          C10: ${{ steps.check10.outcome }}
+          C11: ${{ steps.check11.outcome }}
+        run: |
+          # Helper: convert outcome to emoji
+          emoji() {
+            if [[ "$1" == "success" ]]; then echo "✅ PASS"; else echo "❌ FAIL"; fi
+          }
+          warn_emoji() {
+            if [[ "$1" == "success" ]]; then echo "✅ PASS"; else echo "⚠️ WARN"; fi
+          }
+
+          {
+            echo "## 🔗 Doc-Code Sync Check V2 — Results"
+            echo ""
+            echo "### CRITICAL Checks (Block PR if FAIL)"
+            echo ""
+            echo "| # | Check | Status |"
+            echo "|---|-------|:------:|"
+            echo "| 1 | Version Consistency | $(emoji "$C1") |"
+            echo "| 3 | No file:/// Paths | $(emoji "$C3") |"
+            echo "| 4 | No Phantom Deps | $(emoji "$C4") |"
+            echo "| 6 | Required Headers (6) | $(emoji "$C6") |"
+            echo "| 7 | Filename Consistency | $(emoji "$C7") |"
+            echo "| 8 | CHANGELOG Sync | $(emoji "$C8") |"
+            echo "| 9 | Dependencies Resolve | $(emoji "$C9") |"
+            echo "| 10 | Architecture Refs | $(emoji "$C10") |"
+            echo "| 11 | Doc ↔ Code Cross-Links | $(emoji "$C11") |"
+            echo ""
+            echo "### Advisory Checks (Warnings only)"
+            echo ""
+            echo "| # | Check | Status |"
+            echo "|---|-------|:------:|"
+            echo "| 2 | Stats Consistency | $(warn_emoji "$C2") |"
+            echo "| 5 | Internal Doc Links | $(warn_emoji "$C5") |"
+            echo ""
+            echo "### Verdict"
+            echo ""
+          } >> $GITHUB_STEP_SUMMARY
+
+          # Determine overall verdict
+          CRITICAL_FAILS=0
+          for outcome in "$C1" "$C3" "$C4" "$C6" "$C7" "$C8" "$C9" "$C10" "$C11"; do
+            if [[ "$outcome" != "success" ]]; then
+              CRITICAL_FAILS=$((CRITICAL_FAILS + 1))
+            fi
+          done
+
+          if [[ $CRITICAL_FAILS -eq 0 ]]; then
+            echo "✅ **ALL CRITICAL CHECKS PASSED — PR can be merged**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **$CRITICAL_FAILS CRITICAL CHECK(S) FAILED — PR BLOCKED**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Fix the failing checks above before merging. See logs for details." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # ============================================================
+      # Final Gate — Fail job if any CRITICAL check failed
+      # ============================================================
+
+      - name: 🚦 Final Gate — Block PR if CRITICAL checks failed
+        if: always()
+        env:
+          C1: ${{ steps.check1.outcome }}
+          C3: ${{ steps.check3.outcome }}
+          C4: ${{ steps.check4.outcome }}
+          C6: ${{ steps.check6.outcome }}
+          C7: ${{ steps.check7.outcome }}
+          C8: ${{ steps.check8.outcome }}
+          C9: ${{ steps.check9.outcome }}
+          C10: ${{ steps.check10.outcome }}
+          C11: ${{ steps.check11.outcome }}
+        run: |
+          CRITICAL_FAILS=0
+          for outcome in "$C1" "$C3" "$C4" "$C6" "$C7" "$C8" "$C9" "$C10" "$C11"; do
+            if [[ "$outcome" != "success" ]]; then
+              CRITICAL_FAILS=$((CRITICAL_FAILS + 1))
+            fi
+          done
+          if [[ $CRITICAL_FAILS -gt 0 ]]; then
+            echo "❌ $CRITICAL_FAILS critical check(s) failed — blocking PR merge"
+            exit 1
+          else
+            echo "✅ All critical checks passed — PR can be merged"
+          fi

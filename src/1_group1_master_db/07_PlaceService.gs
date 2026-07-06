@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.040
+ * VERSION: 6.0.002
  * FILE: 07_PlaceService.gs
  * LMDS V5.5 — Place Master Service
  * ===================================================
@@ -71,7 +71,7 @@
 
 // [PERF-009] Place Alias Inverted Index — Map<normalized_alias, Set<placeId>>
 //   Build ครั้งเดียวใน loadAllPlaceAliases_ — ลด findPlaceByAlias_ จาก O(A) scan → O(1) lookup
-var _PLACE_ALIAS_INVERTED_INDEX = null;
+let _PLACE_ALIAS_INVERTED_INDEX = null;
 
 // ============================================================
 // SECTION 1: resolvePlace
@@ -98,26 +98,26 @@ function resolvePlace(rawName, rawAddress) {
   let bestPlace = null;
   let bestScore = 0;
 
-  candidates.forEach(candidate => {
+  candidates.forEach((candidate) => {
     const score = scorePlaceCandidate(cleanPlace, candidate, srcProvince);
-    if (score > bestScore) { bestScore = score; bestPlace = candidate; }
+    if (score > bestScore) {
+      bestScore = score;
+      bestPlace = candidate;
+    }
   });
 
   if (bestScore < AI_CONFIG.THRESHOLD_AUTO) {
     const branchResult = tryMatchBranch(cleanPlace, rawAddress);
     if (branchResult) {
-      return { placeId: branchResult.placeId, status: 'BRANCH_MATCH',
-               confidence: branchResult.score, normResult };
+      return { placeId: branchResult.placeId, status: 'BRANCH_MATCH', confidence: branchResult.score, normResult };
     }
   }
 
   if (bestScore >= AI_CONFIG.THRESHOLD_AUTO) {
-    return { placeId: bestPlace.placeId, status: 'FOUND',
-             confidence: bestScore, normResult };
+    return { placeId: bestPlace.placeId, status: 'FOUND', confidence: bestScore, normResult };
   }
   if (bestScore >= AI_CONFIG.THRESHOLD_REVIEW) {
-    return { placeId: bestPlace.placeId, status: 'NEEDS_REVIEW',
-             confidence: bestScore, normResult };
+    return { placeId: bestPlace.placeId, status: 'NEEDS_REVIEW', confidence: bestScore, normResult };
   }
   return { placeId: null, status: 'NOT_FOUND', confidence: bestScore, normResult };
 }
@@ -136,21 +136,22 @@ function resolvePlace(rawName, rawAddress) {
  */
 function findPlaceCandidates(cleanPlace, rawAddress) {
   const allPlaces = loadAllPlaces_();
-  const results   = [];
+  const results = [];
   // [PERF-005] O(1) dedup lookup แทน results.some() O(K)
   const existingIds = new Set();
 
-  const aliasResolve = typeof resolveMasterUuidViaGlobalAlias === 'function' ? resolveMasterUuidViaGlobalAlias(cleanPlace, 'PLACE') : null;
+  const aliasResolve =
+    typeof resolveMasterUuidViaGlobalAlias === 'function' ? resolveMasterUuidViaGlobalAlias(cleanPlace, 'PLACE') : null;
   if (aliasResolve && aliasResolve.masterUuid && aliasResolve.score >= 95) {
     const ownerId = convertUuidToPlaceId(aliasResolve.masterUuid);
-    const perfect = allPlaces.find(p => p.placeId === ownerId);
+    const perfect = allPlaces.find((p) => p.placeId === ownerId);
     if (perfect) return [perfect];
   }
 
   // Alias Match
   const aliasMatches = findPlaceByAlias_(cleanPlace);
-  aliasMatches.forEach(placeId => {
-    const found = allPlaces.find(p => p.placeId === placeId);
+  aliasMatches.forEach((placeId) => {
+    const found = allPlaces.find((p) => p.placeId === placeId);
     // [PERF-005] O(1) Set lookup แทน results.some() O(K)
     if (found && !existingIds.has(found.placeId)) {
       results.push(found);
@@ -166,7 +167,7 @@ function findPlaceCandidates(cleanPlace, rawAddress) {
   const normA = normalizeForCompare(cleanPlace);
   const normAPrefix3 = normA.length >= 3 ? normA.substring(0, 3) : '';
 
-  allPlaces.forEach(place => {
+  allPlaces.forEach((place) => {
     // [PERF-005] O(1) Set lookup แทน results.some() O(K)
     if (existingIds.has(place.placeId)) return;
     const placeKey = buildThaiPhoneticKey(place.normalized);
@@ -186,18 +187,35 @@ function findPlaceCandidates(cleanPlace, rawAddress) {
 
   // 4. Note Search (Deep Match) — [NEW v5.2.003] ค้นหาลามไปถึงหมายเหตุ
   if (results.length === 0) {
-    const queryParts = cleanPlace.split(/\s+/).filter(p => p.length >= 2);
-    allPlaces.forEach(place => {
-      if (existingIds.has(place.placeId)) return;  // [PERF-005] skip already in results
+    const queryParts = cleanPlace.split(/\s+/).filter((p) => p.length >= 2);
+    allPlaces.forEach((place) => {
+      if (existingIds.has(place.placeId)) return; // [PERF-005] skip already in results
       const noteStr = String(place.note || '');
       if (!noteStr) return;
 
-      const isMatch = queryParts.some(part => noteStr.includes(part));
+      const isMatch = queryParts.some((part) => noteStr.includes(part));
       if (isMatch) {
         results.push(place);
         existingIds.add(place.placeId);
       }
     });
+  }
+
+  // [V6.0.002] 5. Double Metaphone Phonetic Match — find places whose primary/secondary
+  //   phonetic key matches the query. Handles ล↔ร confusion and similar spelling
+  //   variations that the single-key buildThaiPhoneticKey (step 3 above) misses.
+  //   Uses existing allPlaces + existingIds (no extra sheet read).
+  if (typeof phoneticMatch === 'function' && cleanPlace) {
+    for (const p of allPlaces) {
+      if (existingIds.has(p.placeId)) continue; // skip already-found candidates
+      const phResult = phoneticMatch(cleanPlace, p.canonical || p.normalized);
+      if (phResult.match && phResult.score >= 80) {
+        p._phoneticScore = phResult.score;
+        p._matchedKey = phResult.matchedKey;
+        results.push(p);
+        existingIds.add(p.placeId);
+      }
+    }
   }
 
   return results;
@@ -226,9 +244,9 @@ function findPlaceByAlias_(cleanPlace) {
 
   // Fallback (defensive — ถ้า index build ล้มเหลว): legacy O(A) scan
   const allAliases = loadAllPlaceAliases_();
-  const foundSet   = new Set();
+  const foundSet = new Set();
 
-  allAliases.forEach(alias => {
+  allAliases.forEach((alias) => {
     if (!alias[PLACE_ALIAS_IDX.ACTIVE_FLAG]) return;
     const aliasNorm = normalizeForCompare(alias[PLACE_ALIAS_IDX.ALIAS_NAME]);
     if (aliasNorm === targetNorm && aliasNorm.length > 0) {
@@ -249,15 +267,15 @@ function findPlaceByAlias_(cleanPlace) {
  *            ปัญหา: !p.province ทำให้ match ทุก place ที่ไม่มี province
  */
 function tryMatchBranch(cleanPlace, rawAddress) {
-  const allPlaces  = loadAllPlaces_();
-  const normQuery  = normalizeForCompare(cleanPlace);
-  const province   = extractProvince_(rawAddress);
+  const allPlaces = loadAllPlaces_();
+  const normQuery = normalizeForCompare(cleanPlace);
+  const province = extractProvince_(rawAddress);
 
   for (const store of CHAIN_STORE_LIST) {
     const normStore = normalizeForCompare(store);
     if (!normQuery.includes(normStore)) continue;
 
-    const matching = allPlaces.filter(p => {
+    const matching = allPlaces.filter((p) => {
       const normPlace = normalizeForCompare(p.normalized);
       if (!normPlace.includes(normStore)) return false;
       // [FIX v003] ถ้าไม่รู้ province → match ได้ทุก branch
@@ -350,15 +368,15 @@ function extractSubDistrict_(rawAddress) {
 function extractHouseNumber_(rawAddress) {
   if (!rawAddress) return '';
   const addr = String(rawAddress).trim();
-  
+
   // 1. เลขที่ 123/45 หรือ 123/45 (ขึ้นต้นด้วยตัวเลข)
   const match = addr.match(/^(?:เลขที่\s*)?([0-9\/]{1,10}(?:\s*[ก-ฮ])?)/);
   if (match) return match[1].trim();
-  
+
   // 2. ค้นหาคำว่า "เลขที่" กลางประโยค
   const matchMid = addr.match(/เลขที่\s*([0-9\/]{1,10})/);
   if (matchMid) return matchMid[1].trim();
-  
+
   return '';
 }
 
@@ -372,11 +390,10 @@ function extractHouseNumber_(rawAddress) {
  */
 function getEnrichedGeoData(rawAddress, rawPlaceName) {
   const addr1 = String(rawPlaceName || '').trim();
-  const addr2 = String(rawAddress   || '').trim();
+  const addr2 = String(rawAddress || '').trim();
 
   // 1. Extract postcode (สัญญาณที่เชื่อถือได้ที่สุด)
-  let fPost = (addr1.match(/\b[0-9]{5}\b/) || [])[0] ||
-              (addr2.match(/\b[0-9]{5}\b/) || [])[0] || '';
+  const fPost = (addr1.match(/\b[0-9]{5}\b/) || [])[0] || (addr2.match(/\b[0-9]{5}\b/) || [])[0] || '';
 
   // 2. Extract house number
   const house = extractHouseNumber_(addr1) || extractHouseNumber_(addr2);
@@ -412,9 +429,9 @@ function enrichByDictionary_(addr1, addr2, knownPostcode) {
     if (geoMatch) {
       return {
         subDistrict: geoMatch.subDistrict || '',
-        district:    geoMatch.district    || '',
-        province:    geoMatch.province    || '',
-        postcode:    geoMatch.postcode    || knownPostcode
+        district: geoMatch.district || '',
+        province: geoMatch.province || '',
+        postcode: geoMatch.postcode || knownPostcode
       };
     }
   } else {
@@ -427,9 +444,9 @@ function enrichByDictionary_(addr1, addr2, knownPostcode) {
     if (scanResult) {
       return {
         subDistrict: scanResult.subDistrict || '',
-        district:    scanResult.district    || '',
-        province:    scanResult.province    || '',
-        postcode:    scanResult.postcode    || knownPostcode
+        district: scanResult.district || '',
+        province: scanResult.province || '',
+        postcode: scanResult.postcode || knownPostcode
       };
     }
   } else {
@@ -448,9 +465,9 @@ function enrichByDictionary_(addr1, addr2, knownPostcode) {
  * @return {{subDistrict, district, province, postcode}|null}
  */
 function enrichByRegexFuzzy_(addr1, addr2, partial) {
-  const regSub  = !partial.subDistrict ? (extractSubDistrict_(addr1) || extractSubDistrict_(addr2)) : '';
-  const regDist = !partial.district    ? (extractDistrict_(addr1)    || extractDistrict_(addr2))    : '';
-  const regProv = !partial.province    ? (extractProvince_(addr1)    || extractProvince_(addr2))    : '';
+  const regSub = !partial.subDistrict ? extractSubDistrict_(addr1) || extractSubDistrict_(addr2) : '';
+  const regDist = !partial.district ? extractDistrict_(addr1) || extractDistrict_(addr2) : '';
+  const regProv = !partial.province ? extractProvince_(addr1) || extractProvince_(addr2) : '';
 
   if (!regSub && !regDist && !regProv && !partial.subDistrict && !partial.district && !partial.province) {
     return null;
@@ -460,16 +477,16 @@ function enrichByRegexFuzzy_(addr1, addr2, partial) {
   if (typeof lookupPostcodeByArea === 'function') {
     const fuzzy = lookupPostcodeByArea(
       partial.subDistrict || regSub,
-      partial.district    || regDist,
-      partial.province    || regProv
+      partial.district || regDist,
+      partial.province || regProv
     );
     if (fuzzy) {
       // Dictionary ชนะเสมอ — ค่าจาก SYS_TH_GEO เป๊ะ
       return {
-        subDistrict: fuzzy.subDistrict || partial.subDistrict || regSub  || '',
-        district:    fuzzy.district    || partial.district    || regDist || '',
-        province:    fuzzy.province    || partial.province    || regProv || '',
-        postcode:    fuzzy.postcode    || partial.postcode    || ''
+        subDistrict: fuzzy.subDistrict || partial.subDistrict || regSub || '',
+        district: fuzzy.district || partial.district || regDist || '',
+        province: fuzzy.province || partial.province || regProv || '',
+        postcode: fuzzy.postcode || partial.postcode || ''
       };
     }
   } else {
@@ -479,10 +496,10 @@ function enrichByRegexFuzzy_(addr1, addr2, partial) {
   // Fallback: คืนค่า regex ที่ extract ได้ + ค่าจาก tier ก่อนหน้า
   if (regSub || regDist || regProv || partial.subDistrict || partial.district || partial.province) {
     return {
-      subDistrict: partial.subDistrict || regSub  || '',
-      district:    partial.district    || regDist || '',
-      province:    partial.province    || regProv || '',
-      postcode:    partial.postcode    || ''
+      subDistrict: partial.subDistrict || regSub || '',
+      district: partial.district || regDist || '',
+      province: partial.province || regProv || '',
+      postcode: partial.postcode || ''
     };
   }
 
@@ -507,15 +524,15 @@ function enrichByPostcode_(postcode, partial) {
   if (typeof lookupPostcodeByArea === 'function') {
     const exact = lookupPostcodeByArea(
       pcResult.subDistrict || partial.subDistrict,
-      pcResult.district    || partial.district,
-      pcResult.province    || partial.province
+      pcResult.district || partial.district,
+      pcResult.province || partial.province
     );
     if (exact) {
       return {
         subDistrict: partial.subDistrict || exact.subDistrict || '',
-        district:    partial.district    || exact.district    || '',
-        province:    partial.province    || exact.province    || '',
-        postcode:    postcode
+        district: partial.district || exact.district || '',
+        province: partial.province || exact.province || '',
+        postcode: postcode
       };
     }
   } else {
@@ -525,9 +542,9 @@ function enrichByPostcode_(postcode, partial) {
   // Fallback ถ้า lookupPostcodeByArea ไม่มี → ใช้ค่าจาก postcode map
   return {
     subDistrict: partial.subDistrict || pcResult.subDistrict || '',
-    district:    partial.district    || pcResult.district    || '',
-    province:    partial.province    || pcResult.province    || '',
-    postcode:    postcode
+    district: partial.district || pcResult.district || '',
+    province: partial.province || pcResult.province || '',
+    postcode: postcode
   };
 }
 
@@ -541,13 +558,13 @@ function enrichByPostcode_(postcode, partial) {
 function buildEnrichedResult_(house, geo, source) {
   const fullAddress = formatEnrichedAddress_(house, geo.subDistrict, geo.district, geo.province, geo.postcode);
   return {
-    province:     geo.province     || '',
-    district:     geo.district     || '',
-    subDistrict:  geo.subDistrict  || '',
-    postcode:     geo.postcode     || '',
-    fullAddress:  fullAddress,
-    houseNumber:  house,
-    source:       source
+    province: geo.province || '',
+    district: geo.district || '',
+    subDistrict: geo.subDistrict || '',
+    postcode: geo.postcode || '',
+    fullAddress: fullAddress,
+    houseNumber: house,
+    source: source
   };
 }
 
@@ -557,10 +574,10 @@ function buildEnrichedResult_(house, geo, source) {
 function formatEnrichedAddress_(house, sub, dist, prov, post) {
   const parts = [];
   if (house) parts.push(house); // [NEW v5.2.003]
-  if (sub)   parts.push(sub);
-  if (dist)  parts.push(dist);
-  if (prov)  parts.push(prov);
-  if (post)  parts.push(post);
+  if (sub) parts.push(sub);
+  if (dist) parts.push(dist);
+  if (prov) parts.push(prov);
+  if (post) parts.push(post);
   return parts.join(' ').trim();
 }
 
@@ -588,9 +605,9 @@ function scorePlaceCandidate(queryPlace, candidate, srcProvince) {
   const nameB = normalizeForCompare(candidate.normalized || candidate.canonical);
   if (!nameA || !nameB) return 0;
 
-  const levDist   = levenshteinDistance(nameA, nameB);
-  const maxLen    = Math.max(nameA.length, nameB.length);
-  const levScore  = maxLen > 0 ? Math.max(0, (1 - levDist / maxLen) * 100) : 0;
+  const levDist = levenshteinDistance(nameA, nameB);
+  const maxLen = Math.max(nameA.length, nameB.length);
+  const levScore = maxLen > 0 ? Math.max(0, (1 - levDist / maxLen) * 100) : 0;
   const diceScore = diceCoefficient(nameA, nameB) * 100;
   const exactScore = nameA === nameB ? 100 : 0;
 
@@ -604,12 +621,12 @@ function scorePlaceCandidate(queryPlace, candidate, srcProvince) {
     if (candidateProvince !== '') {
       // [FIX P2] ใช้ normalizeProvinceForCompare_ เพื่อรองรับ alias
       //   ถ้า function ยังไม่ถูกโหลด → fallback เทียบ string ตรง
-      const normSrc = (typeof normalizeProvinceForCompare_ === 'function')
-        ? normalizeProvinceForCompare_(srcProvince)
-        : srcProvince;
-      const normCand = (typeof normalizeProvinceForCompare_ === 'function')
-        ? normalizeProvinceForCompare_(candidateProvince)
-        : candidateProvince;
+      const normSrc =
+        typeof normalizeProvinceForCompare_ === 'function' ? normalizeProvinceForCompare_(srcProvince) : srcProvince;
+      const normCand =
+        typeof normalizeProvinceForCompare_ === 'function'
+          ? normalizeProvinceForCompare_(candidateProvince)
+          : candidateProvince;
       if (normSrc !== normCand) {
         finalScore = Math.max(0, finalScore - 15);
       }
@@ -617,7 +634,15 @@ function scorePlaceCandidate(queryPlace, candidate, srcProvince) {
   }
 
   // [FIX v003] ใช้ Config แทน hardcode 55
-  return finalScore < AI_CONFIG.PLACE_SCORE_MIN ? 0 : Math.round(finalScore);
+  let returnScore = finalScore < AI_CONFIG.PLACE_SCORE_MIN ? 0 : Math.round(finalScore);
+
+  // [V6.0.002] Phonetic match bonus — adds 0-2 points when Double Metaphone matched
+  //   (primary=100 → +2, cross=90 → +1, secondary=80 → +0).
+  if (candidate._phoneticScore) {
+    returnScore += Math.round((candidate._phoneticScore - 80) * 0.1);
+  }
+
+  return returnScore;
 }
 
 // ============================================================
@@ -626,41 +651,53 @@ function scorePlaceCandidate(queryPlace, candidate, srcProvince) {
 
 function createPlace(normResult, province, district, subDistrict, postcode) {
   try {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEET.M_PLACE);
-  const now   = new Date();
-  const newId = generateShortId('PL');
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.M_PLACE);
+    const now = new Date();
+    const newId = generateShortId('PL');
 
-  // [FIX v5.2.002] รวบรวม Note ทั้งหมด (Suffix, Delivery Note)
-  const allNotes = normResult.notes || [];
+    // [FIX v5.2.002] รวบรวม Note ทั้งหมด (Suffix, Delivery Note)
+    const allNotes = normResult.notes || [];
 
-  const universalMasterId = typeof generateUUID === 'function' ? generateUUID() : generateShortId('UID');
+    const universalMasterId = typeof generateUUID === 'function' ? generateUUID() : generateShortId('UID');
 
-  const newRow = [
-    newId,
-    normResult.fullAddress || normResult.cleanPlace, // [FIX v008] ใช้ที่อยู่ที่ซ่อมแล้วเป็นชื่อหลัก (Canonical)
-    normResult.cleanPlace, // Normalized
-    normResult.placeType || 'other',
-    subDistrict || '',
-    district    || '',
-    province    || '',
-    postcode    || '',
-    now, now, 1,
-    APP_CONST.STATUS_ACTIVE,
-    allNotes.join(','), // [FIX v5.2.002] เก็บลง Note ห้ามทิ้ง
-    universalMasterId,
-  ];
+    // [V6.0.001] Compute Double Metaphone keys from cleanPlace (handles ล/ร confusion)
+    //   Falls back gracefully if buildThaiDoubleMetaphone is unavailable (defensive)
+    const phoneticKeys =
+      typeof buildThaiDoubleMetaphone === 'function'
+        ? buildThaiDoubleMetaphone(normResult.cleanPlace)
+        : { primary: '', secondary: '' };
 
-  // [FIX-05 v5.4.003] ใช้ getRange+setValues แทน appendRow เพื่อความเสถียร
-  const lastRow = sheet.getLastRow();
-  sheet.getRange(lastRow + 1, 1, 1, newRow.length).setValues([newRow]);
-  invalidatePlaceCache_();
+    const newRow = [
+      newId,
+      normResult.fullAddress || normResult.cleanPlace, // [FIX v008] ใช้ที่อยู่ที่ซ่อมแล้วเป็นชื่อหลัก (Canonical)
+      normResult.cleanPlace, // Normalized
+      normResult.placeType || 'other',
+      subDistrict || '',
+      district || '',
+      province || '',
+      postcode || '',
+      now,
+      now,
+      1,
+      APP_CONST.STATUS_ACTIVE,
+      allNotes.join(','), // [FIX v5.2.002] เก็บลง Note ห้ามทิ้ง
+      universalMasterId,
+      // [V6.0.001] Phonetic keys — used by MatchEngine for fuzzy place match
+      phoneticKeys.primary,
+      phoneticKeys.secondary
+    ];
 
-  // [REMOVED v5.4.001] ไม่เรียก createGlobalAlias() — M_ALIAS เขียนที่ autoEnrich เท่านั้น (Single Writer)
-  // autoEnrichAliasesFromFactBatch_() จะเขียน canonical+variant เข้า M_ALIAS เอง
+    // [FIX-05 v5.4.003] ใช้ getRange+setValues แทน appendRow เพื่อความเสถียร
+    const lastRow = sheet.getLastRow();
+    sheet.getRange(lastRow + 1, 1, 1, newRow.length).setValues([newRow]);
+    invalidatePlaceCache_();
 
-  logDebug('PlaceService', `createPlace: ${newId} — ${normResult.cleanPlace}`);
-  return newId;
+    // [REMOVED v5.4.001] ไม่เรียก createGlobalAlias() — M_ALIAS เขียนที่ autoEnrich เท่านั้น (Single Writer)
+    // autoEnrichAliasesFromFactBatch_() จะเขียน canonical+variant เข้า M_ALIAS เอง
+
+    logDebug('PlaceService', `createPlace: ${newId} — ${normResult.cleanPlace}`);
+    return newId;
   } catch (err) {
     // [FIX B3 v5.5.002] เพิ่ม try-catch ตาม Rule 12
     logError('PlaceService', `createPlace ล้มเหลว: ${err.message}`, err);
@@ -670,19 +707,22 @@ function createPlace(normResult, province, district, subDistrict, postcode) {
 
 function createPlaceAlias(placeId, aliasName, matchScore) {
   try {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEET.M_PLACE_ALIAS);
-  const newId = generateShortId('PLA');
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.M_PLACE_ALIAS);
+    const newId = generateShortId('PLA');
 
-  // [FIX-05 v5.4.003] ใช้ getRange+setValues แทน appendRow
-  const aliasRow = [newId, placeId, aliasName, matchScore || 0, new Date(), true];
-  const aliasLastRow = sheet.getLastRow();
-  sheet.getRange(aliasLastRow + 1, 1, 1, aliasRow.length).setValues([aliasRow]);
-  invalidatePlaceAliasCache_();
+    // [FIX-05 v5.4.003] ใช้ getRange+setValues แทน appendRow
+    const aliasRow = [newId, placeId, aliasName, matchScore || 0, new Date(), true];
+    const aliasLastRow = sheet.getLastRow();
+    sheet.getRange(aliasLastRow + 1, 1, 1, aliasRow.length).setValues([aliasRow]);
+    invalidatePlaceAliasCache_();
 
-  // [REMOVED v5.4.001] ไม่เรียก createGlobalAlias() — M_ALIAS เขียนที่ autoEnrich เท่านั้น (Single Writer)
+    // [REMOVED v5.4.001] ไม่เรียก createGlobalAlias() — M_ALIAS เขียนที่ autoEnrich เท่านั้น (Single Writer)
 
-  logDebug('PlaceService', `createPlaceAlias: ${placeId} (alias hash: ${generateMd5Hash(String(aliasName || '')).substring(0, 8)})`);
+    logDebug(
+      'PlaceService',
+      `createPlaceAlias: ${placeId} (alias hash: ${generateMd5Hash(String(aliasName || '')).substring(0, 8)})`
+    );
   } catch (err) {
     // [FIX B3 v5.5.002] เพิ่ม try-catch ตาม Rule 12
     logError('PlaceService', `createPlaceAlias ล้มเหลว: ${err.message}`, err);
@@ -696,18 +736,19 @@ function createPlaceAlias(placeId, aliasName, matchScore) {
 function updatePlaceStats(placeId) {
   if (!placeId) return;
   try {
-    const ss      = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet   = ss.getSheetByName(SHEET.M_PLACE);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.M_PLACE);
     const lastRow = sheet.getLastRow();
     if (lastRow < 2) return;
 
-    const idCol   = PLACE_IDX.PLACE_ID + 1;
-    const idData  = sheet.getRange(2, idCol, lastRow - 1, 1).getValues();
+    const idCol = PLACE_IDX.PLACE_ID + 1;
+    const idData = sheet.getRange(2, idCol, lastRow - 1, 1).getValues();
     let targetRow = -1;
 
     for (let i = 0; i < idData.length; i++) {
       if (String(idData[i][0]).trim() === placeId) {
-        targetRow = i + 2; break;
+        targetRow = i + 2;
+        break;
       }
     }
 
@@ -722,13 +763,12 @@ function updatePlaceStats(placeId) {
     // [FIX v5.4.003] Batch write: อ่านทั้ง 2 คอลัมน์ → แก้ใน RAM → เขียนทีเดียว
     // ลดจาก 3 API calls เหลือ 1+1 = 2 API calls
     const statsRange = sheet.getRange(targetRow, lastSeenCol, 1, 2);
-    const statsVals  = statsRange.getValues();
+    const statsVals = statsRange.getValues();
     const curr = Number(statsVals[0][1]) || 0;
     statsVals[0][0] = new Date();
     statsVals[0][1] = curr + 1;
     statsRange.setValues(statsVals);
     invalidatePlaceCache_();
-
   } catch (err) {
     // [FIX LAW-13 v5.4.003] ส่ง err object เพื่อให้ stack trace เข้า SYS_LOG
     logError('PlaceService', `updatePlaceStats ล้มเหลว: ${err.message}`, err);
@@ -761,17 +801,15 @@ function loadCachedGeoRowsForPlace_() {
 
   // [FIX LAW-03 v5.4.003] ใช้ computed column count จาก TH_GEO_IDX แทน hardcode 4
   // ป้องกันถ้ามีการเปลี่ยนแปลง index ในอนาคต — อ่านเฉพาะคอลัมน์ที่ต้องใช้
-  const geoColsNeeded = Math.max(
-    TH_GEO_IDX.POSTCODE, TH_GEO_IDX.SUB_DISTRICT,
-    TH_GEO_IDX.DISTRICT, TH_GEO_IDX.PROVINCE
-  ) + 1;
+  const geoColsNeeded =
+    Math.max(TH_GEO_IDX.POSTCODE, TH_GEO_IDX.SUB_DISTRICT, TH_GEO_IDX.DISTRICT, TH_GEO_IDX.PROVINCE) + 1;
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, geoColsNeeded).getValues();
-  _GLOBAL_GEO_DICT_CACHE_PLACE = data.map(function(row) {
+  _GLOBAL_GEO_DICT_CACHE_PLACE = data.map(function (row) {
     return {
-      postcode:    String(row[TH_GEO_IDX.POSTCODE]     || '').trim(),
+      postcode: String(row[TH_GEO_IDX.POSTCODE] || '').trim(),
       subDistrict: String(row[TH_GEO_IDX.SUB_DISTRICT] || '').trim(),
-      district:    String(row[TH_GEO_IDX.DISTRICT]     || '').trim(),
-      province:    String(row[TH_GEO_IDX.PROVINCE]     || '').trim()
+      district: String(row[TH_GEO_IDX.DISTRICT] || '').trim(),
+      province: String(row[TH_GEO_IDX.PROVINCE] || '').trim()
     };
   });
 
@@ -784,22 +822,24 @@ function loadAllPlaces_() {
   //   Root cause: เมื่อ saveChunkedCache_ ไม่พร้อม (typeof !== 'function'), code ตกไป fallback
   //   ที่ใช้ cache.put(cacheKey, resultJson) ตรง ทำให้ 825KB > 100KB limit → "M_PLACE Cache เต็ม"
   //   ตอนนี้ถ้า saveChunkedCache_ ไม่พร้อม → throw error แทน เพื่อบังคับใช้ chunked path
-  const cacheKey = (typeof CACHE_KEY !== 'undefined' && CACHE_KEY.PLACE_ALL) ? CACHE_KEY.PLACE_ALL : 'M_PLACE_ALL';
-  const cache    = CacheService.getScriptCache();
+  const cacheKey = typeof CACHE_KEY !== 'undefined' && CACHE_KEY.PLACE_ALL ? CACHE_KEY.PLACE_ALL : 'M_PLACE_ALL';
+  const cache = CacheService.getScriptCache();
 
   // [FIX v5.5.010] บังคับใช้ loadChunkedCache_ — ไม่มี fallback แล้ว
   if (typeof loadChunkedCache_ !== 'function') {
     // [FIX R13-01 REVIEW15] Rule 13: ส่ง Error object เพื่อให้มี stack trace ใน SYS_LOG.DETAILS
-    logError('PlaceService',
+    logError(
+      'PlaceService',
       'loadChunkedCache_ ไม่พร้อม — กรุณาตรวจสอบว่า 14_Utils.gs ถูก load แล้ว',
-      new Error('CHUNKED_CACHE_UNAVAILABLE_PLACE'));
+      new Error('CHUNKED_CACHE_UNAVAILABLE_PLACE')
+    );
     // Fallback: อ่านจาก sheet ตรง (ไม่ผ่าน cache) เพื่อให้ function ยังทำงานได้
   } else {
     const cached = loadChunkedCache_(cache, cacheKey);
     if (cached) return cached;
   }
 
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET.M_PLACE);
   if (!sheet || sheet.getLastRow() < 2) return [];
 
@@ -808,22 +848,21 @@ function loadAllPlaces_() {
   const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, colsToRead).getValues();
 
   const result = rows
-    .filter(r => r[PLACE_IDX.PLACE_ID])
+    .filter((r) => r[PLACE_IDX.PLACE_ID])
     // [FIX v003] กรองทั้ง ARCHIVED และ MERGED (เดิมกรองแค่ ARCHIVED)
-    .filter(r => r[PLACE_IDX.STATUS] !== APP_CONST.STATUS_ARCHIVED &&
-                 r[PLACE_IDX.STATUS] !== APP_CONST.STATUS_MERGED)
-    .map(r => ({
-      placeId:    String(r[PLACE_IDX.PLACE_ID]),
-      canonical:  String(r[PLACE_IDX.CANONICAL]   || ''),
-      normalized: String(r[PLACE_IDX.NORMALIZED]  || ''),
-      placeType:  String(r[PLACE_IDX.PLACE_TYPE]  || ''),
-      province:   String(r[PLACE_IDX.PROVINCE]    || ''),
-      district:   String(r[PLACE_IDX.DISTRICT]    || ''),
+    .filter((r) => r[PLACE_IDX.STATUS] !== APP_CONST.STATUS_ARCHIVED && r[PLACE_IDX.STATUS] !== APP_CONST.STATUS_MERGED)
+    .map((r) => ({
+      placeId: String(r[PLACE_IDX.PLACE_ID]),
+      canonical: String(r[PLACE_IDX.CANONICAL] || ''),
+      normalized: String(r[PLACE_IDX.NORMALIZED] || ''),
+      placeType: String(r[PLACE_IDX.PLACE_TYPE] || ''),
+      province: String(r[PLACE_IDX.PROVINCE] || ''),
+      district: String(r[PLACE_IDX.DISTRICT] || ''),
       subDistrict: String(r[PLACE_IDX.SUB_DISTRICT] || ''),
-      postcode:   String(r[PLACE_IDX.POSTCODE]    || ''),
+      postcode: String(r[PLACE_IDX.POSTCODE] || ''),
       usageCount: Number(r[PLACE_IDX.USAGE_COUNT] || 0),
       note: String(r[PLACE_IDX.NOTE] || ''),
-      masterUuid: String(r[PLACE_IDX.MASTER_UUID] || ''),
+      masterUuid: String(r[PLACE_IDX.MASTER_UUID] || '')
     }));
 
   // [FIX v5.5.010 HOTFIX #2] บังคับใช้ saveChunkedCache_ — ลบ fallback ที่ใช้ cache.put ตรง
@@ -834,10 +873,13 @@ function loadAllPlaces_() {
     logDebug('PlaceService', 'loadAllPlaces_: cached via saveChunkedCache_ (' + result.length + ' places)');
   } else {
     // [FIX R13-01b REVIEW15] Rule 13: ส่ง Error object เพื่อ stack trace บอกตำแหน่งที่เกิด
-    logError('PlaceService',
+    logError(
+      'PlaceService',
       'saveChunkedCache_ ไม่พร้อม — skip cache write for M_PLACE_ALL (' +
-      result.length + ' places). กรุณาตรวจสอบว่า 14_Utils.gs ถูก load แล้ว',
-      new Error('SAVE_CHUNKED_CACHE_UNAVAILABLE_PLACE_ALL'));
+        result.length +
+        ' places). กรุณาตรวจสอบว่า 14_Utils.gs ถูก load แล้ว',
+      new Error('SAVE_CHUNKED_CACHE_UNAVAILABLE_PLACE_ALL')
+    );
   }
   return result;
 }
@@ -847,15 +889,18 @@ function loadAllPlaceAliases_() {
   // [FIX v5.5.010 HOTFIX #3] ลบ fallback path ที่ใช้ cache.put ตรง — บังคับใช้ saveChunkedCache_
   //   Root cause: เมื่อ saveChunkedCache_ ไม่พร้อม, code ตกไป fallback ที่ใช้ cache.put ตรง
   //   ทำให้ 312KB > 100KB limit → "M_PLACE_ALIAS Cache write error: อาร์กิวเมนต์มากเกินไป"
-  const cacheKey = (typeof CACHE_KEY !== 'undefined' && CACHE_KEY.PLACE_ALIAS_ALL) ? CACHE_KEY.PLACE_ALIAS_ALL : 'M_PLACE_ALIAS_ALL';
-  const cache    = CacheService.getScriptCache();
+  const cacheKey =
+    typeof CACHE_KEY !== 'undefined' && CACHE_KEY.PLACE_ALIAS_ALL ? CACHE_KEY.PLACE_ALIAS_ALL : 'M_PLACE_ALIAS_ALL';
+  const cache = CacheService.getScriptCache();
 
   // [FIX v5.5.010] บังคับใช้ loadChunkedCache_ — ไม่มี fallback แล้ว
   if (typeof loadChunkedCache_ !== 'function') {
     // [FIX R13-02 REVIEW15] Rule 13: ส่ง Error object เพื่อ stack trace
-    logError('PlaceService',
+    logError(
+      'PlaceService',
       'loadChunkedCache_ ไม่พร้อม — กรุณาตรวจสอบว่า 14_Utils.gs ถูก load แล้ว',
-      new Error('CHUNKED_CACHE_UNAVAILABLE_PLACE_ALIAS'));
+      new Error('CHUNKED_CACHE_UNAVAILABLE_PLACE_ALIAS')
+    );
   } else {
     const cached = loadChunkedCache_(cache, cacheKey);
     if (cached) {
@@ -865,7 +910,7 @@ function loadAllPlaceAliases_() {
     }
   }
 
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET.M_PLACE_ALIAS);
   if (!sheet || sheet.getLastRow() < 2) return [];
 
@@ -879,10 +924,13 @@ function loadAllPlaceAliases_() {
     logDebug('PlaceService', 'loadAllPlaceAliases_: cached via saveChunkedCache_ (' + rows.length + ' aliases)');
   } else {
     // [FIX R13-02b REVIEW15] Rule 13: ส่ง Error object เพื่อ stack trace
-    logError('PlaceService',
+    logError(
+      'PlaceService',
       'saveChunkedCache_ ไม่พร้อม — skip cache write for M_PLACE_ALIAS_ALL (' +
-      rows.length + ' aliases). กรุณาตรวจสอบว่า 14_Utils.gs ถูก load แล้ว',
-      new Error('SAVE_CHUNKED_CACHE_UNAVAILABLE_PLACE_ALIAS_ALL'));
+        rows.length +
+        ' aliases). กรุณาตรวจสอบว่า 14_Utils.gs ถูก load แล้ว',
+      new Error('SAVE_CHUNKED_CACHE_UNAVAILABLE_PLACE_ALIAS_ALL')
+    );
   }
   // [PERF-009] Build inverted index ครั้งเดียวหลัง sheet read
   _buildPlaceAliasInvertedIndex_(rows);
@@ -897,15 +945,15 @@ function loadAllPlaceAliases_() {
  * @private
  */
 function _buildPlaceAliasInvertedIndex_(allAliases) {
-  if (_PLACE_ALIAS_INVERTED_INDEX) return;  // already built
+  if (_PLACE_ALIAS_INVERTED_INDEX) return; // already built
   _PLACE_ALIAS_INVERTED_INDEX = new Map();
   if (!allAliases || allAliases.length === 0) return;
 
-  allAliases.forEach(function(alias) {
+  allAliases.forEach(function (alias) {
     if (!alias[PLACE_ALIAS_IDX.ACTIVE_FLAG]) return;
-    var aliasNorm = normalizeForCompare(alias[PLACE_ALIAS_IDX.ALIAS_NAME]);
+    const aliasNorm = normalizeForCompare(alias[PLACE_ALIAS_IDX.ALIAS_NAME]);
     if (!aliasNorm) return;
-    var placeId = String(alias[PLACE_ALIAS_IDX.PLACE_ID]);
+    const placeId = String(alias[PLACE_ALIAS_IDX.PLACE_ID]);
     if (!_PLACE_ALIAS_INVERTED_INDEX.has(aliasNorm)) {
       _PLACE_ALIAS_INVERTED_INDEX.set(aliasNorm, new Set());
     }
@@ -919,14 +967,24 @@ function _buildPlaceAliasInvertedIndex_(allAliases) {
  * @param {Set<string>} placeIds - Set of place IDs to update
  */
 function batchUpdatePlaceStats_(placeIds) {
-  batchUpdateEntityStats_(SHEET.M_PLACE, PLACE_IDX, PLACE_IDX.PLACE_ID, PLACE_IDX.USAGE_COUNT, PLACE_IDX.LAST_SEEN, placeIds, invalidatePlaceCache_);
+  batchUpdateEntityStats_(
+    SHEET.M_PLACE,
+    PLACE_IDX,
+    PLACE_IDX.PLACE_ID,
+    PLACE_IDX.USAGE_COUNT,
+    PLACE_IDX.LAST_SEEN,
+    placeIds,
+    invalidatePlaceCache_
+  );
 }
 
 /**
  * invalidatePlaceCache_ — [REF-011] Uses centralized invalidateChunkedCache_
  */
 function invalidatePlaceCache_() {
-  invalidateChunkedCache_('M_PLACE_ALL', function() { _GLOBAL_GEO_DICT_CACHE_PLACE = null; });
+  invalidateChunkedCache_('M_PLACE_ALL', function () {
+    _GLOBAL_GEO_DICT_CACHE_PLACE = null;
+  });
 }
 /**
  * invalidatePlaceAliasCache_ — [REF-011] Uses centralized invalidateChunkedCache_
@@ -934,7 +992,7 @@ function invalidatePlaceCache_() {
  *   (createPlaceAlias, autoEnrichAliasesFromFactBatch_, MIGRATION Step 3)
  */
 function invalidatePlaceAliasCache_() {
-  _PLACE_ALIAS_INVERTED_INDEX = null;  // [PERF-009] clear inverted index → rebuild on next loadAllPlaceAliases_
+  _PLACE_ALIAS_INVERTED_INDEX = null; // [PERF-009] clear inverted index → rebuild on next loadAllPlaceAliases_
   invalidateChunkedCache_('M_PLACE_ALIAS_ALL');
 }
 
@@ -947,14 +1005,14 @@ function lookupPlaceAdminById_(placeId) {
 
   // [FIX v5.5.001] Use loadAllPlaces_() cache + .find() instead of direct sheet read
   const allPlaces = loadAllPlaces_();
-  const place = allPlaces.find(p => p.placeId === String(placeId));
+  const place = allPlaces.find((p) => p.placeId === String(placeId));
 
   if (!place) return null;
 
   return {
     subDistrict: String(place.subDistrict || ''),
-    district:    String(place.district    || ''),
-    province:    String(place.province    || ''),
-    postcode:    String(place.postcode    || '')
+    district: String(place.district || ''),
+    province: String(place.province || ''),
+    postcode: String(place.postcode || '')
   };
 }

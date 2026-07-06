@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.040
+ * VERSION: 6.0.002
  * FILE: 17_SearchService.gs
  * LMDS V5.5 — Search Service (The Bridger — Group 2)
  * ===================================================
@@ -29,7 +29,7 @@
  *     - fastLookupByShipToName()          → 21_AliasService.gs (Tier 0 Fast Track)
  *     - resolvePerson()                   → 06_PersonService.gs
  *     - getDestsByPersonId()              → 09_DestinationService.gs
- *   EXPORTS TO: 
+ *   EXPORTS TO:
  *     - 18_ServiceSCG.gs      (findBestGeoByPersonPlace, runLookupEnrichment)
  *   SHEETS ACCESSED:
  *     - SHEET.DAILY_JOB       (Read+Write: ShipToName→LatLong_Actual + color coding)
@@ -45,10 +45,12 @@
  *   │  │   └── lookupSingleRow()          [UI Wrapper สำหรับเรียกทีละแถว]         │
  *   │  ├── flushLookupResults_()   [Output: batch setValues กลับไปที่ DAILY_JOB] │
  *   │  │   └── ใช้ clearContent() และ setBackgrounds เฉพาะช่วง ลดการพังของ Format│
- *   │  └── getEnrichmentLock_()    [Utility: PropertiesService Lock]         │
+ *   │  └── (Locking handled by caller — runLookupEnrichment re-entrancy guarded) │
  *   └────────────────────────────────────────────────────────────────────────┘
  * ===================================================
  */
+// [FIX V5.5.048] ลบ dead reference getEnrichmentLock_() ออกจาก ARCHITECTURE comment
+//                เนื่องจากฟังก์ชันนี้ไม่มีอยู่จริง (LockService ถูกจัดการที่ caller ด้านนอก)
 
 // ============================================================
 // SECTION 1: findBestGeoByPersonPlace — ShipToName Only
@@ -87,8 +89,7 @@
 function findBestGeoByPersonPlace(rawPerson, rawAddress) {
   // Guard: ชื่อว่างหรือสั้นเกิน → NOT_FOUND ทันที
   if (!rawPerson || String(rawPerson).trim().length < 2) {
-    return buildSearchResult_(null, null, 'NOT_FOUND', 0, null,
-      'ShipToName ว่างหรือสั้นเกิน');
+    return buildSearchResult_(null, null, 'NOT_FOUND', 0, null, 'ShipToName ว่างหรือสั้นเกิน');
   }
 
   const rawName = String(rawPerson).trim();
@@ -128,12 +129,14 @@ function findBestGeoByPersonPlace(rawPerson, rawAddress) {
     }
     if (fastResult && fastResult.lat != null && fastResult.lng != null) {
       // [FIX v5.5.021 M1/M2] Mask rawName เพื่อป้องกัน PII Leak ใน SYS_LOG
-      const reason = cleanName !== rawName
-        ? `M_ALIAS Fast Track (cleaned) → "${cleanName}"`
-        : `M_ALIAS Fast Track: "${cleanName}"`;
+      const reason =
+        cleanName !== rawName ? `M_ALIAS Fast Track (cleaned) → "${cleanName}"` : `M_ALIAS Fast Track: "${cleanName}"`;
       return buildSearchResult_(
-        fastResult.lat, fastResult.lng,
-        'FOUND_ALIAS_FAST', fastResult.confidence, fastResult.destId,
+        fastResult.lat,
+        fastResult.lng,
+        'FOUND_ALIAS_FAST',
+        fastResult.confidence,
+        fastResult.destId,
         reason
       );
     }
@@ -144,38 +147,27 @@ function findBestGeoByPersonPlace(rawPerson, rawAddress) {
   //   เดิมส่ง cleanName เข้า resolvePerson ซึ่งจะ normalize ซ้ำอีกครั้ง (safe but wasteful)
   //   ตอนนี้ส่ง rawName + preNormResult ให้ resolvePerson ใช้ normResult ที่เราคำนวณแล้ว
   const personResult = resolvePerson(rawName, normResult);
-  const personId     = personResult ? personResult.personId : null;
+  const personId = personResult ? personResult.personId : null;
 
   if (personId) {
-    const dests = getDestsByPersonId(personId)
-      .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0));
+    const dests = getDestsByPersonId(personId).sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0));
 
     if (dests.length > 0) {
       // [ADD v5.5.022-PATCH1] Tie-Breaker: ถ้ามีหลาย dest และมี rawAddress → เลือกด้วย address matching
-      const top = (dests.length > 1 && rawAddr)
-        ? (selectBestDestByAddress_(dests, rawAddr) || dests[0])
-        : dests[0];
+      const top = dests.length > 1 && rawAddr ? selectBestDestByAddress_(dests, rawAddr) || dests[0] : dests[0];
       // [FIX v5.5.021 M1/M2] Mask rawName
-      const reason = cleanName !== rawName
-        ? `Person match (cleaned) → "${cleanName}" → usageCount:${top.usageCount}`
-        : `Person match: "${cleanName}" → usageCount:${top.usageCount}`;
-      return buildSearchResult_(
-        top.lat, top.lng,
-        'FOUND_DOMINANT', 90, top.destId,
-        reason
-      );
+      const reason =
+        cleanName !== rawName
+          ? `Person match (cleaned) → "${cleanName}" → usageCount:${top.usageCount}`
+          : `Person match: "${cleanName}" → usageCount:${top.usageCount}`;
+      return buildSearchResult_(top.lat, top.lng, 'FOUND_DOMINANT', 90, top.destId, reason);
     }
   }
 
   // ไม่พบ — เว้นว่าง LatLong_Actual
-  const reason = cleanName !== rawName
-    ? `ไม่พบข้อมูล (cleaned: "${cleanName}")`
-    : `ไม่พบข้อมูล — ShipToName:"${cleanName}"`;
-  return buildSearchResult_(
-    null, null,
-    'NOT_FOUND', 0, null,
-    reason
-  );
+  const reason =
+    cleanName !== rawName ? `ไม่พบข้อมูล (cleaned: "${cleanName}")` : `ไม่พบข้อมูล — ShipToName:"${cleanName}"`;
+  return buildSearchResult_(null, null, 'NOT_FOUND', 0, null, reason);
 }
 
 // ============================================================
@@ -211,7 +203,9 @@ function selectBestDestByAddress_(dests, rawAddress) {
     } else {
       normAddr = normAddr.toLowerCase().replace(/\s+/g, '');
     }
-  } catch (e) { /* fallback */ }
+  } catch (e) {
+    /* fallback */
+  }
   if (normAddr.length < 4) return null; // ที่อยู่สั้นเกินไป ไม่น่าเชื่อถือ
 
   // โหลด place map (placeId → address string) — ใช้ loadAllPlaces_ cache อยู่แล้ว
@@ -220,7 +214,7 @@ function selectBestDestByAddress_(dests, rawAddress) {
     if (typeof loadAllPlaces_ === 'function') {
       const allPlaces = loadAllPlaces_();
       placeMap = {};
-      allPlaces.forEach(function(p) {
+      allPlaces.forEach(function (p) {
         if (p && p.placeId) {
           // ประกอบ address จาก canonical + sub_district + district + province + postcode
           const parts = [
@@ -256,8 +250,8 @@ function selectBestDestByAddress_(dests, rawAddress) {
   //   ตัวอย่าง: "บางนา" vs "บางบอน" = 0.444 (false match ที่ threshold เดิม 0.4)
   //   ยก threshold เป็น 0.70 เพื่อให้ address ต้องคล้ายกันจริง ๆ จึงจะถือว่าเป็นที่เดียวกัน
   //   ค่า 0.4-0.70 จะถูก log เป็น warning (near miss) เพื่อ monitoring
-  const TIE_BREAK_THRESHOLD = 0.70; // 70% Dice — strict match
-  const NEAR_MISS_THRESHOLD = 0.40; // 40% Dice — ค่าเดิม ใช้สำหรับ near-miss monitoring เท่านั้น
+  const TIE_BREAK_THRESHOLD = 0.7; // 70% Dice — strict match
+  const NEAR_MISS_THRESHOLD = 0.4; // 40% Dice — ค่าเดิม ใช้สำหรับ near-miss monitoring เท่านั้น
 
   for (let i = 0; i < dests.length; i++) {
     const dest = dests[i];
@@ -273,18 +267,22 @@ function selectBestDestByAddress_(dests, rawAddress) {
       } else {
         normPlaceAddr = normPlaceAddr.toLowerCase().replace(/\s+/g, '');
       }
-    } catch (e) { /* fallback */ }
+    } catch (e) {
+      /* fallback */
+    }
     if (normPlaceAddr.length < 4) continue;
 
     let placeBigrams;
     try {
       placeBigrams = buildBigramSetSafe_(normPlaceAddr);
-    } catch (e) { continue; }
+    } catch (e) {
+      continue;
+    }
     if (!placeBigrams || placeBigrams.size === 0) continue;
 
     // Dice coefficient = 2 * |A ∩ B| / (|A| + |B|)
     let intersection = 0;
-    addrBigrams.forEach(function(b) {
+    addrBigrams.forEach(function (b) {
       if (placeBigrams.has(b)) intersection++;
     });
     const dice = (2.0 * intersection) / (addrBigrams.size + placeBigrams.size);
@@ -296,24 +294,37 @@ function selectBestDestByAddress_(dests, rawAddress) {
   }
 
   if (bestDest && bestScore >= TIE_BREAK_THRESHOLD) {
-    logDebug('SearchService',
-      'selectBestDestByAddress_: match destId=' + bestDest.destId +
-      ' (Dice=' + bestScore.toFixed(2) + ')');
+    logDebug(
+      'SearchService',
+      'selectBestDestByAddress_: match destId=' + bestDest.destId + ' (Dice=' + bestScore.toFixed(2) + ')'
+    );
     return bestDest;
   }
 
   // [Fix Phase-C #1] Near-miss monitoring: Dice ระหว่าง 0.40-0.70 เป็น zone ที่เคย match ได้ (threshold เดิม)
   //   แต่ตอนนี้ถือว่าไม่ match — log warning เพื่อให้เฝ้าระวัง pattern ที่อาจต้องปรับ threshold หรือเพิ่ม alias
   if (bestDest && bestScore >= NEAR_MISS_THRESHOLD) {
-    logWarn('SearchService',
-      'selectBestDestByAddress_: NEAR MISS — best Dice=' + bestScore.toFixed(2) +
-      ' (between ' + NEAR_MISS_THRESHOLD + ' and ' + TIE_BREAK_THRESHOLD +
-      ') destId=' + bestDest.destId +
-      ' → fallback usageCount (threshold 0.70 not met)');
+    logWarn(
+      'SearchService',
+      'selectBestDestByAddress_: NEAR MISS — best Dice=' +
+        bestScore.toFixed(2) +
+        ' (between ' +
+        NEAR_MISS_THRESHOLD +
+        ' and ' +
+        TIE_BREAK_THRESHOLD +
+        ') destId=' +
+        bestDest.destId +
+        ' → fallback usageCount (threshold 0.70 not met)'
+    );
   } else if (bestDest) {
-    logDebug('SearchService',
-      'selectBestDestByAddress_: best Dice=' + bestScore.toFixed(2) +
-      ' ต่ำกว่า threshold ' + TIE_BREAK_THRESHOLD + ' → fallback usageCount');
+    logDebug(
+      'SearchService',
+      'selectBestDestByAddress_: best Dice=' +
+        bestScore.toFixed(2) +
+        ' ต่ำกว่า threshold ' +
+        TIE_BREAK_THRESHOLD +
+        ' → fallback usageCount'
+    );
   }
   return null;
 }
@@ -346,12 +357,12 @@ function buildBigramSetSafe_(str) {
  */
 function buildSearchResult_(lat, lng, status, confidence, destId, reason) {
   return {
-    lat:        lat,        // null เมื่อ NOT_FOUND
-    lng:        lng,        // null เมื่อ NOT_FOUND
-    status:     status,
+    lat: lat, // null เมื่อ NOT_FOUND
+    lng: lng, // null เมื่อ NOT_FOUND
+    status: status,
     confidence: confidence,
-    destId:     destId,    // null ถ้าไม่มี Dest
-    reason:     reason,
+    destId: destId, // null ถ้าไม่มี Dest
+    reason: reason
   };
 }
 
@@ -371,25 +382,25 @@ function buildSearchResult_(lat, lng, status, confidence, destId, reason) {
  * [ADD v003] Time Guard ป้องกัน Timeout
  */
 function runLookupEnrichment() {
-  const ss        = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet     = ss.getSheetByName(SHEET.DAILY_JOB);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET.DAILY_JOB);
 
   if (!sheet || sheet.getLastRow() < 2) {
     logWarn('SearchService', 'ตารางงานประจำวัน ว่างอยู่');
     return;
   }
 
-  const startTime   = new Date();
-  const timeLimit   = AI_CONFIG.TIME_LIMIT_MS || (5 * 60 * 1000);
-  const totalRows   = sheet.getLastRow() - 1;
-  const schemaLen   = SCHEMA[SHEET.DAILY_JOB].length;
-  
+  const startTime = new Date();
+  const timeLimit = AI_CONFIG.TIME_LIMIT_MS || 5 * 60 * 1000;
+  const totalRows = sheet.getLastRow() - 1;
+  const schemaLen = SCHEMA[SHEET.DAILY_JOB].length;
+
   // [FIX v5.5.021 H1] เพิ่ม Chunk Processing ป้องกัน Memory Spike
-  const CHUNK_SIZE  = 500;
-  let countFound    = 0;
+  const CHUNK_SIZE = 500;
+  let countFound = 0;
   let countNotFound = 0;
-  let countSkipped  = 0;
-  let timedOut      = false;
+  let countSkipped = 0;
+  let timedOut = false;
 
   try {
     for (let startRow = 2; startRow <= sheet.getLastRow(); startRow += CHUNK_SIZE) {
@@ -402,15 +413,15 @@ function runLookupEnrichment() {
       const numRows = Math.min(CHUNK_SIZE, sheet.getLastRow() - startRow + 1);
       const chunkData = sheet.getRange(startRow, 1, numRows, schemaLen).getValues();
       const latActualArr = [];
-      const bgColorArr   = [];
+      const bgColorArr = [];
 
       chunkData.forEach((row, i) => {
         const r = lookupEnrichOneRow_(row);
         latActualArr.push(r.latActual);
         bgColorArr.push(r.bgColor);
-        countFound    += r.found;
+        countFound += r.found;
         countNotFound += r.notFound;
-        countSkipped  += r.skipped;
+        countSkipped += r.skipped;
       });
 
       // Flush ทีละ Chunk ลดการบริโภค Memory (ใช้ startRow)
@@ -422,7 +433,7 @@ function runLookupEnrichment() {
   }
 
   const msg =
-    `✅ จับคู่พิกัดเสร็จ\n` +
+    '✅ จับคู่พิกัดเสร็จ\n' +
     `เจอ: ${countFound} | ไม่พบ: ${countNotFound} | ข้าม: ${countSkipped}` +
     (timedOut ? '\n⚠️ หยุดก่อนครบเพราะใกล้ Timeout — รันอีกครั้งเพื่อดำเนินการต่อ' : '');
 
@@ -444,8 +455,8 @@ function runLookupEnrichment() {
 function lookupEnrichOneRow_(row) {
   // [REDESIGN v5.4.003] อ่านเฉพาะ ShipToName — ShipToAddress/LatLong_SCG ไม่ใช้แล้ว
   // [ADD v5.5.022-PATCH1] อ่าน ShipToAddress เพิ่ม — ใช้เป็น tie-breaker กรณี ShipToName ซ้ำ
-  const rawPerson  = String(row[DATA_IDX.SHIP_TO_NAME]  || '').trim();
-  const rawAddress = String(row[DATA_IDX.SHIP_TO_ADDR]  || '').trim();
+  const rawPerson = String(row[DATA_IDX.SHIP_TO_NAME] || '').trim();
+  const rawAddress = String(row[DATA_IDX.SHIP_TO_ADDR] || '').trim();
   const existingLL = String(row[DATA_IDX.LATLNG_ACTUAL] || '').trim();
 
   // ตรวจ existingLL — ข้ามแถวที่มีพิกัดดีอยู่แล้ว
@@ -457,14 +468,20 @@ function lookupEnrichOneRow_(row) {
   }
 
   // ค้นหาพิกัดจาก ShipToName เท่านั้น (rawAddress ใช้เป็น tie-breaker เมื่อ ShipToName ซ้ำ)
-  const result   = findBestGeoByPersonPlace(rawPerson, rawAddress);
+  const result = findBestGeoByPersonPlace(rawPerson, rawAddress);
 
   // [FIX v5.5.021 C2] รวบ switch case ป้องกัน silent fallback
-  if (['FOUND', 'FOUND_DOMINANT', 'FOUND_ALIAS_FAST'].includes(result.status) && result.lat != null && result.lng != null) {
+  if (
+    ['FOUND', 'FOUND_DOMINANT', 'FOUND_ALIAS_FAST'].includes(result.status) &&
+    result.lat != null &&
+    result.lng != null
+  ) {
     return {
       latActual: [`${result.lat},${result.lng}`],
-      bgColor:   [APP_CONST.COLOR_FOUND],
-      found: 1, notFound: 0, skipped: 0
+      bgColor: [APP_CONST.COLOR_FOUND],
+      found: 1,
+      notFound: 0,
+      skipped: 0
     };
   }
 
@@ -472,7 +489,7 @@ function lookupEnrichOneRow_(row) {
   if (result.status !== 'NOT_FOUND') {
     logWarn('SearchService', `Unknown status "${result.status}" for "${rawPerson}" — treated as NOT_FOUND`);
   }
-  
+
   return { latActual: [''], bgColor: [APP_CONST.COLOR_NOT_FOUND], found: 0, notFound: 1, skipped: 0 };
 }
 
@@ -499,11 +516,10 @@ function flushLookupResults_(sheet, latActualArr, bgColorArr, schemaLen, startRo
   try {
     // Batch Write LatLong_Actual
     const latActualCol = DATA_IDX.LATLNG_ACTUAL + 1;
-    sheet.getRange(startRow, latActualCol, processedCount, 1)
-         .setValues(latActualArr.slice(0, processedCount));
+    sheet.getRange(startRow, latActualCol, processedCount, 1).setValues(latActualArr.slice(0, processedCount));
 
     // [FIX v5.5.021 C3] Batch setBackgrounds เฉพาะคอลัมน์ LATLNG_ACTUAL เพื่อไม่ให้ทับสีคอลัมน์อื่น
-    const targetColors = bgColorArr.slice(0, processedCount).map(row => row[0] ? [row[0]] : [null]);
+    const targetColors = bgColorArr.slice(0, processedCount).map((row) => (row[0] ? [row[0]] : [null]));
     sheet.getRange(startRow, latActualCol, processedCount, 1).setBackgrounds(targetColors);
 
     if (context === 'error-flush') {
@@ -526,26 +542,25 @@ function flushLookupResults_(sheet, latActualArr, bgColorArr, schemaLen, startRo
 function lookupSingleRow(rowNumber) {
   // [FIX R12] เพิ่ม try-catch — entry point ต้องมี error handling
   try {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEET.DAILY_JOB);
-  if (!sheet || rowNumber < 2) return null;
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.DAILY_JOB);
+    if (!sheet || rowNumber < 2) return null;
 
-  const rowData   = sheet.getRange(rowNumber, 1, 1,
-                     SCHEMA[SHEET.DAILY_JOB].length).getValues()[0];
-  const rawPerson = String(rowData[DATA_IDX.SHIP_TO_NAME] || '').trim();
-  const rawAddress = String(rowData[DATA_IDX.SHIP_TO_ADDR] || '').trim();
-  // [ADD v5.5.022-PATCH1] ส่ง rawAddress เป็น tie-breaker กรณี ShipToName ซ้ำ
+    const rowData = sheet.getRange(rowNumber, 1, 1, SCHEMA[SHEET.DAILY_JOB].length).getValues()[0];
+    const rawPerson = String(rowData[DATA_IDX.SHIP_TO_NAME] || '').trim();
+    const rawAddress = String(rowData[DATA_IDX.SHIP_TO_ADDR] || '').trim();
+    // [ADD v5.5.022-PATCH1] ส่ง rawAddress เป็น tie-breaker กรณี ShipToName ซ้ำ
 
-  const result = findBestGeoByPersonPlace(rawPerson, rawAddress);
+    const result = findBestGeoByPersonPlace(rawPerson, rawAddress);
 
-  logDebug('SearchService',
-    `Row ${rowNumber} → Status:${result.status} ` +
-    `(${result.confidence}%) lat:${result.lat} lng:${result.lng} — ` +
-    `Reason: ${result.reason}`
-  );
+    logDebug(
+      'SearchService',
+      `Row ${rowNumber} → Status:${result.status} ` +
+        `(${result.confidence}%) lat:${result.lat} lng:${result.lng} — ` +
+        `Reason: ${result.reason}`
+    );
 
-  return result;
-
+    return result;
   } catch (e) {
     logError('SearchService', 'lookupSingleRow ล้มเหลว: ' + e.message, e);
     // [FIX v5.5.021 H2] แจ้งเตือนผู้ใช้ ไม่เงียบ

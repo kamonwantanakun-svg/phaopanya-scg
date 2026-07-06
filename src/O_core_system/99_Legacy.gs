@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.040
+ * VERSION: 6.0.002
  * FILE: 99_Legacy.gs
  * LMDS V5.5 — Deprecated/Legacy Functions (Compatibility Layer)
  * ===================================================
@@ -57,10 +57,20 @@ function getColIndex(schemaKey, colName) {
   // [REF-012] Log warning เมื่อถูกเรียก — ป้องกันการใช้งานในอนาคต
   if (typeof logWarn === TYPE_OF_FUNCTION) {
     try {
-      var stack = (new Error().stack || '').split('\n');
-      var caller = stack[2] || 'unknown';
-      logWarn(LEGACY_MODULE_NAME, '[DEPRECATED] getColIndex("' + schemaKey + '", "' + colName + '") — Use *_IDX.* constants instead. Caller: ' + caller.trim());
-    } catch (e) { /* ignore log error */ }
+      const stack = (new Error().stack || '').split('\n');
+      const caller = stack[2] || 'unknown';
+      logWarn(
+        LEGACY_MODULE_NAME,
+        '[DEPRECATED] getColIndex("' +
+          schemaKey +
+          '", "' +
+          colName +
+          '") — Use *_IDX.* constants instead. Caller: ' +
+          caller.trim()
+      );
+    } catch (e) {
+      // ignore log error
+    }
   }
   const headers = SCHEMA[schemaKey];
   if (!headers) return -1;
@@ -84,8 +94,13 @@ function getColIndex(schemaKey, colName) {
 function getDestinationsByPerson(personId) {
   if (typeof logWarn === TYPE_OF_FUNCTION) {
     try {
-      logWarn(LEGACY_MODULE_NAME, '[DEPRECATED] getDestinationsByPerson("' + personId + '") — Use getDestsByPersonId() instead.');
-    } catch (e) { /* ignore log error */ }
+      logWarn(
+        LEGACY_MODULE_NAME,
+        '[DEPRECATED] getDestinationsByPerson("' + personId + '") — Use getDestsByPersonId() instead.'
+      );
+    } catch (e) {
+      // ignore log error
+    }
   }
   return getDestsByPersonId(personId);
 }
@@ -103,8 +118,13 @@ function getDestinationsByPerson(personId) {
 function getDestinationsByPlace(placeId) {
   if (typeof logWarn === TYPE_OF_FUNCTION) {
     try {
-      logWarn(LEGACY_MODULE_NAME, '[DEPRECATED] getDestinationsByPlace("' + placeId + '") — Use getDestsByPlaceId() instead.');
-    } catch (e) { /* ignore log error */ }
+      logWarn(
+        LEGACY_MODULE_NAME,
+        '[DEPRECATED] getDestinationsByPlace("' + placeId + '") — Use getDestsByPlaceId() instead.'
+      );
+    } catch (e) {
+      // ignore log error
+    }
   }
   return getDestsByPlaceId(placeId);
 }

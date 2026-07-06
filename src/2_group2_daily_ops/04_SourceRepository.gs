@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.040
+ * VERSION: 6.0.002
  * FILE: 04_SourceRepository.gs
  * LMDS V5.5 — Source Data Repository
  * ===================================================
@@ -71,7 +71,7 @@
 // ============================================================
 
 // Cache key สำหรับ Source data
-const CACHE_KEY_SOURCE   = 'SOURCE_ROWS_V3';
+const CACHE_KEY_SOURCE = 'SOURCE_ROWS_V3';
 const CACHE_KEY_INVOICES = 'PROCESSED_INVOICES_V3';
 
 // [FIX S7 v5.5.002] SRC_READ_COLS ย้ายไปประกาศที่ 01_Config.gs แล้ว (Single Source of Truth)
@@ -92,25 +92,25 @@ let _SOURCE_ROWS_RAM_CACHE = null;
  */
 function runLoadSource() {
   try {
-  const ss       = SpreadsheetApp.getActiveSpreadsheet();
-  const srcSheet = ss.getSheetByName(SHEET.SOURCE);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const srcSheet = ss.getSheetByName(SHEET.SOURCE);
 
-  if (!srcSheet) {
-    logError('SourceRepo', `ไม่พบชีต: ${SHEET.SOURCE}`, new Error('SHEET_NOT_FOUND'));
-    throw new Error(`ไม่พบชีต "${SHEET.SOURCE}" กรุณาตรวจสอบชื่อชีต`);
-  }
+    if (!srcSheet) {
+      logError('SourceRepo', `ไม่พบชีต: ${SHEET.SOURCE}`, new Error('SHEET_NOT_FOUND'));
+      throw new Error(`ไม่พบชีต "${SHEET.SOURCE}" กรุณาตรวจสอบชื่อชีต`);
+    }
 
-  logInfo('SourceRepo', 'เริ่มโหลด Source (Refreshing Cache)');
-  invalidateSourceCache();
+    logInfo('SourceRepo', 'เริ่มโหลด Source (Refreshing Cache)');
+    invalidateSourceCache();
 
-  const pending = getUnprocessedRows();
-  logInfo('SourceRepo', `ตรวจพบแถวที่ต้องประมวลผล: ${pending.length} แถว`);
-  
-  if (pending.length > 0) {
-    SpreadsheetApp.getActiveSpreadsheet().toast(`🚀 โหลดข้อมูลสำเร็จ: ${pending.length} แถว พร้อมประมวลผล`, APP_NAME);
-  } else {
-    SpreadsheetApp.getActiveSpreadsheet().toast(`✅ ข้อมูลเป็นปัจจุบันอยู่แล้ว`, APP_NAME);
-  }
+    const pending = getUnprocessedRows();
+    logInfo('SourceRepo', `ตรวจพบแถวที่ต้องประมวลผล: ${pending.length} แถว`);
+
+    if (pending.length > 0) {
+      SpreadsheetApp.getActiveSpreadsheet().toast(`🚀 โหลดข้อมูลสำเร็จ: ${pending.length} แถว พร้อมประมวลผล`, APP_NAME);
+    } else {
+      SpreadsheetApp.getActiveSpreadsheet().toast('✅ ข้อมูลเป็นปัจจุบันอยู่แล้ว', APP_NAME);
+    }
   } catch (err) {
     logError('SourceRepo', 'runLoadSource ล้มเหลว: ' + err.message, err);
     // [FIX B2 v5.5.002] เปลี่ยน getUi().alert() → safeUiAlert_() — trigger-safe
@@ -132,45 +132,43 @@ function runLoadSource() {
  */
 function getAllSourceRows() {
   try {
-  // [REFACTOR-06] RAM cache ก่อน (เร็วสุด, หายเมื่อ execution จบ)
-  if (_SOURCE_ROWS_RAM_CACHE) return _SOURCE_ROWS_RAM_CACHE;
+    // [REFACTOR-06] RAM cache ก่อน (เร็วสุด, หายเมื่อ execution จบ)
+    if (_SOURCE_ROWS_RAM_CACHE) return _SOURCE_ROWS_RAM_CACHE;
 
-  const cache  = CacheService.getScriptCache();
-  // ลองอ่านจาก chunked cache
-  const cached = loadSourceRowsFromCache_(cache);
+    const cache = CacheService.getScriptCache();
+    // ลองอ่านจาก chunked cache
+    const cached = loadSourceRowsFromCache_(cache);
 
-  if (cached) {
-    _SOURCE_ROWS_RAM_CACHE = cached;
-    return cached;
-  }
+    if (cached) {
+      _SOURCE_ROWS_RAM_CACHE = cached;
+      return cached;
+    }
 
-  const ss       = SpreadsheetApp.getActiveSpreadsheet();
-  const srcSheet = ss.getSheetByName(SHEET.SOURCE);
-  if (!srcSheet || srcSheet.getLastRow() < 2) return [];
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const srcSheet = ss.getSheetByName(SHEET.SOURCE);
+    if (!srcSheet || srcSheet.getLastRow() < 2) return [];
 
-  const colsToRead = Math.min(SRC_READ_COLS, srcSheet.getLastColumn());
-  const totalRows  = srcSheet.getLastRow() - 1;
-  const allData    = srcSheet.getRange(2, 1, totalRows, colsToRead)
-                             .getValues();
+    const colsToRead = Math.min(SRC_READ_COLS, srcSheet.getLastColumn());
+    const totalRows = srcSheet.getLastRow() - 1;
+    const allData = srcSheet.getRange(2, 1, totalRows, colsToRead).getValues();
 
-  const result = allData
-    .map((row, i) => ({ row, sourceRow: i + 2 }))
-    .filter(({ row }) => row[SRC_IDX.INVOICE_NO])
-    .filter(({ row }) => {
-      const sync = String(row[SRC_IDX.SYNC_STATUS] || '').trim();
-      // [FIX CRIT-006] กรองทั้ง SUCCESS และ REVIEW — REVIEW = อยู่ในคิวรอตรวจ ไม่ต้องประมวลผลซ้ำ
-      return sync !== SCG_CONFIG.SYNC_DONE_VALUE && sync !== 'REVIEW';
-    })
-    .map(({ row, sourceRow }) => buildSourceObj_(row, sourceRow));
+    const result = allData
+      .map((row, i) => ({ row, sourceRow: i + 2 }))
+      .filter(({ row }) => row[SRC_IDX.INVOICE_NO])
+      .filter(({ row }) => {
+        const sync = String(row[SRC_IDX.SYNC_STATUS] || '').trim();
+        // [FIX CRIT-006] กรองทั้ง SUCCESS และ REVIEW — REVIEW = อยู่ในคิวรอตรวจ ไม่ต้องประมวลผลซ้ำ
+        return sync !== SCG_CONFIG.SYNC_DONE_VALUE && sync !== 'REVIEW';
+      })
+      .map(({ row, sourceRow }) => buildSourceObj_(row, sourceRow));
 
-  // บันทึกล RAM cache
-  _SOURCE_ROWS_RAM_CACHE = result;
+    // บันทึกล RAM cache
+    _SOURCE_ROWS_RAM_CACHE = result;
 
-  // บันทึกลง CacheService ด้วย (สำหรับ execution ถัดไป)
-  saveSourceRowsToCache_(result);
+    // บันทึกลง CacheService ด้วย (สำหรับ execution ถัดไป)
+    saveSourceRowsToCache_(result);
 
-  return result;
-
+    return result;
   } catch (e) {
     // [FIX R13-07 REVIEW15] Rule 13 + Rule 8: ส่ง e เพื่อ stack trace และแก้ module name ให้สอดคล้องกับที่อื่นในไฟล์ ('SourceRepo')
     logError('SourceRepo', 'getAllSourceRows ล้มเหลว: ' + e.message, e);
@@ -184,26 +182,26 @@ function getAllSourceRows() {
 function getUnprocessedRows() {
   const allRows = getAllSourceRows();
   if (allRows.length === 0) return [];
-  
+
   const doneSet = getProcessedInvoiceSet_();
   const unprocessed = [];
   const skipped = [];
-  
-  allRows.forEach(row => {
+
+  allRows.forEach((row) => {
     if (doneSet.has(row.invoiceNo)) {
       skipped.push(row);
     } else {
       unprocessed.push(row);
     }
   });
-  
+
   // [UPGRADE v5.2.006] อัปเดตสถานะให้แถวที่เคยทำเสร็จแล้ว (มีใน FACT_DELIVERY) เป็น SUCCESS ทันที
   // เพื่อป้องกันไม่ให้ผู้ใช้สับสนว่าทำไมสถานะในชีต SOURCE ถึงยังว่างอยู่
   if (skipped.length > 0) {
     updateSyncStatus_(skipped, 'SUCCESS');
     logInfo('SourceRepo', `ข้าม ${skipped.length} แถวที่เคยเข้า FACT_DELIVERY ไปแล้ว (ปรับเป็น SUCCESS)`);
   }
-  
+
   return unprocessed;
 }
 
@@ -215,31 +213,32 @@ function getUnprocessedRows() {
  *   ตอนนี้ FACT rows ที่ ERROR จะไม่เข้า doneSet → SOURCE จะถูกประมวลผลใหม่
  */
 function getProcessedInvoiceSet_() {
-  const cache    = CacheService.getScriptCache();
+  const cache = CacheService.getScriptCache();
   // [FIX CRIT-008] ใช้ chunked cache loader แทน cache.get ตรง — ป้องกัน 100KB limit
-  const cached   = loadProcessedInvoicesFromCache_(cache);
+  const cached = loadProcessedInvoicesFromCache_(cache);
   if (cached) return cached;
 
-  const ss        = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const factSheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
-  const doneSet   = new Set();
+  const doneSet = new Set();
 
   if (!factSheet || factSheet.getLastRow() < 2) return doneSet;
 
   // [FIX Phase-B #2] อ่าน INVOICE_NO + MATCH_STATUS พร้อมกัน (adjacent columns: idx 6 & 22)
   // ใช้ getRange(startRow, startCol, numRows, numCols) โดย numCols = (MATCH_STATUS - INVOICE_NO) + 1
-  const invoiceCol     = FACT_IDX.INVOICE_NO + 1;     // 7 (col G)
+  const invoiceCol = FACT_IDX.INVOICE_NO + 1; // 7 (col G)
   // [FIX CodeQL js/unused-local-variable V5.5.035] matchStatusCol ไม่ถูกใช้ — คำนวณผ่าน numColsToRead แทน
-  const numColsToRead = (FACT_IDX.MATCH_STATUS - FACT_IDX.INVOICE_NO) + 1;
-  const lastRow       = factSheet.getLastRow() - 1;
-  const dataRange     = factSheet.getRange(2, invoiceCol, lastRow, numColsToRead)
-                                  .getValues();
-  const invoiceIdx    = 0; // relative index within row slice
+  const numColsToRead = FACT_IDX.MATCH_STATUS - FACT_IDX.INVOICE_NO + 1;
+  const lastRow = factSheet.getLastRow() - 1;
+  const dataRange = factSheet.getRange(2, invoiceCol, lastRow, numColsToRead).getValues();
+  const invoiceIdx = 0; // relative index within row slice
   const matchStatusIdx = FACT_IDX.MATCH_STATUS - FACT_IDX.INVOICE_NO;
 
-  dataRange.forEach(r => {
+  dataRange.forEach((r) => {
     const invoiceNo = r[invoiceIdx];
-    const matchStatus = String(r[matchStatusIdx] || '').trim().toUpperCase();
+    const matchStatus = String(r[matchStatusIdx] || '')
+      .trim()
+      .toUpperCase();
     // [FIX Phase-B #2] Skip rows ที่ MATCH_STATUS === 'ERROR' — ไม่ให้เข้า doneSet เพื่อให้ SOURCE re-process
     if (!invoiceNo) return;
     if (matchStatus === 'ERROR') return;
@@ -300,8 +299,8 @@ function buildSourceObj_(row, rowNum) {
   const rawLatNum = Number(row[SRC_IDX.LAT]);
   const rawLngNum = Number(row[SRC_IDX.LNG]);
 
-  let rawLat = (!isNaN(rawLatNum) && rawLatNum !== 0) ? rawLatNum : 0;
-  let rawLng = (!isNaN(rawLngNum) && rawLngNum !== 0) ? rawLngNum : 0;
+  let rawLat = !isNaN(rawLatNum) && rawLatNum !== 0 ? rawLatNum : 0;
+  let rawLng = !isNaN(rawLngNum) && rawLngNum !== 0 ? rawLngNum : 0;
 
   if (rawLat === 0 || rawLng === 0) {
     const combined = String(row[SRC_IDX.LATLNG_COMBINED] || '').trim();
@@ -314,17 +313,16 @@ function buildSourceObj_(row, rowNum) {
     }
   }
 
-  const hasGeo = !isNaN(rawLat) && !isNaN(rawLng) &&
-                 rawLat !== 0    && rawLng !== 0;
+  const hasGeo = !isNaN(rawLat) && !isNaN(rawLng) && rawLat !== 0 && rawLng !== 0;
 
   // [FIX CodeQL js/unused-local-variable V5.5.035] ลบ resolvedAddr + rawAddr ที่ไม่ถูกใช้
   // (ใช้ scgAddr + sysAddr ด้านล่างแทน — เป็นชื่อที่สื่อความหมายกว่า)
-  
+
   // [UPGRADE v5.2.003] ปรับปรุง Mapping ให้ตรงตามความต้องการ Fact-Checking
   // 1. rawPlaceName = RAW_ADDRESS (18) — ข้อมูลมั่วๆ จาก SCG แต่จำเป็นต้องเก็บ
   // 2. resolvedAddr = RESOLVED_ADDR (24) — ข้อมูลที่แปลงจาก LatLong เชื่อถือได้
-  const scgAddr      = String(row[SRC_IDX.RAW_ADDRESS]   || '').trim();
-  const sysAddr      = String(row[SRC_IDX.RESOLVED_ADDR] || '').trim();
+  const scgAddr = String(row[SRC_IDX.RAW_ADDRESS] || '').trim();
+  const sysAddr = String(row[SRC_IDX.RESOLVED_ADDR] || '').trim();
 
   let deliveryDate = '';
   if (row[SRC_IDX.DELIVERY_DATE]) {
@@ -336,64 +334,44 @@ function buildSourceObj_(row, rowNum) {
   }
 
   return {
-    sourceSheet:     SHEET.SOURCE,
-    sourceRow:       rowNum,
-    invoiceNo:       normalizeInvoiceNo(row[SRC_IDX.INVOICE_NO]),
-    shipmentNo:      String(row[SRC_IDX.SHIPMENT_NO]     || '').trim(),
-    deliveryDate:    deliveryDate,
-    deliveryTime:    row[SRC_IDX.DELIVERY_TIME],
-    driverName:      String(row[SRC_IDX.DRIVER_NAME]     || '').trim(),
-    truckLicense:    String(row[SRC_IDX.TRUCK_LICENSE]   || '').trim(),
-    carrierCode:     '',
-    carrierName:     '',
-    soldToCode:      String(row[SRC_IDX.CUSTOMER_CODE]   || '').trim(),
-    soldToName:      String(row[SRC_IDX.SOLD_TO_NAME]    || '').trim(),
-    rawPersonName:   String(row[SRC_IDX.RAW_PERSON_NAME] || '').trim(),
-    rawPlaceName:    scgAddr,     // [FIX v5.2.003] = RAW_ADDRESS(18)
-    rawAddress:      sysAddr,     // [FIX v5.2.003] = RESOLVED_ADDR(24) — ใช้เป็นฐานใน Match Engine
-    scgAddress:      scgAddr,     // [NEW v5.2.003] เก็บไว้ลง FACT_DELIVERY โดยเฉพาะ
-    resolvedAddr:    sysAddr,     // [KEEP]
-    rawLat:          rawLat,
-    rawLng:          rawLng,
-    hasGeo:          hasGeo,
-    warehouse:       String(row[SRC_IDX.WAREHOUSE]       || '').trim(),
+    sourceSheet: SHEET.SOURCE,
+    sourceRow: rowNum,
+    invoiceNo: normalizeInvoiceNo(row[SRC_IDX.INVOICE_NO]),
+    shipmentNo: String(row[SRC_IDX.SHIPMENT_NO] || '').trim(),
+    deliveryDate: deliveryDate,
+    deliveryTime: row[SRC_IDX.DELIVERY_TIME],
+    driverName: String(row[SRC_IDX.DRIVER_NAME] || '').trim(),
+    truckLicense: String(row[SRC_IDX.TRUCK_LICENSE] || '').trim(),
+    carrierCode: '',
+    carrierName: '',
+    soldToCode: String(row[SRC_IDX.CUSTOMER_CODE] || '').trim(),
+    soldToName: String(row[SRC_IDX.SOLD_TO_NAME] || '').trim(),
+    rawPersonName: String(row[SRC_IDX.RAW_PERSON_NAME] || '').trim(),
+    rawPlaceName: scgAddr, // [FIX v5.2.003] = RAW_ADDRESS(18)
+    rawAddress: sysAddr, // [FIX v5.2.003] = RESOLVED_ADDR(24) — ใช้เป็นฐานใน Match Engine
+    scgAddress: scgAddr, // [NEW v5.2.003] เก็บไว้ลง FACT_DELIVERY โดยเฉพาะ
+    resolvedAddr: sysAddr, // [KEEP]
+    rawLat: rawLat,
+    rawLng: rawLng,
+    hasGeo: hasGeo,
+    warehouse: String(row[SRC_IDX.WAREHOUSE] || '').trim(),
     // [FIX CRIT-001] Extract province from address using extractProvince_() — Rule 3 (GEO_PROVINCE_CONFLICT) was never triggering
-    province:        (typeof extractProvince_ === 'function') ? extractProvince_(sysAddr || scgAddr) : '',
-    sourceId:        String(row[SRC_IDX.SOURCE_ID]       || '').trim(),
-    remark:          String(row[SRC_IDX.REMARK]          || '').trim(),
+    province: typeof extractProvince_ === 'function' ? extractProvince_(sysAddr || scgAddr) : '',
+    sourceId: String(row[SRC_IDX.SOURCE_ID] || '').trim(),
+    remark: String(row[SRC_IDX.REMARK] || '').trim(),
     // [ADD v5.5.014] ชื่อจริงที่คนขับ/ผู้ดูแลยืนยัน — กรอกใน AppSheet หรือ Google Sheet
     // ถ้าว่าง = ไม่มีข้อมูลจริง → ระบบใช้ชื่อดิบตามปกติ
     driverVerifiedName: String(row[SRC_IDX.DRIVER_VERIFIED_NAME] || '').trim(),
-    driverVerifiedAddr: String(row[SRC_IDX.DRIVER_VERIFIED_ADDR] || '').trim(),
+    driverVerifiedAddr: String(row[SRC_IDX.DRIVER_VERIFIED_ADDR] || '').trim()
   };
 }
 
 // ============================================================
-// SECTION 5: Batch Processor
+// SECTION 5: [REMOVED V5.5.044] Batch Processor
 // ============================================================
-
-/**
- * processSrcBatch_ — ส่ง Source Batch เข้า Match Engine
- * [FIX v003] คืนค่า Batch สำหรับเขียนทีเดียว
- */
-function processSrcBatch_(batch) {
-  let processed = 0;
-  const factBatch = [];
-  const reviewBatch = [];
-
-  batch.forEach(srcObj => {
-    try {
-      const result = processOneRow(srcObj);
-      processed++;
-      if (result.factData)   factBatch.push(result.factData);
-      if (result.reviewData) reviewBatch.push(result.reviewData);
-    } catch (err) {
-      logError('SourceRepo',
-        `processSrcBatch_ แถว ${srcObj.sourceRow} — ${err.message}`);
-    }
-  });
-  return { processed, factBatch, reviewBatch };
-}
+// processSrcBatch_ ถูก mark @deprecated ใน V5.5.043 และลบออกใน V5.5.044
+//   เป็น leftover จาก refactor รอบก่อน (ปัจจุบันใช้ processOneRow ตรงๆ ใน MatchEngine)
+//   หากมี external caller ที่ต้องการ restore → ดู git history ของ commit นี้
 
 // ============================================================
 // SECTION 6: Cache Management
@@ -466,13 +444,13 @@ function loadSourceRowsFromCache_(cache) {
  */
 function updateSyncStatus_(batchRows, status = 'SUCCESS') {
   if (!batchRows || batchRows.length === 0) return;
-  
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET.SOURCE);
   if (!sheet) return;
 
   // [FIX CRIT-006] รองรับ status 'REVIEW' — แถวที่อยู่ในคิวรอตรวจ
-  var statusVal;
+  let statusVal;
   if (status === 'SUCCESS') {
     statusVal = SCG_CONFIG.SYNC_DONE_VALUE;
   } else if (status === 'REVIEW') {
@@ -483,7 +461,7 @@ function updateSyncStatus_(batchRows, status = 'SUCCESS') {
   const statusCol = SRC_IDX.SYNC_STATUS + 1;
   // [FIX B12 v5.5.002] ย้าย columnToLetterHelper ออกจาก map loop — ค่าคงที่ไม่ต้องคำนวณทุกรอบ
   const colLetter = columnToLetterHelper_(statusCol);
-  const a1Notations = batchRows.map(row => `${colLetter}${row.sourceRow}`);
+  const a1Notations = batchRows.map((row) => `${colLetter}${row.sourceRow}`);
 
   try {
     callSpreadsheetWithRetry(() => {
@@ -502,8 +480,8 @@ function updateSyncStatus_(batchRows, status = 'SUCCESS') {
     // ลบเฉพาะแถวที่ถูกประมวลผลแล้วออกจาก RAM cache แทนที่จะล้างทั้งหมด
     // ทำให้ getUnprocessedRows() ครั้งถัดไปไม่ต้องอ่าน Sheet ใหม่ทั้งหมด
     if (_SOURCE_ROWS_RAM_CACHE) {
-      const batchSourceRows = new Set(batchRows.map(r => r.sourceRow));
-      _SOURCE_ROWS_RAM_CACHE = _SOURCE_ROWS_RAM_CACHE.filter(r => !batchSourceRows.has(r.sourceRow));
+      const batchSourceRows = new Set(batchRows.map((r) => r.sourceRow));
+      _SOURCE_ROWS_RAM_CACHE = _SOURCE_ROWS_RAM_CACHE.filter((r) => !batchSourceRows.has(r.sourceRow));
     }
     // ล้าง CacheService cache เท่านั้น (เพื่อให้ execution ถัดไปเห็นข้อมูลใหม่)
     // แต่ไม่ล้าง RAM cache เพราะเราอัปเดตเฉพาะส่วนแล้วด้านบน
@@ -528,12 +506,13 @@ function updateSyncStatus_(batchRows, status = 'SUCCESS') {
   }
 }
 
-/** 
+/**
  * columnToLetterHelper_ — [REF-019] แปลงเลขคอลัมน์เป็นตัวอักษร (เช่น 1 -> A, 37 -> AK)
  * เพิ่ม _ suffix ตามกฎ Private Function (Rule 8 — ใช้ภายในโมดูลเท่านั้น)
  */
 function columnToLetterHelper_(column) {
-  let temp, letter = '';
+  let temp,
+    letter = '';
   while (column > 0) {
     temp = (column - 1) % 26;
     letter = String.fromCharCode(temp + 65) + letter;

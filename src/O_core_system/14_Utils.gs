@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.040
+ * VERSION: 6.0.002
  * FILE: 14_Utils.gs
  * LMDS V5.5 — Utility Functions
  * ===================================================
@@ -89,11 +89,7 @@ function levenshteinDistance(strA, strB) {
   for (let i = 1; i <= lenA; i++) {
     for (let j = 1; j <= lenB; j++) {
       const cost = strA[i - 1] === strB[j - 1] ? 0 : 1;
-      matrix[i][j] = Math.min(
-        matrix[i - 1][j]     + 1,
-        matrix[i][j - 1]     + 1,
-        matrix[i - 1][j - 1] + cost
-      );
+      matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
     }
   }
   return matrix[lenA][lenB];
@@ -110,11 +106,11 @@ function diceCoefficient(strA, strB) {
   if (strA === strB) return 1;
   if (strA.length < 2 || strB.length < 2) return 0;
 
-  const bigramsA    = buildBigramSet_(strA);
-  const bigramsB    = buildBigramSet_(strB);
-  let intersection  = 0;
+  const bigramsA = buildBigramSet_(strA);
+  const bigramsB = buildBigramSet_(strB);
+  let intersection = 0;
 
-  bigramsA.forEach(bg => {
+  bigramsA.forEach((bg) => {
     if (bigramsB.has(bg)) intersection++;
   });
 
@@ -144,42 +140,42 @@ function resetSourceSyncStatus() {
   }
   // [FIX BUG-04 v5.4.003] หุ้ม try-catch ครอบทั้งฟังก์ชัน — ก่อนหน้านี้ ui.alert() นอก try-catch ทำให้ throw ได้
   try {
-  const ui = SpreadsheetApp.getUi();
-  const resp = ui.alert(
-    '🔄 ยืนยันการรีเซ็ตสถานะ?',
-    'ระบบจะล้างค่าในคอลัมน์ SYNC_STATUS ของชีตต้นทางทั้งหมด\n' +
-    'เพื่อให้ระบบกลับมาประมวลผลแถวเหล่านั้นใหม่อีกครั้งเมื่อกด Run Pipeline\n\n' +
-    'ยืนยันการดำเนินการหรือไม่?',
-    ui.ButtonSet.YES_NO
-  );
-  
-  if (resp !== ui.Button.YES) return;
+    const ui = SpreadsheetApp.getUi();
+    const resp = ui.alert(
+      '🔄 ยืนยันการรีเซ็ตสถานะ?',
+      'ระบบจะล้างค่าในคอลัมน์ SYNC_STATUS ของชีตต้นทางทั้งหมด\n' +
+        'เพื่อให้ระบบกลับมาประมวลผลแถวเหล่านั้นใหม่อีกครั้งเมื่อกด Run Pipeline\n\n' +
+        'ยืนยันการดำเนินการหรือไม่?',
+      ui.ButtonSet.YES_NO
+    );
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEET.SOURCE);
-  if (!sheet) {
+    if (resp !== ui.Button.YES) return;
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.SOURCE);
+    if (!sheet) {
+      // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+      safeUiAlert_('❌ ไม่พบชีตต้นทาง: ' + SHEET.SOURCE);
+      return;
+    }
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) {
+      // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+      safeUiAlert_('ℹ️ ไม่มีข้อมูลให้รีเซ็ต');
+      return;
+    }
+
+    // คอลัมน์ SYNC_STATUS (Index 36 = คอลัมน์ AK)
+    const colIdx = SRC_IDX.SYNC_STATUS + 1;
+
+    sheet.getRange(2, colIdx, lastRow - 1, 1).clearContent();
+    // ระบายสีพื้นหลังกลับเป็นปกติ
+    sheet.getRange(2, colIdx, lastRow - 1, 1).setBackground(null);
+
     // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
-    safeUiAlert_('❌ ไม่พบชีตต้นทาง: ' + SHEET.SOURCE);
-    return;
-  }
-
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) {
-    // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
-    safeUiAlert_('ℹ️ ไม่มีข้อมูลให้รีเซ็ต');
-    return;
-  }
-
-  // คอลัมน์ SYNC_STATUS (Index 36 = คอลัมน์ AK)
-  const colIdx = SRC_IDX.SYNC_STATUS + 1; 
-  
-  sheet.getRange(2, colIdx, lastRow - 1, 1).clearContent();
-  // ระบายสีพื้นหลังกลับเป็นปกติ
-  sheet.getRange(2, colIdx, lastRow - 1, 1).setBackground(null);
-  
-  // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
-  safeUiAlert_('✅ รีเซ็ตสถานะสำเร็จ!\n\nคุณสามารถกดเมนู "Run Full Pipeline" เพื่อเริ่มประมวลผลใหม่ได้เลยครับ');
-  logInfo('Utils', 'รีเซ็ตสถานะ SYNC ในชีตต้นทางเรียบร้อยแล้ว');
+    safeUiAlert_('✅ รีเซ็ตสถานะสำเร็จ!\n\nคุณสามารถกดเมนู "Run Full Pipeline" เพื่อเริ่มประมวลผลใหม่ได้เลยครับ');
+    logInfo('Utils', 'รีเซ็ตสถานะ SYNC ในชีตต้นทางเรียบร้อยแล้ว');
   } catch (err) {
     logError('Utils', 'resetSourceSyncStatus ล้มเหลว: ' + err.message, err);
     safeUiAlert_('❌ เกิดข้อผิดพลาด: ' + err.message);
@@ -196,22 +192,19 @@ function resetSourceSyncStatus() {
  */
 function haversineDistanceM(lat1, lng1, lat2, lng2) {
   const earthRadius = 6371000;
-  const toRad       = Math.PI / 180;
+  const toRad = Math.PI / 180;
 
-  const diffLat    = (lat2 - lat1) * toRad;
-  const diffLng    = (lng2 - lng1) * toRad;
+  const diffLat = (lat2 - lat1) * toRad;
+  const diffLng = (lng2 - lng1) * toRad;
 
   const sinHalfLat = Math.sin(diffLat / 2);
   const sinHalfLng = Math.sin(diffLng / 2);
 
-  const aVal = sinHalfLat * sinHalfLat +
-    Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) *
-    sinHalfLng * sinHalfLng;
+  const aVal = sinHalfLat * sinHalfLat + Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * sinHalfLng * sinHalfLng;
 
   // [FIX v003] clamp aVal ให้อยู่ใน [0,1] ป้องกัน Floating Point error
-  const safeAVal    = Math.min(1, Math.max(0, aVal));
-  const centralAngle = 2 * Math.atan2(Math.sqrt(safeAVal),
-                                       Math.sqrt(1 - safeAVal));
+  const safeAVal = Math.min(1, Math.max(0, aVal));
+  const centralAngle = 2 * Math.atan2(Math.sqrt(safeAVal), Math.sqrt(1 - safeAVal));
   return earthRadius * centralAngle;
 }
 
@@ -238,14 +231,13 @@ function generateShortId(prefix) {
  * generateMd5Hash — สร้าง MD5 Hex สำหรับ Cache Key
  */
 function generateMd5Hash(input) {
-  const rawBytes = Utilities.computeDigest(
-    Utilities.DigestAlgorithm.MD5,
-    String(input)
-  );
-  return rawBytes.map(b => {
-    const hex = (b < 0 ? b + 256 : b).toString(16);
-    return hex.length === 1 ? '0' + hex : hex;
-  }).join('');
+  const rawBytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, String(input));
+  return rawBytes
+    .map((b) => {
+      const hex = (b < 0 ? b + 256 : b).toString(16);
+      return hex.length === 1 ? '0' + hex : hex;
+    })
+    .join('');
 }
 
 // ============================================================
@@ -263,9 +255,9 @@ function toThaiDateStr(date) {
   // [FIX v003] ป้องกัน Invalid Date → คืน '' แทน 'NaN/NaN/NaN'
   if (isNaN(parsedDate.getTime())) return '';
 
-  const day   = String(parsedDate.getDate()).padStart(2, '0');
+  const day = String(parsedDate.getDate()).padStart(2, '0');
   const month = String(parsedDate.getMonth() + 1).padStart(2, '0');
-  const year  = parsedDate.getFullYear() + 543;
+  const year = parsedDate.getFullYear() + 543;
   return `${day}/${month}/${year}`;
 }
 
@@ -282,8 +274,7 @@ function isValidLatLng(lat, lng) {
   if (numLat === 0 || numLng === 0) return false;
 
   // กรอบประเทศไทย
-  return numLat >= 5.5  && numLat <= 20.5 &&
-         numLng >= 97.5 && numLng <= 105.7;
+  return numLat >= 5.5 && numLat <= 20.5 && numLng >= 97.5 && numLng <= 105.7;
 }
 
 /**
@@ -310,6 +301,17 @@ function parseLatLng(latLngStr) {
 /**
  * callGeminiAPI — เรียกใช้งาน Google Gemini API
  * [ADD v003] รองรับ AI Reasoning Tier F
+ * [FIX BUG-AUDIT-009 V5.5.042] เพิ่ม retry สำหรับ 429/503 แบบ exponential backoff
+ *   เดิม fetch ครั้งเดียว → ถ้า Gemini ตอบ 429 (rate limit) หรือ 503 ชั่วคราว
+ *   จะ return null ทันที → ฟีเจอร์ AI enrichment หายไปแบบเงียบ
+ *   ตอนนี้ retry 3 ครั้ง (1s → 2s → 4s) เหมือน fetchWithRetry_ ของฝั่ง SCG
+ *
+ *   หมายเหตุ: ปัจจุบัน (V5.5.041+) USE_AI_REASONING=false และไม่มี call site ใน production
+ *   แต่ฟังก์ชันนี้อยู่ใน public API พร้อมใช้เมื่อเปิดใช้งาน AI ในอนาคต
+ *
+ * @param {string} prompt - ข้อความส่งเข้า Gemini
+ * @param {string} modelName - model name (default: AI_CONFIG.MODEL)
+ * @return {string|null} ข้อความตอบกลับ หรือ null ถ้าล้มเหลวทุก retry
  */
 function callGeminiAPI(prompt, modelName = AI_CONFIG.MODEL) {
   // [FIX v5.5.001] ใช้ getGeminiApiKey() แทน duplicate validation — consistency + format check
@@ -318,14 +320,14 @@ function callGeminiAPI(prompt, modelName = AI_CONFIG.MODEL) {
   // [SEC-006] เปลี่ยนจาก Query Parameter → x-goog-api-key Header
   // ลดความเสี่ยง API Key รั่วผ่าน Stackdriver Logging
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
-  
+
   const payload = {
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.1,
       topP: 1,
       topK: 1,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 2048
     }
   };
 
@@ -334,29 +336,63 @@ function callGeminiAPI(prompt, modelName = AI_CONFIG.MODEL) {
     contentType: 'application/json',
     payload: JSON.stringify(payload),
     muteHttpExceptions: true,
-    headers: { 'x-goog-api-key': apiKey }  // [SEC-006] ส่งผ่าน Header แทน URL
+    headers: { 'x-goog-api-key': apiKey } // [SEC-006] ส่งผ่าน Header แทน URL
   };
 
-  try {
-    const response = UrlFetchApp.fetch(url, options);
-    const resCode  = response.getResponseCode();
-    const resText  = response.getContentText();
+  // [FIX BUG-AUDIT-009 V5.5.042] Retry 3 ครั้งสำหรับ 429/503 (transient errors)
+  const maxRetries = APP_CONST.MAX_RETRIES || 3;
+  const baseDelayMs = 1000;
+  let lastError = null;
 
-    if (resCode !== 200) {
-      logError('Utils', `Gemini API Error (${resCode}): ${resText}`, new Error(`GEMINI_API_${resCode}`));
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = UrlFetchApp.fetch(url, options);
+      const resCode = response.getResponseCode();
+      const resText = response.getContentText();
+
+      if (resCode === 200) {
+        const json = JSON.parse(resText);
+        if (json.candidates && json.candidates[0].content && json.candidates[0].content.parts) {
+          return json.candidates[0].content.parts[0].text;
+        }
+        return null;
+      }
+
+      // 429 (rate limit) หรือ 503 (service unavailable) → retry
+      if ((resCode === 429 || resCode === 503) && attempt < maxRetries) {
+        const delayMs = baseDelayMs * Math.pow(2, attempt - 1); // 1s, 2s, 4s
+        logWarn('Utils', `Gemini API ${resCode} — retry ${attempt}/${maxRetries} ใน ${delayMs}ms`);
+        Utilities.sleep(delayMs);
+        continue;
+      }
+
+      // 4xx อื่นๆ (ยกเว้น 429) หรือ retry หมดแล้ว → log + return null
+      // [SEC-012] ไม่แสดง resText ทั้งหมด เพื่อกัน API key/cookie รั่วผ่าน log
+      const preview = resText ? resText.substring(0, 200) : '';
+      logError(
+        'Utils',
+        `Gemini API Error (${resCode}) [attempt ${attempt}/${maxRetries}]: ${preview}`,
+        new Error(`GEMINI_API_${resCode}`)
+      );
+      return null;
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
+        logWarn('Utils', `callGeminiAPI exception — retry ${attempt}/${maxRetries} ใน ${delayMs}ms: ${err.message}`);
+        Utilities.sleep(delayMs);
+        continue;
+      }
+      logError('Utils', `callGeminiAPI ล้มเหลวหลัง ${maxRetries} ครั้ง: ${err.message}`, err);
       return null;
     }
-
-    const json = JSON.parse(resText);
-    if (json.candidates && json.candidates[0].content && json.candidates[0].content.parts) {
-      return json.candidates[0].content.parts[0].text;
-    }
-    return null;
-
-  } catch (err) {
-    logError('Utils', `callGeminiAPI ล้มเหลว: ${err.message}`, err);
-    return null;
   }
+
+  // ไม่ควรถึงตรงนี้ แต่ไว้เป็น defense-in-depth
+  if (lastError) {
+    logError('Utils', `callGeminiAPI exhausted retries: ${lastError.message}`, lastError);
+  }
+  return null;
 }
 
 /**
@@ -364,9 +400,10 @@ function callGeminiAPI(prompt, modelName = AI_CONFIG.MODEL) {
  */
 function cleanAIResponse_(text) {
   if (!text) return '';
-  return text.replace(/```json/g, '')
-             .replace(/```/g, '')
-             .trim();
+  return text
+    .replace(/```json/g, '')
+    .replace(/```/g, '')
+    .trim();
 }
 
 /**
@@ -393,7 +430,10 @@ function callSpreadsheetWithRetry(apiFunc, maxRetries = 3, baseDelayMs = 500) {
         errMsg.indexOf('failed while accessing') !== -1 ||
         errMsg.indexOf('หยุดทำงานขณะเข้าถึงเอกสาร') !== -1
       ) {
-        logWarn('Utils', `Spreadsheet Service Crash (Attempt ${attempt}/${maxRetries}): ${errMsg}. กำลังรอเพื่อลองใหม่...`);
+        logWarn(
+          'Utils',
+          `Spreadsheet Service Crash (Attempt ${attempt}/${maxRetries}): ${errMsg}. กำลังรอเพื่อลองใหม่...`
+        );
         if (attempt < maxRetries) {
           Utilities.sleep(baseDelayMs * attempt * (1 + Math.random())); // Exponential backoff + jitter
           continue;
@@ -407,7 +447,7 @@ function callSpreadsheetWithRetry(apiFunc, maxRetries = 3, baseDelayMs = 500) {
 
 /**
  * normalizeInvoiceNo — [NEW v5.2.016] จัดรูปแบบเลขที่ Invoice ให้เป็น String ปกติ
- * ช่วยป้องกันความซ้ำซ้อนและการประมวลผลวนลูปเมื่อ Google อ่านค่า 122,206,552,193,122,000,000,000 
+ * ช่วยป้องกันความซ้ำซ้อนและการประมวลผลวนลูปเมื่อ Google อ่านค่า 122,206,552,193,122,000,000,000
  * เป็น e-notation (เช่น 1.22206552193122e+23) หรือมีลูกน้ำปนเป
  * @param {*} inv - เลขที่ Invoice
  * @return {string}
@@ -433,7 +473,9 @@ function normalizeInvoiceNo(inv) {
       } else {
         str = numStr + '0'.repeat(exp);
       }
-    } catch (e) { logDebug('Utils', 'normalizeInvoiceNo e-notation parse error: ' + e.message); }
+    } catch (e) {
+      logDebug('Utils', 'normalizeInvoiceNo e-notation parse error: ' + e.message);
+    }
   }
   if (str.endsWith('.0')) str = str.slice(0, -2);
   return str;
@@ -455,7 +497,11 @@ function safeUiAlert_(message, title) {
     }
   } catch (e) {
     // รันจาก Trigger ไม่มี UI context → log เงียบๆ
-    try { logInfo('System', `[UI Message] ${String(message).substring(0, 200)}`); } catch (_) {}
+    try {
+      logInfo('System', `[UI Message] ${String(message).substring(0, 200)}`);
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
   }
 }
 
@@ -493,9 +539,9 @@ function safeUiAlert_(message, title) {
  */
 function withEntryPointGuard_(moduleName, fnName, fn, options) {
   options = options || {};
-  var lock = options.lock;
-  var showAlert = options.showAlert !== false;
-  var errorPrefix = options.errorPrefix || 'ล้มเหลว: ';
+  const lock = options.lock;
+  const showAlert = options.showAlert !== false;
+  const errorPrefix = options.errorPrefix || 'ล้มเหลว: ';
 
   try {
     return fn();
@@ -504,15 +550,25 @@ function withEntryPointGuard_(moduleName, fnName, fn, options) {
     if (showAlert) {
       try {
         safeUiAlert_('❌ ' + fnName + ' ' + errorPrefix + e.message);
-      } catch (alertErr) { /* ignore — trigger context */ }
+      } catch (alertErr) {
+        /* ignore — trigger context */
+      }
     }
     return undefined;
   } finally {
     if (lock && lock.hasLock()) {
-      try { lock.releaseLock(); } catch (e) { /* ignore */ }
+      try {
+        lock.releaseLock();
+      } catch (e) {
+        /* ignore */
+      }
     }
     if (typeof flushLogBuffer_ === 'function') {
-      try { flushLogBuffer_(); } catch (e) { /* ignore */ }
+      try {
+        flushLogBuffer_();
+      } catch (e) {
+        /* ignore */
+      }
     }
   }
 }
@@ -532,9 +588,9 @@ function withEntryPointGuard_(moduleName, fnName, fn, options) {
  */
 function hasTimePassed_(startTime, limitMs, bufferMs) {
   if (!startTime) return false;
-  var effectiveLimit = limitMs || (typeof AI_CONFIG !== 'undefined' ? AI_CONFIG.TIME_LIMIT_MS : 300000);
-  var effectiveBuffer = (typeof bufferMs === 'number') ? bufferMs : 30000;
-  return (new Date() - startTime) > (effectiveLimit - effectiveBuffer);
+  const effectiveLimit = limitMs || (typeof AI_CONFIG !== 'undefined' ? AI_CONFIG.TIME_LIMIT_MS : 300000);
+  const effectiveBuffer = typeof bufferMs === 'number' ? bufferMs : 30000;
+  return new Date() - startTime > effectiveLimit - effectiveBuffer;
 }
 
 // ============================================================
@@ -550,8 +606,10 @@ function hasTimePassed_(startTime, limitMs, bufferMs) {
  */
 function convertUuidToPersonId(masterUuid) {
   if (!masterUuid) return null;
-  var allPersons = loadAllPersons_();
-  var hit = allPersons.find(function(p) { return p.masterUuid === masterUuid; });
+  const allPersons = loadAllPersons_();
+  const hit = allPersons.find(function (p) {
+    return p.masterUuid === masterUuid;
+  });
   return hit ? hit.personId : null;
 }
 
@@ -561,8 +619,10 @@ function convertUuidToPersonId(masterUuid) {
  */
 function convertUuidToPlaceId(masterUuid) {
   if (!masterUuid) return null;
-  var allPlaces = loadAllPlaces_();
-  var hit = allPlaces.find(function(p) { return p.masterUuid === masterUuid; });
+  const allPlaces = loadAllPlaces_();
+  const hit = allPlaces.find(function (p) {
+    return p.masterUuid === masterUuid;
+  });
   return hit ? hit.placeId : null;
 }
 
@@ -572,8 +632,10 @@ function convertUuidToPlaceId(masterUuid) {
  */
 function convertPersonIdToUuid(personId) {
   if (!personId) return null;
-  var allPersons = loadAllPersons_();
-  var hit = allPersons.find(function(p) { return p.personId === personId; });
+  const allPersons = loadAllPersons_();
+  const hit = allPersons.find(function (p) {
+    return p.personId === personId;
+  });
   return hit ? hit.masterUuid : null;
 }
 
@@ -583,8 +645,10 @@ function convertPersonIdToUuid(personId) {
  */
 function convertPlaceIdToUuid(placeId) {
   if (!placeId) return null;
-  var allPlaces = loadAllPlaces_();
-  var hit = allPlaces.find(function(p) { return p.placeId === placeId; });
+  const allPlaces = loadAllPlaces_();
+  const hit = allPlaces.find(function (p) {
+    return p.placeId === placeId;
+  });
   return hit ? hit.masterUuid : null;
 }
 
@@ -599,46 +663,52 @@ function convertPlaceIdToUuid(placeId) {
  * [SEC-007 FIX] Mask email ก่อน log เพื่อป้องกัน PII leakage ลง SYS_LOG
  * @return {boolean}
  */
+/**
+ * ฟังก์ชันช่วยสำหรับ mask email
+ */
+function getMaskedEmail_(email) {
+  if (typeof maskReviewerEmail_ === 'function') {
+    return maskReviewerEmail_(email);
+  }
+  const domain = email.split('@')[1] || 'unknown';
+  if (email.length > 2) {
+    return email[0] + '***' + email[email.length - 1] + '@' + domain;
+  }
+  return email[0] + '***@' + domain;
+}
+
 function isAuthorizedUser_() {
   try {
-    const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+    const email = String(Session.getActiveUser().getEmail() || '')
+      .trim()
+      .toLowerCase();
     if (!email) {
       logWarn('Security', '[SEC-002] ไม่สามารถอ่าน Email ผู้ใช้ได้ — ปฏิเสธการเข้าถึง');
       return false;
     }
 
-    const adminsStr = String(
-      PropertiesService.getScriptProperties().getProperty('LMDS_ADMINS') || ''
-    ).trim();
+    const adminsStr = String(PropertiesService.getScriptProperties().getProperty('LMDS_ADMINS') || '').trim();
 
     if (!adminsStr) {
-      // [SEC-001 FIX] Deny-by-default: ปล่อยผ่านเฉพาะ Script Owner เท่านั้น
-      const ownerEmail = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+      const ownerEmail = String(Session.getEffectiveUser().getEmail() || '')
+        .trim()
+        .toLowerCase();
       if (email === ownerEmail) {
-        logWarn('Security', '[SEC-001] LMDS_ADMINS ยังไม่ได้ตั้ง — Script Owner ผ่าน (ควรตั้ง Admin List โดยเร็ว)');
+        logWarn('Security', '[SEC-001] LMDS_ADMINS ยังไม่ได้ตั้ง — Script Owner ผ่าน');
         return true;
       }
-      // [SEC-007 FIX] Mask email ก่อน log
-      const maskedNoAdmin = (typeof maskReviewerEmail_ === 'function')
-        ? maskReviewerEmail_(email)
-        : (email.length > 2
-            ? email[0] + '***' + email[email.length - 1] + '@' + (email.split('@')[1] || 'unknown')
-            : email[0] + '***@' + (email.split('@')[1] || 'unknown'));
-      logWarn('Security', `[SEC-001] LMDS_ADMINS ยังไม่ได้ตั้ง — ปฏิเสธ: ${maskedNoAdmin}`);
+      logWarn('Security', `[SEC-001] LMDS_ADMINS ยังไม่ได้ตั้ง — ปฏิเสธ: ${getMaskedEmail_(email)}`);
       return false;
     }
 
-    const admins = adminsStr.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+    const admins = adminsStr
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
     const isAuthorized = admins.includes(email);
 
     if (!isAuthorized) {
-      // [SEC-007 FIX] Mask email ก่อน log
-      const masked = (typeof maskReviewerEmail_ === 'function')
-        ? maskReviewerEmail_(email)
-        : (email.length > 2
-            ? email[0] + '***' + email[email.length - 1] + '@' + (email.split('@')[1] || 'unknown')
-            : email[0] + '***@' + (email.split('@')[1] || 'unknown'));
-      logWarn('Security', `[SEC-002] ปฏิเสธการเข้าถึง: ${masked} ไม่อยู่ในรายชื่อ Admin`);
+      logWarn('Security', `[SEC-002] ปฏิเสธการเข้าถึง: ${getMaskedEmail_(email)} ไม่อยู่ในรายชื่อ Admin`);
     }
 
     return isAuthorized;
@@ -662,21 +732,19 @@ function setupAdminList_UI() {
   }
   try {
     const ui = SpreadsheetApp.getUi();
-    const currentAdmins = String(
-      PropertiesService.getScriptProperties().getProperty('LMDS_ADMINS') || ''
-    ).trim();
+    const currentAdmins = String(PropertiesService.getScriptProperties().getProperty('LMDS_ADMINS') || '').trim();
 
     // [SEC-008 FIX] แสดงเฉพาะจำนวน admin ไม่แสดงรายชื่อ email เต็ม
     const currentCount = currentAdmins ? currentAdmins.split(',').filter(Boolean).length : 0;
     const result = ui.prompt(
       '👥 ตั้งค่ารายชื่อ Admin',
       'ใส่ Email ของ Admin คั่นด้วยจุลภาค (,):\n\n' +
-      'ตัวอย่าง: admin@company.com, manager@company.com\n\n' +
-      'Admin เท่านั้นที่สามารถรัน Operation ขั้นสูง\n' +
-      '(Migration, Hardening, Clear Data, Reset Sync)\n\n' +
-      (currentCount > 0
-        ? `ค่าปัจจุบัน: ${currentCount} admin(s) ตั้งอยู่ (ไม่แสดงรายชื่อเพื่อความปลอดภัย)`
-        : '⚠️ ยังไม่ได้ตั้งค่า'),
+        'ตัวอย่าง: admin@company.com, manager@company.com\n\n' +
+        'Admin เท่านั้นที่สามารถรัน Operation ขั้นสูง\n' +
+        '(Migration, Hardening, Clear Data, Reset Sync)\n\n' +
+        (currentCount > 0
+          ? `ค่าปัจจุบัน: ${currentCount} admin(s) ตั้งอยู่ (ไม่แสดงรายชื่อเพื่อความปลอดภัย)`
+          : '⚠️ ยังไม่ได้ตั้งค่า'),
       ui.ButtonSet.OK_CANCEL
     );
 
@@ -685,8 +753,11 @@ function setupAdminList_UI() {
     const newAdmins = String(result.getResponseText() || '').trim();
     if (newAdmins) {
       // Validate format
-      const emails = newAdmins.split(',').map(e => e.trim()).filter(Boolean);
-      const invalidEmails = emails.filter(e => !e.includes('@'));
+      const emails = newAdmins
+        .split(',')
+        .map((e) => e.trim())
+        .filter(Boolean);
+      const invalidEmails = emails.filter((e) => !e.includes('@'));
       if (invalidEmails.length > 0) {
         safeUiAlert_('❌ Email ไม่ถูกต้อง: ' + invalidEmails.join(', '));
         return;
@@ -700,8 +771,8 @@ function setupAdminList_UI() {
       const confirm = ui.alert(
         '⚠️ ยืนยันการล้าง Admin List',
         'การล้าง Admin List จะทำให้ระบบอนุญาตเฉพาะ Script Owner เท่านั้น (ตาม SEC-001)\n' +
-        'ผู้ใช้ทั่วไปที่ไม่ใช่ Script Owner จะถูกปฏิเสธ\n\n' +
-        'ดำเนินการต่อ?',
+          'ผู้ใช้ทั่วไปที่ไม่ใช่ Script Owner จะถูกปฏิเสธ\n\n' +
+          'ดำเนินการต่อ?',
         ui.ButtonSet.YES_NO
       );
       if (confirm !== ui.Button.YES) {
@@ -734,25 +805,44 @@ function setupAdminList_UI() {
  * @param {Function} cacheFn - Cache invalidation function to call after update
  * @param {Function} [extraUpdatesFn] - Optional callback(row, id) for extra field updates
  */
-function batchUpdateEntityStats_(sheetName, idxObj, idColIdx, usageCountIdx, lastSeenIdx, idSet, cacheFn, extraUpdatesFn) {
-  var ids = (idSet instanceof Set) ? Array.from(idSet) : (Array.isArray(idSet) ? idSet : [idSet]);
+function batchUpdateEntityStats_(
+  sheetName,
+  idxObj,
+  idColIdx,
+  usageCountIdx,
+  lastSeenIdx,
+  idSet,
+  cacheFn,
+  extraUpdatesFn
+) {
+  let ids;
+  if (idSet instanceof Set) {
+    ids = Array.from(idSet);
+  } else if (Array.isArray(idSet)) {
+    ids = idSet;
+  } else {
+    ids = [idSet];
+  }
+
   if (ids.length === 0) return;
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   if (!sheet) return;
-  var lastRow = sheet.getLastRow();
+  const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
-  var allIdx = Object.keys(idxObj).map(function(k) { return idxObj[k]; });
-  var minCol = Math.min.apply(null, allIdx) + 1;
-  var maxCol = Math.max.apply(null, allIdx) + 1;
-  var numCols = maxCol - minCol + 1;
-  var allData = sheet.getRange(2, minCol, lastRow - 1, numCols).getValues();
-  var idOffset = idColIdx - (minCol - 1);
-  var usageOffset = usageCountIdx - (minCol - 1);
-  var seenOffset = lastSeenIdx - (minCol - 1);
-  var now = new Date();
-  var updated = 0;
-  ids.forEach(function(id) {
-    for (var i = 0; i < allData.length; i++) {
+  const allIdx = Object.keys(idxObj).map(function (k) {
+    return idxObj[k];
+  });
+  const minCol = Math.min.apply(null, allIdx) + 1;
+  const maxCol = Math.max.apply(null, allIdx) + 1;
+  const numCols = maxCol - minCol + 1;
+  const allData = sheet.getRange(2, minCol, lastRow - 1, numCols).getValues();
+  const idOffset = idColIdx - (minCol - 1);
+  const usageOffset = usageCountIdx - (minCol - 1);
+  const seenOffset = lastSeenIdx - (minCol - 1);
+  const now = new Date();
+  let updated = 0;
+  ids.forEach(function (id) {
+    for (let i = 0; i < allData.length; i++) {
       if (String(allData[i][idOffset]) === String(id)) {
         allData[i][usageOffset] = (Number(allData[i][usageOffset]) || 0) + 1;
         allData[i][seenOffset] = now;
@@ -791,35 +881,44 @@ function batchUpdateEntityStats_(sheetName, idxObj, idColIdx, usageCountIdx, las
  */
 function saveChunkedCache_(cache, keyPrefix, data, optChunkSizeKB) {
   // [FIX v5.5.010] ลด chunk size จาก 90KB → 80KB (safety margin สำหรับ JSON overhead)
-  var CHUNK_SIZE_BYTES = (optChunkSizeKB || 80) * 1000; // 80 KB = 80,000 chars
-  var ttl = (typeof AI_CONFIG !== 'undefined' && AI_CONFIG.CACHE_TTL_SEC) ? AI_CONFIG.CACHE_TTL_SEC : 21600;
+  const CHUNK_SIZE_BYTES = (optChunkSizeKB || 80) * 1000; // 80 KB = 80,000 chars
+  const ttl = typeof AI_CONFIG !== 'undefined' && AI_CONFIG.CACHE_TTL_SEC ? AI_CONFIG.CACHE_TTL_SEC : 21600;
 
   // [FIX v5.5.010] จำนวน chunks ต่อ putAll batch — 5 chunks × 80KB = 400KB ต่อ call
   // GAS putAll limit ~1MB total payload, ใช้ 400KB เผื่อ safety margin
-  var BATCH_SIZE = 5;
+  const BATCH_SIZE = 5;
 
-  var json = JSON.stringify(data);
+  const json = JSON.stringify(data);
 
   // [FIX v5.5.008 P2 #13] Helper: ล้าง orphaned chunks จาก previous large-cache write
-  var cleanupOrphanedChunks_ = function(currentNumChunks) {
+  const cleanupOrphanedChunks_ = function (currentNumChunks) {
     try {
-      var prevChunksStr = cache.get(keyPrefix + '_CHUNKS');
+      const prevChunksStr = cache.get(keyPrefix + '_CHUNKS');
       if (!prevChunksStr) return;
-      var prevNumChunks = Number(prevChunksStr);
+      const prevNumChunks = Number(prevChunksStr);
       if (isNaN(prevNumChunks)) return;
 
-      var orphanStart = currentNumChunks;
+      const orphanStart = currentNumChunks;
       if (orphanStart >= prevNumChunks) return;
 
-      var orphanKeys = [];
-      for (var i = orphanStart; i < prevNumChunks; i++) {
+      const orphanKeys = [];
+      for (let i = orphanStart; i < prevNumChunks; i++) {
         orphanKeys.push(keyPrefix + '_' + i);
       }
       if (orphanKeys.length > 0) {
         cache.removeAll(orphanKeys);
-        logDebug('Utils', 'saveChunkedCache_: cleaned up ' + orphanKeys.length +
-                  ' orphaned chunks for ' + keyPrefix + ' (prev=' + prevNumChunks +
-                  ', current=' + currentNumChunks + ')');
+        logDebug(
+          'Utils',
+          'saveChunkedCache_: cleaned up ' +
+            orphanKeys.length +
+            ' orphaned chunks for ' +
+            keyPrefix +
+            ' (prev=' +
+            prevNumChunks +
+            ', current=' +
+            currentNumChunks +
+            ')'
+        );
       }
     } catch (e) {
       logWarn('Utils', 'saveChunkedCache_ orphan cleanup error: ' + e.message);
@@ -841,16 +940,16 @@ function saveChunkedCache_(cache, keyPrefix, data, optChunkSizeKB) {
   }
 
   // [FIX v5.5.007] แบ่งข้อมูลตามขนาด KB แทนจำนวน items
-  var numChunks = Math.ceil(json.length / CHUNK_SIZE_BYTES);
+  const numChunks = Math.ceil(json.length / CHUNK_SIZE_BYTES);
 
   // [PERF] สร้าง cache entries ทั้งหมดใน RAM ก่อน
-  var cacheEntries = {};
+  const cacheEntries = {};
   cacheEntries[keyPrefix + '_CHUNKS'] = String(numChunks);
 
-  for (var i = 0; i < numChunks; i++) {
-    var start = i * CHUNK_SIZE_BYTES;
-    var end = Math.min(start + CHUNK_SIZE_BYTES, json.length);
-    var chunk = json.substring(start, end);
+  for (let i = 0; i < numChunks; i++) {
+    const start = i * CHUNK_SIZE_BYTES;
+    const end = Math.min(start + CHUNK_SIZE_BYTES, json.length);
+    const chunk = json.substring(start, end);
 
     // [SAFETY] ตรวจสอบขนาด chunk ก่อนเขียน
     if (chunk.length > 95000) {
@@ -865,18 +964,18 @@ function saveChunkedCache_(cache, keyPrefix, data, optChunkSizeKB) {
   // Root cause: GAS putAll มี limit total payload size (~1MB ต่อ call)
   // เมื่อมี 48 chunks × 90KB = 4.3MB → "อาร์กิวเมนต์มากเกินไป: value" error
   // ตอนนี้แบ่งเป็น batch 5 chunks ต่อ putAll (5 × 80KB = 400KB ต่อ call)
-  var allKeys = Object.keys(cacheEntries);
-  var totalBatches = Math.ceil(allKeys.length / BATCH_SIZE);
-  var successBatches = 0;
-  var failedChunks = [];
+  const allKeys = Object.keys(cacheEntries);
+  const totalBatches = Math.ceil(allKeys.length / BATCH_SIZE);
+  let successBatches = 0;
+  const failedChunks = [];
 
-  for (var batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
-    var batchStart = batchIdx * BATCH_SIZE;
-    var batchEnd = Math.min(batchStart + BATCH_SIZE, allKeys.length);
-    var batchEntries = {};
+  for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
+    const batchStart = batchIdx * BATCH_SIZE;
+    const batchEnd = Math.min(batchStart + BATCH_SIZE, allKeys.length);
+    const batchEntries = {};
 
-    for (var j = batchStart; j < batchEnd; j++) {
-      var key = allKeys[j];
+    for (let j = batchStart; j < batchEnd; j++) {
+      const key = allKeys[j];
       batchEntries[key] = cacheEntries[key];
     }
 
@@ -885,10 +984,18 @@ function saveChunkedCache_(cache, keyPrefix, data, optChunkSizeKB) {
       successBatches++;
     } catch (batchErr) {
       // putAll batch ล้มเหลว → ลองเขียนทีละ chunk ใน batch นี้
-      logWarn('Utils', 'saveChunkedCache_ putAll batch ' + (batchIdx + 1) + '/' + totalBatches +
-              ' ล้มเหลว: ' + batchErr.message + ' — ลองเขียนทีละ chunk');
+      logWarn(
+        'Utils',
+        'saveChunkedCache_ putAll batch ' +
+          (batchIdx + 1) +
+          '/' +
+          totalBatches +
+          ' ล้มเหลว: ' +
+          batchErr.message +
+          ' — ลองเขียนทีละ chunk'
+      );
 
-      for (var k in batchEntries) {
+      for (const k in batchEntries) {
         try {
           cache.put(k, batchEntries[k], ttl);
         } catch (chunkErr) {
@@ -903,77 +1010,102 @@ function saveChunkedCache_(cache, keyPrefix, data, optChunkSizeKB) {
   cleanupOrphanedChunks_(numChunks);
 
   if (failedChunks.length === 0) {
-    logDebug('Utils', 'saveChunkedCache_: ' + keyPrefix + ' — ' + numChunks + ' chunks, ' +
-             json.length + ' chars (' + totalBatches + ' batches, all succeeded)');
+    logDebug(
+      'Utils',
+      'saveChunkedCache_: ' +
+        keyPrefix +
+        ' — ' +
+        numChunks +
+        ' chunks, ' +
+        json.length +
+        ' chars (' +
+        totalBatches +
+        ' batches, all succeeded)'
+    );
   } else {
-    logWarn('Utils', 'saveChunkedCache_: ' + keyPrefix + ' — ' + numChunks + ' chunks, ' +
-            failedChunks.length + ' failed (batches: ' + successBatches + '/' + totalBatches + ' succeeded)');
+    logWarn(
+      'Utils',
+      'saveChunkedCache_: ' +
+        keyPrefix +
+        ' — ' +
+        numChunks +
+        ' chunks, ' +
+        failedChunks.length +
+        ' failed (batches: ' +
+        successBatches +
+        '/' +
+        totalBatches +
+        ' succeeded)'
+    );
   }
 }
 
 /**
  * loadChunkedCache_ — [REF-010] Centralized chunked cache reader
  * [FIX v5.5.007] ใช้ getAll() สำหรับ batch read — เร็วขึ้น 5-10 เท่า
- * 
+ *
  * @param {CacheService.Cache} cache - CacheService instance
  * @param {string} keyPrefix - Base key prefix for cache entries
  * @return {*|null} Parsed data or null if not found
  */
 function loadChunkedCache_(cache, keyPrefix) {
   // [FAST PATH] ลองอ่านแบบ single key ก่อน
-  var single = cache.get(keyPrefix);
+  const single = cache.get(keyPrefix);
   if (single) {
-    try { 
-      var result = JSON.parse(single);
+    try {
+      const result = JSON.parse(single);
       logDebug('Utils', 'loadChunkedCache_: ' + keyPrefix + ' — single get (' + single.length + ' chars)');
       return result;
-    } catch (e) { 
-      logDebug('Utils', 'loadChunkedCache_ single parse error: ' + e.message); 
+    } catch (e) {
+      logDebug('Utils', 'loadChunkedCache_ single parse error: ' + e.message);
     }
   }
-  
+
   // [CHUNKED PATH] อ่าน chunk count
-  var chunkCountStr = cache.get(keyPrefix + '_CHUNKS');
+  const chunkCountStr = cache.get(keyPrefix + '_CHUNKS');
   if (!chunkCountStr) {
     logDebug('Utils', 'loadChunkedCache_: ' + keyPrefix + ' — ไม่พบ data');
     return null;
   }
-  
-  var totalChunks = Number(chunkCountStr);
+
+  const totalChunks = Number(chunkCountStr);
   if (isNaN(totalChunks) || totalChunks <= 0) {
     logWarn('Utils', 'loadChunkedCache_: ' + keyPrefix + ' — _CHUNKS ไม่ถูกต้อง: ' + chunkCountStr);
     return null;
   }
-  
+
   // [PERF] ใช้ getAll() สำหรับ batch read
-  var keys = [];
-  for (var i = 0; i < totalChunks; i++) {
+  const keys = [];
+  for (let i = 0; i < totalChunks; i++) {
     keys.push(keyPrefix + '_' + i);
   }
-  
-  var chunks;
+
+  let chunks;
   try {
     chunks = cache.getAll(keys);
   } catch (e) {
     logError('Utils', 'loadChunkedCache_ getAll ล้มเหลว: ' + e.message, e);
     return null;
   }
-  
+
   // รวม chunks
-  var jsonStr = '';
-  for (var j = 0; j < totalChunks; j++) {
-    var key = keyPrefix + '_' + j;
-    var chunk = chunks[key];
+  let jsonStr = '';
+  for (let j = 0; j < totalChunks; j++) {
+    const key = keyPrefix + '_' + j;
+    const chunk = chunks[key];
     if (!chunk) {
       logWarn('Utils', 'loadChunkedCache_: ขาด chunk ' + j + ' — cache ไม่สมบูรณ์');
       return null;
     }
     jsonStr += chunk;
   }
-  
+
   try {
-    var parsed = JSON.parse(jsonStr);
-    logDebug('Utils', 'loadChunkedCache_: ' + keyPrefix + ' — ' + totalChunks + ' chunks, ' + jsonStr.length + ' chars');
+    const parsed = JSON.parse(jsonStr);
+    logDebug(
+      'Utils',
+      'loadChunkedCache_: ' + keyPrefix + ' — ' + totalChunks + ' chunks, ' + jsonStr.length + ' chars'
+    );
     return parsed;
   } catch (e) {
     logError('Utils', 'loadChunkedCache_ JSON parse ล้มเหลว: ' + e.message, e);
@@ -994,19 +1126,23 @@ function loadChunkedCache_(cache, keyPrefix) {
  */
 function invalidateChunkedCache_(cacheKeyPrefix, ramVarResetFn, extraKeys) {
   if (typeof ramVarResetFn === 'function') ramVarResetFn();
-  var cache = CacheService.getScriptCache();
-  var keysToRemove = [cacheKeyPrefix];
-  var chunkCount = cache.get(cacheKeyPrefix + '_CHUNKS');
+  const cache = CacheService.getScriptCache();
+  let keysToRemove = [cacheKeyPrefix];
+  const chunkCount = cache.get(cacheKeyPrefix + '_CHUNKS');
   if (chunkCount) {
     keysToRemove.push(cacheKeyPrefix + '_CHUNKS');
-    for (var i = 0; i < Number(chunkCount); i++) {
+    for (let i = 0; i < Number(chunkCount); i++) {
       keysToRemove.push(cacheKeyPrefix + '_' + i);
     }
   }
   if (extraKeys && extraKeys.length > 0) {
     keysToRemove = keysToRemove.concat(extraKeys);
   }
-  try { cache.removeAll(keysToRemove); } catch (e) { /* ignore */ }
+  try {
+    cache.removeAll(keysToRemove);
+  } catch (e) {
+    /* ignore */
+  }
 }
 
 // ============================================================
@@ -1022,21 +1158,19 @@ function invalidateChunkedCache_(cacheKeyPrefix, ramVarResetFn, extraKeys) {
  * @return {Set<string>}
  */
 function buildGlobalAliasDedupSet_() {
-  var dedupSet = new Set();
+  const dedupSet = new Set();
   try {
-    var ss         = SpreadsheetApp.getActiveSpreadsheet();
-    var mAliasSheet = ss.getSheetByName(SHEET.M_ALIAS);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const mAliasSheet = ss.getSheetByName(SHEET.M_ALIAS);
     if (!mAliasSheet || mAliasSheet.getLastRow() < 2) return dedupSet;
 
-    var data = mAliasSheet.getRange(
-      2, 1, mAliasSheet.getLastRow() - 1, SCHEMA[SHEET.M_ALIAS].length
-    ).getValues();
+    const data = mAliasSheet.getRange(2, 1, mAliasSheet.getLastRow() - 1, SCHEMA[SHEET.M_ALIAS].length).getValues();
 
-    data.forEach(function(row) {
+    data.forEach(function (row) {
       if (row[ALIAS_IDX.ACTIVE_FLAG] !== true && String(row[ALIAS_IDX.ACTIVE_FLAG]).toUpperCase() !== 'TRUE') return;
-      var eType = String(row[ALIAS_IDX.ENTITY_TYPE] || '');
-      var mUuid = String(row[ALIAS_IDX.MASTER_UUID]  || '');
-      var norm  = normalizeForCompare(row[ALIAS_IDX.VARIANT_NAME]);
+      const eType = String(row[ALIAS_IDX.ENTITY_TYPE] || '');
+      const mUuid = String(row[ALIAS_IDX.MASTER_UUID] || '');
+      const norm = normalizeForCompare(row[ALIAS_IDX.VARIANT_NAME]);
       if (eType && mUuid && norm) {
         dedupSet.add(eType + '::' + mUuid + '::' + norm);
       }
@@ -1048,64 +1182,10 @@ function buildGlobalAliasDedupSet_() {
 }
 
 // ============================================================
-// SECTION 12: [ADD v5.5.007 P1 #9] Safe Cache Helpers
-// ป้องกัน cache.get()/put() ล้มเหลวจาก quota exceeded หรือ transient errors
-// ทำให้ calling function crash — ปัจจุบัน fallback ไป sheet read ได้
+// SECTION 12: [REMOVED V5.5.044] Safe Cache Helpers (dead code)
 // ============================================================
-
-/**
- * safeCacheGet_ — [ADD v5.5.007 P1 #9] Safe wrapper สำหรับ CacheService.get()
- *   ถ้า cache.get() throw exception (quota, transient) → คืน null แทน และ log warning
- *   ทำให้ caller สามารถ fallback ไป sheet read ได้โดยไม่ crash
- * @param {GoogleAppsScript.Cache.Cache} cache - CacheService instance
- * @param {string} key - Cache key
- * @return {string|null} Cached value หรือ null ถ้าไม่พบ/error
- */
-function safeCacheGet_(cache, key) {
-  if (!cache || !key) return null;
-  try {
-    return cache.get(key);
-  } catch (e) {
-    logWarn('Utils', 'safeCacheGet_ error for key "' + key + '": ' + e.message);
-    return null;
-  }
-}
-
-/**
- * safeCachePut_ — [ADD v5.5.007 P1 #9] Safe wrapper สำหรับ CacheService.put()
- *   ถ้า cache.put() throw exception (quota, >100KB, transient) → log warning แล้วไม่ crash
- * @param {GoogleAppsScript.Cache.Cache} cache - CacheService instance
- * @param {string} key - Cache key
- * @param {string} value - Value to cache (string)
- * @param {number} [ttl] - TTL in seconds (default: 21600 = 6h)
- * @return {boolean} true ถ้าสำเร็จ, false ถ้าล้มเหลว
- */
-function safeCachePut_(cache, key, value, ttl) {
-  if (!cache || !key || !value) return false;
-  var effectiveTtl = ttl || (typeof AI_CONFIG !== 'undefined' && AI_CONFIG.CACHE_TTL_SEC) ? (ttl || AI_CONFIG.CACHE_TTL_SEC) : 21600;
-  try {
-    cache.put(key, value, effectiveTtl);
-    return true;
-  } catch (e) {
-    logWarn('Utils', 'safeCachePut_ error for key "' + key + '" (size: ' + value.length + ' chars): ' + e.message);
-    return false;
-  }
-}
-
-/**
- * safeCacheRemoveAll_ — [ADD v5.5.007 P1 #9] Safe wrapper สำหรับ CacheService.removeAll()
- *   ถ้า removeAll() throw exception → log warning แล้วไม่ crash
- * @param {GoogleAppsScript.Cache.Cache} cache - CacheService instance
- * @param {string[]} keys - Array of keys to remove
- * @return {boolean} true ถ้าสำเร็จ, false ถ้าล้มเหลว
- */
-function safeCacheRemoveAll_(cache, keys) {
-  if (!cache || !keys || keys.length === 0) return false;
-  try {
-    cache.removeAll(keys);
-    return true;
-  } catch (e) {
-    logWarn('Utils', 'safeCacheRemoveAll_ error for ' + keys.length + ' keys: ' + e.message);
-    return false;
-  }
-}
+// safeCacheGet_/safeCachePut_/safeCacheRemoveAll_ ถูก mark @deprecated ใน V5.5.043
+//   และลบออกใน V5.5.044 เพราะไม่มี internal caller ใน codebase
+//   ถูกแทนที่ด้วย chunked cache helpers (saveChunkedCache_/loadChunkedCache_/invalidateChunkedCache_)
+//   ตั้งแต่ V5.5.008+ ซึ่งรองรับ payloads >100KB
+//   หากมี external caller ที่ต้องการ restore → ดู git history ของ commit นี้
