@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.002
+ * VERSION: 6.0.003
  * FILE: 01_Config.gs
  * LMDS V5.5 — System Configuration & Constants
  * ===================================================
@@ -67,8 +67,11 @@
 //   (Semantic Note Parser + Double Metaphone Thai)
 // [V6.0.002] Bump from 6.0.001 → 6.0.002 — V6.0 Phase 2 Matching Engine
 //   (Geofencing Tie-breaker + phoneticMatch wiring + parseAndStoreSemanticNotes wiring)
-const APP_VERSION = '6.0.002';
-const SCHEMA_VERSION = '6.0.002';
+// [V6.0.003] Bump from 6.0.002 → 6.0.003 — V6.0 Phase 3 System Learning
+//   (Self-Healing Alias verified_by/review_id/verified_at + SYS_NEGATIVE_SAMPLES
+//    negative learning feedback loop)
+const APP_VERSION = '6.0.003';
+const SCHEMA_VERSION = '6.0.003';
 const APP_NAME = 'LMDS V5.5';
 
 // [NEW v5.2.001] Global RAM Caches for batch runs
@@ -135,6 +138,9 @@ const SHEET = Object.freeze({
   RPT_QUALITY: 'RPT_DATA_QUALITY',
   // [V6.0.001] Semantic Note Parser storage — extract structured notes from raw text
   SYS_NOTES: 'SYS_NOTES',
+  // [V6.0.003] System Learning — negative samples from IGNORE review decisions
+  //   ใช้สำหรับป้องกัน autoEnrich สร้าง alias ผิดในรอบถัดไป
+  SYS_NEGATIVE_SAMPLES: 'SYS_NEGATIVE_SAMPLES',
   // [REMOVE v5.5.013] MAPS_CACHE ถูกลบออก — ไม่ได้ใช้ใน pipeline อีกต่อไป
   //   สูตร Google Maps ใช้ CacheService.getDocumentCache แทน (ดู 15_GoogleMapsAPI.gs)
   DAILY_JOB: 'ตารางงานประจำวัน',
@@ -211,7 +217,11 @@ const ALIAS_IDX = Object.freeze({
   CONFIDENCE: 4,
   SOURCE: 5,
   CREATED_AT: 6,
-  ACTIVE_FLAG: 7
+  ACTIVE_FLAG: 7,
+  // [V6.0.003] Self-Healing Alias fields — audit trail for human-verified aliases
+  VERIFIED_BY: 8, // user email (null if source != HUMAN)
+  REVIEW_ID: 9, // FK to Q_REVIEW (null if not from review)
+  VERIFIED_AT: 10 // timestamp when verified
 });
 
 const GEO_IDX = Object.freeze({
@@ -639,6 +649,21 @@ const NOTES_IDX = Object.freeze({
   ACTIVE_FLAG: 10
 });
 
+// [V6.0.003] NEGATIVE_SAMPLE_IDX — SYS_NEGATIVE_SAMPLES column indices (System Learning)
+//   เก็บ raw name/address ที่ Admin ปฏิเสธ (IGNORE) เพื่อป้องกัน autoEnrich
+//   สร้าง alias ผิดๆ ในรอบถัดไป — ใช้สำหรับ negative learning feedback loop
+//   ใช้โดย markAsNegativeSample_() ใน 12_ReviewService.gs
+const NEGATIVE_SAMPLE_IDX = Object.freeze({
+  SAMPLE_ID: 0,
+  RAW_PERSON_NAME: 1,
+  RAW_PLACE_NAME: 2,
+  CANDIDATE_PERSON_ID: 3,
+  CANDIDATE_PLACE_ID: 4,
+  REASON: 5,
+  MARKED_BY: 6,
+  MARKED_AT: 7
+});
+
 // [ADD R3] OWNER_SUM_IDX — สรุป_เจ้าของสินค้า column indices (6 columns)
 // ใช้แทน hardcoded column positions ใน 18_ServiceSCG.gs
 const OWNER_SUM_IDX = Object.freeze({
@@ -722,7 +747,9 @@ function validateConfig() {
       { name: SHEET.SOURCE, idx: SRC_IDX, label: 'SOURCE (SCGนครหลวงJWDภูมิภาค)' },
       { name: SHEET.DAILY_JOB, idx: DATA_IDX, label: 'DAILY_JOB (ตารางงานประจำวัน)' },
       // [V6.0.001] เพิ่มการตรวจ SYS_NOTES — Semantic Note Parser storage
-      { name: SHEET.SYS_NOTES, idx: NOTES_IDX, label: 'SYS_NOTES (Semantic Note Parser)' }
+      { name: SHEET.SYS_NOTES, idx: NOTES_IDX, label: 'SYS_NOTES (Semantic Note Parser)' },
+      // [V6.0.003] เพิ่มการตรวจ SYS_NEGATIVE_SAMPLES — System Learning negative samples
+      { name: SHEET.SYS_NEGATIVE_SAMPLES, idx: NEGATIVE_SAMPLE_IDX, label: 'SYS_NEGATIVE_SAMPLES (System Learning)' }
     ];
     checks.forEach((item) => {
       const schemaArr = SCHEMA[item.name];

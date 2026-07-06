@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.002
+ * VERSION: 6.0.003
  * FILE: 21_AliasService.gs
  * LMDS V5.5 — Hybrid Alias Architecture (Global M_ALIAS + Entity-Specific Views)
  * ===================================================
@@ -145,9 +145,11 @@ function loadAliasCacheChunked_(cacheKey) {
  * @param {string} entityType - 'PERSON' หรือ 'PLACE'
  * @param {number} confidence - 0-100
  * @param {string} source - 'AI'/'HUMAN'/'AUTO'/'MERGE'/'MIGRATION'/'SCG_RAW'
+ * @param {string} [optVerifiedBy] - [V6.0.003] user email (masked) ที่ยืนยัน alias — ใช้เฉพาะ source='HUMAN'
+ * @param {string} [optReviewId] - [V6.0.003] FK to Q_REVIEW.review_id ถ้ามาจาก review
  * @return {string|null} aliasId หรือ null ถ้าซ้ำ
  */
-function createGlobalAlias(masterUuid, variantName, entityType, confidence, source) {
+function createGlobalAlias(masterUuid, variantName, entityType, confidence, source, optVerifiedBy, optReviewId) {
   try {
     if (!masterUuid || !variantName || !entityType) return null;
     const cleanVariant = normalizeForCompare(variantName);
@@ -167,6 +169,10 @@ function createGlobalAlias(masterUuid, variantName, entityType, confidence, sour
 
     const aliasId = generateShortId('A');
     const now = new Date();
+    // [V6.0.003] Self-Healing Alias fields — append 3 new columns (verified_by / review_id / verified_at)
+    //   - verified_by: ใส่เฉพาะเมื่อมี optVerifiedBy (Human-in-the-loop)
+    //   - review_id:   ใส่เฉพาะเมื่อมี optReviewId (จาก Q_REVIEW)
+    //   - verified_at: ใส่ timestamp ถ้ามี optVerifiedBy, ถ้าไม่มี → ว่าง (auto-generated alias)
     const newRow = [
       aliasId,
       masterUuid,
@@ -175,7 +181,11 @@ function createGlobalAlias(masterUuid, variantName, entityType, confidence, sour
       confidence || 100,
       source || 'MANUAL',
       now,
-      true
+      true,
+      // [V6.0.003] Self-Healing Alias fields
+      optVerifiedBy || '',
+      optReviewId || '',
+      optVerifiedBy ? now : ''
     ];
     // [FIX v5.5.001] ใช้ getRange+setValues แทน appendRow เพื่อความเสถียร (consistent with other CRUD)
     const lastRow = sheet.getLastRow();

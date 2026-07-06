@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.002
+ * VERSION: 6.0.003
  * FILE: 12_ReviewService.gs
  * LMDS V5.5 — Review Queue Service
  * [FIX BUG-B2] v5.4.003: updateReviewRowStatus_() helper — 1 setValues แทน 5× setValue
@@ -520,6 +520,10 @@ function applyReviewDecision(reviewId, decisionVal, rowData, optTargetRow) {
         break;
       case 'IGNORE':
         updateReviewRowStatus_(sheet, targetRow, 'Done', reviewer, now, decisionVal, '');
+        // [V6.0.003] Mark as negative sample to prevent future wrong alias creation
+        //   เมื่อ Admin IGNORE = "นี่ไม่ใช่ match ที่ถูกต้อง" → เก็บเป็น negative sample
+        //   ป้องกัน autoEnrichAliasesFromFactBatch_ สร้าง alias ผิดในรอบถัดไป
+        markAsNegativeSample_(rowArr);
         break;
       default:
         logWarn('ReviewService', 'applyReviewDecision: Unknown decision ' + decisionVal);
@@ -851,6 +855,77 @@ function maskReviewerEmail_(email) {
 
   if (local.length <= 2) return local[0] + '***@' + domain;
   return local[0] + '***' + local[local.length - 1] + '@' + domain;
+}
+
+// ============================================================
+// SECTION 5b: [V6.0.003] System Learning — Negative Samples
+//   เมื่อ Admin เลือก IGNORE ใน Q_REVIEW → เก็บ raw name/address เป็น
+//   negative sample ใน SYS_NEGATIVE_SAMPLES เพื่อป้องกัน autoEnrich
+//   สร้าง alias ผิดในรอบ Match Engine ถัดไป (negative learning feedback loop)
+// ============================================================
+
+/**
+ * markAsNegativeSample_ — [V6.0.003] Mark a review as negative sample
+ *   Used when Admin selects IGNORE — prevents autoEnrich from creating wrong alias
+ * @param {Array} rowData - Q_REVIEW row data array (REVIEW_IDX order)
+ * @private
+ */
+function markAsNegativeSample_(rowData) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.SYS_NEGATIVE_SAMPLES);
+    if (!sheet) {
+      logWarn('ReviewService', 'markAsNegativeSample_: SYS_NEGATIVE_SAMPLES sheet not found');
+      return;
+    }
+
+    const rawPerson = String(rowData[REVIEW_IDX.RAW_PERSON] || '').trim();
+    const rawPlace = String(rowData[REVIEW_IDX.RAW_PLACE] || '').trim();
+    const candPersonStr = String(rowData[REVIEW_IDX.CAND_PERSONS] || '[]').trim();
+    const candPlaceStr = String(rowData[REVIEW_IDX.CAND_PLACES] || '[]').trim();
+
+    let candPersonId = '';
+    let candPlaceId = '';
+    try {
+      const personIds = JSON.parse(candPersonStr);
+      if (Array.isArray(personIds) && personIds.length > 0) candPersonId = personIds[0];
+    } catch (e) {
+      /* ignore — candidate JSON may be empty/malformed */
+    }
+    try {
+      const placeIds = JSON.parse(candPlaceStr);
+      if (Array.isArray(placeIds) && placeIds.length > 0) candPlaceId = placeIds[0];
+    } catch (e) {
+      /* ignore */
+    }
+
+    let markedBy = 'Admin';
+    try {
+      markedBy = maskReviewerEmail_(
+        Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail() || 'Admin'
+      );
+    } catch (e) {
+      /* ignore — WebApp context may not expose email */
+    }
+
+    // [V6.0.003] Default reason 'WRONG_MATCH' — Admin ปฏิเสธ match ที่ระบบเสนอ
+    //   สามารถขยายภายหลังเป็น 'DIFFERENT_PERSON' / 'DATA_QUALITY' ถ้ามี UI ให้เลือก
+    const newRow = [
+      generateShortId('NS'),
+      rawPerson,
+      rawPlace,
+      candPersonId,
+      candPlaceId,
+      'WRONG_MATCH',
+      markedBy,
+      new Date()
+    ];
+
+    sheet.getRange(sheet.getLastRow() + 1, 1, 1, newRow.length).setValues([newRow]);
+    logInfo('ReviewService', 'markAsNegativeSample_: stored negative sample for rawPerson="' + rawPerson + '"');
+  } catch (e) {
+    logError('ReviewService', 'markAsNegativeSample_ failed: ' + e.message, e);
+  }
 }
 
 // ============================================================

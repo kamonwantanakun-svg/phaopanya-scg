@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.002
+ * VERSION: 6.0.003
  * FILE: 10_MatchEngine.gs
  * LMDS V5.5 — Core Match & Resolution Engine
  * ===================================================
@@ -1699,11 +1699,23 @@ function resolveAndPersistMerge_(srcObj, candidates) {
   //   เรียนรู้ typo pattern โดยสร้าง Global Alias จากชื่อดิบ → masterUuid ทันที
   //   รอบ Match Engine ถัดไปจะจับคู่ได้เองโดยไม่ต้องเข้า Q_REVIEW ซ้ำ
   //   [Rule 12] ห้ามให้ alias-learning ทำให้ MERGE decision ล้มเหลว
+  // [V6.0.003] Pass verified_by + review_id to createGlobalAlias — audit trail
+  //   - verified_by: ดึงจาก Session.getEffectiveUser().getEmail() (อาจว่างใน WebApp context)
+  //   - review_id:   ไม่มีใน signature ปัจจุบัน (resolveAndPersist_ → resolveAndPersistMerge_
+  //     ไม่ได้รับ reviewId จาก caller) — pass เป็น '' ไปก่อน, ปรับ caller chain ภายหลัง
   try {
+    // [V6.0.003] ดึง email ผู้ Reviewer สำหรับ verified_by field
+    let verifiedBy = '';
+    try {
+      verifiedBy = Session.getEffectiveUser().getEmail() || '';
+    } catch (e) {
+      /* WebApp context — Session may not be available */
+    }
+
     if (targetPersonId && srcObj.rawPersonName) {
       const personUuid = getPersonMasterUuid_(targetPersonId);
       if (personUuid) {
-        const newAliasId = createGlobalAlias(personUuid, srcObj.rawPersonName, 'PERSON', 100, 'HUMAN');
+        const newAliasId = createGlobalAlias(personUuid, srcObj.rawPersonName, 'PERSON', 100, 'HUMAN', verifiedBy);
         if (newAliasId) {
           logInfo('MatchEngine', 'Self-Healing Alias: PERSON "' + srcObj.rawPersonName + '" → ' + targetPersonId);
         }
@@ -1712,7 +1724,7 @@ function resolveAndPersistMerge_(srcObj, candidates) {
     if (targetPlaceId && srcObj.rawPlaceName) {
       const placeUuid = getPlaceMasterUuid_(targetPlaceId);
       if (placeUuid) {
-        const newAliasId = createGlobalAlias(placeUuid, srcObj.rawPlaceName, 'PLACE', 100, 'HUMAN');
+        const newAliasId = createGlobalAlias(placeUuid, srcObj.rawPlaceName, 'PLACE', 100, 'HUMAN', verifiedBy);
         if (newAliasId) {
           logInfo('MatchEngine', 'Self-Healing Alias: PLACE "' + srcObj.rawPlaceName + '" → ' + targetPlaceId);
         }

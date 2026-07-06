@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.002
+ * VERSION: 6.0.003
  * FILE: 03_SetupSheets.gs
  * LMDS V5.5 — Sheet Setup & Configuration Service
  * ===================================================
@@ -183,6 +183,11 @@ function setupSystemSheets_(ss) {
   // [V6.0.001] SYS_NOTES — Semantic Note Parser storage (parseAndStoreSemanticNotes)
   //   สร้างชีตถ้ายังไม่มี — ใช้สำหรับ audit trail + entity enrichment
   createSheetIfMissing_(ss, SHEET.SYS_NOTES, getSheetHeaders(SHEET.SYS_NOTES));
+
+  // [V6.0.003] SYS_NEGATIVE_SAMPLES — System Learning negative feedback storage
+  //   สร้างชีตถ้ายังไม่มี — ใช้สำหรับเก็บ raw name/address ที่ Admin IGNORE
+  //   ป้องกัน autoEnrich สร้าง alias ผิดในรอบถัดไป
+  createSheetIfMissing_(ss, SHEET.SYS_NEGATIVE_SAMPLES, getSheetHeaders(SHEET.SYS_NEGATIVE_SAMPLES));
 
   // เพิ่มค่า Config เริ่มต้น
   setupDefaultConfig_(ss);
