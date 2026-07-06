@@ -1,0 +1,90 @@
+<!-- views/LiveFeed.html — [V6.0.004] Real-time Match Engine Monitor -->
+<script>
+  (function () {
+    'use strict';
+
+    const LiveFeedView = {
+      pollTimer: null,
+
+      render: function (data, container) {
+        container.innerHTML =
+          '<div class="space-y-4">' +
+          '<div class="flex justify-between items-center">' +
+          '<h2 class="text-lg font-semibold text-gray-900">📊 Live Feed Monitor</h2>' +
+          '<button type="button" id="liveFeedRefresh" class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">รีเฟรช</button>' +
+          '</div>' +
+          '<div id="liveFeedContent" class="space-y-3">' +
+          '<div class="text-sm text-gray-400">กดปุ่ม "รีเฟรช" เพื่อตรวจสอบสถานะ</div>' +
+          '</div>' +
+          '</div>';
+
+        const refreshBtn = document.getElementById('liveFeedRefresh');
+        const content = document.getElementById('liveFeedContent');
+
+        async function checkStatus() {
+          try {
+            const status = await globalThis.api.getMatchEngineLiveStatus();
+            let html = '';
+
+            if (status.isRunning) {
+              const pct = status.totalRows > 0 ? Math.round((status.currentRow / status.totalRows) * 100) : 0;
+              html =
+                '<div class="bg-green-50 border border-green-200 rounded-lg p-4">' +
+                '<div class="flex items-center gap-2 mb-2">' +
+                '<span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>' +
+                '<span class="text-sm font-medium text-green-700">Match Engine กำลังทำงาน</span>' +
+                '</div>' +
+                '<div class="w-full bg-gray-200 rounded-full h-2 mb-2">' +
+                '<div class="bg-green-500 h-2 rounded-full" style="width: ' +
+                pct +
+                '%"></div>' +
+                '</div>' +
+                '<div class="text-sm text-gray-600">' +
+                status.currentRow +
+                ' / ' +
+                status.totalRows +
+                ' แถว (' +
+                pct +
+                '%)</div>' +
+                '</div>';
+            } else {
+              html =
+                '<div class="bg-gray-50 border border-gray-200 rounded-lg p-4">' +
+                '<div class="flex items-center gap-2">' +
+                '<span class="w-2 h-2 bg-gray-400 rounded-full"></span>' +
+                '<span class="text-sm font-medium text-gray-600">Match Engine ไม่ได้ทำงาน</span>' +
+                '</div>' +
+                '</div>';
+            }
+
+            if (status.startedAt) {
+              html +=
+                '<div class="text-xs text-gray-400">เริ่มเมื่อ: ' +
+                new Date(status.startedAt).toLocaleString('th-TH') +
+                '</div>';
+            }
+            if (status.errorCount > 0) {
+              html += '<div class="text-xs text-red-500">Errors: ' + status.errorCount + '</div>';
+            }
+            if (status.recentMatches && status.recentMatches.length > 0) {
+              html += '<div class="mt-3"><h3 class="text-sm font-medium text-gray-700 mb-1">Recent Matches</h3>';
+              status.recentMatches.slice(0, 5).forEach(function (m) {
+                html += '<div class="text-xs text-gray-500">' + JSON.stringify(m) + '</div>';
+              });
+              html += '</div>';
+            }
+
+            content.innerHTML = html;
+          } catch (err) {
+            content.innerHTML = '<div class="text-sm text-red-500">Error: ' + err.message + '</div>';
+          }
+        }
+
+        refreshBtn.addEventListener('click', checkStatus);
+        checkStatus(); // Initial check
+      }
+    };
+
+    globalThis.LiveFeedView = LiveFeedView;
+  })();
+</script>

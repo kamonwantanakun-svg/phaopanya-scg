@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.003
+ * VERSION: 6.0.004
  * FILE: 24_PipelineManager.gs
  * LMDS V5.5 — Pipeline Manager (Standalone Module)
  * ===================================================
@@ -1134,6 +1134,57 @@ function uninstallPipelineTriggers() {
     deleted: deleted,
     message: 'Removed ' + deleted + ' pipeline trigger(s)'
   };
+}
+
+// ============================================================
+// SECTION 7.5: Pre-flight Check (V6.0.004)
+// ============================================================
+
+/**
+ * runPipelinePreflight — [V6.0.004] Pre-flight check before running MatchEngine
+ *   Checks: DAILY_JOB has today's data, SYS_TH_GEO exists, GEMINI_API_KEY set, SOURCE has unprocessed rows
+ * @return {{ ready: boolean, issues: string[] }}
+ */
+function runPipelinePreflight() {
+  const issues = [];
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Check 1: DAILY_JOB sheet has today's data
+  const dailySheet = ss.getSheetByName(SHEET.DAILY_JOB);
+  if (!dailySheet || dailySheet.getLastRow() < 2) {
+    issues.push('DAILY_JOB sheet ว่าง — กรุณารัน "ดึงข้อมูล SCG API" ก่อน');
+  }
+
+  // Check 2: SYS_TH_GEO dictionary exists
+  const geoSheet = ss.getSheetByName(SHEET.SYS_TH_GEO);
+  if (!geoSheet || geoSheet.getLastRow() < 100) {
+    issues.push('SYS_TH_GEO dictionary ไม่ครบ — กรุณารัน "buildGeoDictionary" ก่อน');
+  }
+
+  // Check 3: GEMINI_API_KEY (only if USE_AI_REASONING)
+  if (typeof AI_CONFIG !== 'undefined' && AI_CONFIG.USE_AI_REASONING) {
+    try {
+      if (typeof getGeminiApiKey === 'function') getGeminiApiKey();
+    } catch (e) {
+      issues.push('GEMINI_API_KEY ยังไม่ได้ตั้งค่า — กรุณารัน "ตั้งค่า API Key"');
+    }
+  }
+
+  // Check 4: SOURCE sheet has unprocessed rows
+  const sourceSheet = ss.getSheetByName(SHEET.SOURCE);
+  if (sourceSheet && sourceSheet.getLastRow() > 1) {
+    const syncCol =
+      typeof SRC_IDX !== 'undefined' && typeof SRC_IDX.SYNC_STATUS === 'number' ? SRC_IDX.SYNC_STATUS + 1 : 37;
+    const data = sourceSheet.getRange(2, syncCol, sourceSheet.getLastRow() - 1, 1).getValues();
+    const pending = data.filter((r) => r[0] !== 'SUCCESS' && r[0] !== 'REVIEW').length;
+    if (pending === 0) {
+      issues.push('SOURCE sheet ไม่มีแถวที่ต้องประมวลผล (SYNC_STATUS ทั้งหมด = SUCCESS/REVIEW)');
+    }
+  } else {
+    issues.push('SOURCE sheet ว่าง หรือไม่มีข้อมูล');
+  }
+
+  return { ready: issues.length === 0, issues: issues };
 }
 
 // ============================================================

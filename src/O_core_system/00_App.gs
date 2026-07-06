@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.003
+ * VERSION: 6.0.004
  * FILE: 00_App.gs
  * LMDS V5.5 — Application Entry Point & Menu Controller
  * ===================================================
@@ -127,6 +127,11 @@ function onOpen() {
         .addSeparator()
         .addItem('🔄 รีเซ็ตสถานะ SYNC (เพื่อรันใหม่)', 'resetSourceSyncStatus')
         .addItem('🧹 ล้างความจำระบบ (Clear Cache)', 'invalidateAllGlobalCaches')
+        .addSeparator()
+        .addItem('🔍 [V6] Dedup Audit (Person)', 'runDedupAuditPerson_UI')
+        .addItem('🔍 [V6] Dedup Audit (Place)', 'runDedupAuditPlace_UI')
+        .addSeparator()
+        .addItem('👥 [V6] ตั้งค่า Roles (RBAC)', 'setupRoleAssignments_UI')
         .addItem('📖 ดู Version Info', 'showVersionInfo')
     )
 

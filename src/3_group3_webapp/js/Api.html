@@ -132,7 +132,21 @@
        * @param {number} [limit=20] - จำนวนผลลัพธ์สูงสุด
        * @return {Promise<{results: Array, total: number, query: string, elapsedMs: number}>}
        */
-      searchLocations: (query, limit) => promisify_('searchLocations', query, limit)
+      searchLocations: (query, limit) => promisify_('searchLocations', query, limit),
+
+      /**
+       * getMapAnalyticsData — [V6.0.004] ดึงข้อมูลการจัดส่งสำหรับแสดงบนแผนที่
+       * @param {number} days - จำนวนวันย้อนหลัง
+       * @param {string} filterStatus - กรองตาม match status
+       * @return {Promise<Array<{lat,lng,count,matchStatus,personId,destId}>>}
+       */
+      getMapAnalyticsData: (days, filter) => promisify_('getMapAnalyticsData', days, filter),
+
+      /**
+       * getMatchEngineLiveStatus — [V6.0.004] ดึงสถานะล่าสุดของ MatchEngine
+       * @return {Promise<{isRunning,currentRow,totalRows,startedAt,lastMatchAt,errorCount,recentMatches}>}
+       */
+      getMatchEngineLiveStatus: () => promisify_('getMatchEngineLiveStatus')
     };
   })();
 

@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.003
+ * VERSION: 6.0.004
  * FILE: 10_MatchEngine.gs
  * LMDS V5.5 — Core Match & Resolution Engine
  * ===================================================
@@ -113,6 +113,24 @@ function runMatchEngine() {
 
   const setup = acquireMatchEngineLock_();
   if (!setup) return;
+
+  // [V6.0.004] Pre-flight check
+  if (typeof runPipelinePreflight === 'function') {
+    const preflight = runPipelinePreflight();
+    if (!preflight.ready) {
+      const msg = 'Pipeline preflight failed:\n' + preflight.issues.join('\n');
+      logWarn('MatchEngine', msg);
+      if (typeof sendPipelineAlert_ === 'function') {
+        sendPipelineAlert_('Pipeline preflight failed:\n' + preflight.issues.join('\n'), 'WARN');
+      }
+      safeUiAlert_('⚠️ Pipeline ไม่พร้อมรัน', msg);
+      // Release lock + cleanup before returning — preserve existing pattern
+      if (setup.lock && setup.lock.hasLock()) setup.lock.releaseLock();
+      _ALIAS_ENRICHMENT_CONTEXT = null;
+      if (typeof flushLogBuffer_ === 'function') flushLogBuffer_();
+      return;
+    }
+  }
 
   const ctx = prepareMatchEngineContext_();
   if (ctx === null) {
