@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.050
+ * VERSION: 6.0.001
  * FILE: 02_Schema.gs
  * LMDS V5.5 — Sheet Schema Definitions
  * ===================================================
@@ -63,7 +63,10 @@ const SCHEMA = Object.freeze({
     'usage_count', // [6]
     'record_status', // [7]
     'note', // [8]
-    'master_uuid' // [9]
+    'master_uuid', // [9]
+    // [V6.0.001] Phonetic keys (Double Metaphone Thai) — used by MatchEngine for fuzzy name match
+    'phonetic_primary', // [10]
+    'phonetic_secondary' // [11]
   ],
 
   M_PERSON_ALIAS: [
@@ -89,7 +92,10 @@ const SCHEMA = Object.freeze({
     'usage_count', // [10]
     'record_status', // [11]
     'note', // [12]
-    'master_uuid' // [13]
+    'master_uuid', // [13]
+    // [V6.0.001] Phonetic keys (Double Metaphone Thai) — used by MatchEngine for fuzzy place match
+    'phonetic_primary', // [14]
+    'phonetic_secondary' // [15]
   ],
 
   M_PLACE_ALIAS: [
@@ -268,6 +274,28 @@ const SCHEMA = Object.freeze({
     'failed', // [5]
     'match_rate', // [6]
     'notes' // [7]
+  ],
+
+  /**
+   * SYS_NOTES — [V6.0.001] Semantic Note Parser storage
+   * เก็บ structured notes ที่ extract จาก raw text (ชื่อ/ที่อยู่/หมายเหตุ) เพื่อใช้สำหรับ
+   *   - Audit trail (ที่มาของข้อมูล)
+   *   - Entity enrichment (เบอร์โทร, COD, เวลา, คำสั่งฝากป้อม/ยาม)
+   *   - Search & matching (ค้นหาด้วย note_type + note_value)
+   * 11 คอลัมน์ — เขียนโดย parseAndStoreSemanticNotes() ใน 05_NormalizeService.gs
+   */
+  SYS_NOTES: [
+    'note_id', // [0] N+12 hex (เช่น "N3F9A2B1C4D5E")
+    'entity_type', // [1] 'PERSON' | 'PLACE' | 'FACT'
+    'entity_id', // [2] FK → M_PERSON.person_id / M_PLACE.place_id / FACT_DELIVERY.tx_id
+    'note_type', // [3] 'CONTACT' | 'TIME' | 'INSTRUCTION' | 'COD' | 'FRAGILE' | 'OTHER'
+    'note_value', // [4] structured value (เช่น phone number, COD amount, time string)
+    'note_raw', // [5] original text ที่ extract มา
+    'source', // [6] 'SCG_RAW' | 'DRIVER_INPUT' | 'AI_EXTRACTED'
+    'confidence', // [7] 0-100
+    'created_at', // [8] timestamp
+    'created_by', // [9] 'system' | user email
+    'active_flag' // [10] TRUE/FALSE
   ],
 
   // [REMOVE v5.5.013] MAPS_CACHE SCHEMA ถูกลบออก — MAPS_CACHE sheet ไม่ได้ใช้แล้ว
@@ -502,7 +530,9 @@ function validateSchemaConsistency() {
     //   ก่อนหน้านี้ SHEET.SOURCE ไม่มีใน SCHEMA → ไม่ถูกตรวจ → ไม่พบจุดผิดจนกว่าจะ runtime error
     { sheetName: SHEET.SOURCE, idx: SRC_IDX, label: 'SCGนครหลวงJWDภูมิภาค (SOURCE)' },
     // [ADD v5.5.011] เพิ่มการตรวจ SCHEMA vs DATA_IDX สำหรับ SHEET.DAILY_JOB
-    { sheetName: SHEET.DAILY_JOB, idx: DATA_IDX, label: 'ตารางงานประจำวัน (DAILY_JOB)' }
+    { sheetName: SHEET.DAILY_JOB, idx: DATA_IDX, label: 'ตารางงานประจำวัน (DAILY_JOB)' },
+    // [V6.0.001] เพิ่มการตรวจ SCHEMA vs NOTES_IDX สำหรับ SHEET.SYS_NOTES (Semantic Note Parser)
+    { sheetName: SHEET.SYS_NOTES, idx: NOTES_IDX, label: 'SYS_NOTES (Semantic Note Parser)' }
   ];
 
   const errors = [];

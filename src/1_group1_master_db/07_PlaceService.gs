@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.050
+ * VERSION: 6.0.001
  * FILE: 07_PlaceService.gs
  * LMDS V5.5 — Place Master Service
  * ===================================================
@@ -636,6 +636,13 @@ function createPlace(normResult, province, district, subDistrict, postcode) {
 
     const universalMasterId = typeof generateUUID === 'function' ? generateUUID() : generateShortId('UID');
 
+    // [V6.0.001] Compute Double Metaphone keys from cleanPlace (handles ล/ร confusion)
+    //   Falls back gracefully if buildThaiDoubleMetaphone is unavailable (defensive)
+    const phoneticKeys =
+      typeof buildThaiDoubleMetaphone === 'function'
+        ? buildThaiDoubleMetaphone(normResult.cleanPlace)
+        : { primary: '', secondary: '' };
+
     const newRow = [
       newId,
       normResult.fullAddress || normResult.cleanPlace, // [FIX v008] ใช้ที่อยู่ที่ซ่อมแล้วเป็นชื่อหลัก (Canonical)
@@ -650,7 +657,10 @@ function createPlace(normResult, province, district, subDistrict, postcode) {
       1,
       APP_CONST.STATUS_ACTIVE,
       allNotes.join(','), // [FIX v5.2.002] เก็บลง Note ห้ามทิ้ง
-      universalMasterId
+      universalMasterId,
+      // [V6.0.001] Phonetic keys — used by MatchEngine for fuzzy place match
+      phoneticKeys.primary,
+      phoneticKeys.secondary
     ];
 
     // [FIX-05 v5.4.003] ใช้ getRange+setValues แทน appendRow เพื่อความเสถียร

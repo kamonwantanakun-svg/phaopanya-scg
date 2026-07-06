@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.050
+ * VERSION: 6.0.001
  * FILE: 06_PersonService.gs
  * LMDS V5.5 — Person Master Service
  * ===================================================
@@ -492,6 +492,7 @@ function calculateNameScore_(nameA, nameB) {
 
 /**
  * createPerson — สร้างบุคคลใหม่ใน M_PERSON
+ * [V6.0.001] เพิ่ม phonetic_primary/secondary (Double Metaphone Thai) ใน newRow
  */
 function createPerson(normResult) {
   try {
@@ -507,6 +508,13 @@ function createPerson(normResult) {
 
     const universalMasterId = typeof generateUUID === 'function' ? generateUUID() : generateShortId('UID');
 
+    // [V6.0.001] Compute Double Metaphone keys from cleanName (handles ล/ร confusion)
+    //   Falls back gracefully if buildThaiDoubleMetaphone is unavailable (defensive)
+    const phoneticKeys =
+      typeof buildThaiDoubleMetaphone === 'function'
+        ? buildThaiDoubleMetaphone(normResult.cleanName)
+        : { primary: '', secondary: '' };
+
     const newRow = [
       newId,
       normResult.cleanName,
@@ -517,7 +525,10 @@ function createPerson(normResult) {
       1,
       APP_CONST.STATUS_ACTIVE,
       allNotes.join(','),
-      universalMasterId
+      universalMasterId,
+      // [V6.0.001] Phonetic keys — used by MatchEngine for fuzzy name match
+      phoneticKeys.primary,
+      phoneticKeys.secondary
     ];
 
     // [FIX-05 v5.4.003] ใช้ getRange+setValues แทน appendRow เพื่อความเสถียร

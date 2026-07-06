@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.050
+ * VERSION: 6.0.001
  * FILE: 05_NormalizeService.gs
  * LMDS V5.5 — Thai Name & Place Normalization
  * ===================================================
@@ -246,28 +246,74 @@ function runNormalize() {
 /**
  * normalizePersonNameFull — ล้างชื่อบุคคลแบบสมบูรณ์
  * @param {string} rawName
+ * @return {{ cleanName, isCompany, extractedPhone, extractedDocNo, deliveryNotes, originalName, structuredNotes }}
+ *   structuredNotes: [V6.0.001] array of { noteType, noteValue, noteRaw, source, confidence }
+ *   ใช้โดย pipeline ในภายหลังเพื่อเขียนไป SYS_NOTES ผ่าน parseAndStoreSemanticNotes()
  */
 function normalizePersonNameFull(rawName) {
   const original = String(rawName || '').trim();
   let working = original;
   const notes = [];
+  // [V6.0.001] structuredNotes — collected by Semantic Note Parser helpers (no sheet write here)
+  const structuredNotes = [];
 
   if (!working) {
-    return buildNormResult_(original, '', false, '', '', []);
+    return buildNormResult_(original, '', false, '', '', [], []);
   }
 
   // --- Step 1: ดึงเบอร์โทรออก ---
   const phoneResult = normExtractPhone_(working);
   working = phoneResult.working;
   const extractedPhone = phoneResult.phone;
+  // [V6.0.001] Add CONTACT structured note for extracted phone
+  if (extractedPhone) {
+    structuredNotes.push({
+      noteType: 'CONTACT',
+      noteValue: extractedPhone,
+      noteRaw: extractedPhone,
+      source: 'SCG_RAW',
+      confidence: 100
+    });
+  }
 
   // --- Step 2: ดึงเลขเอกสารออก ---
   const docResult = normExtractDocNo_(working);
   working = docResult.working;
   const extractedDoc = docResult.docNo;
   if (docResult.notes.length > 0) notes.push(...docResult.notes);
+  // [V6.0.001] Add OTHER structured note for extracted doc numbers
+  if (extractedDoc) {
+    structuredNotes.push({
+      noteType: 'OTHER',
+      noteValue: extractedDoc,
+      noteRaw: extractedDoc,
+      source: 'SCG_RAW',
+      confidence: 95
+    });
+  }
+
+  // [V6.0.001] BEFORE Step 3 — collect structured notes via Semantic Note Parser helpers
+  //   ทำก่อน DELIVERY_NOTE_LIST stripping เพื่อจับ raw text ก่อนถูกตัด
+  //   ใช้ pure functions (no sheet write) — sheet write เกิดที่ parseAndStoreSemanticNotes()
+  //   ข้าม extractContactPhone_ เพราะ Step 1 ด้านบนดึง phone ไปแล้ว
+  const semCOD = extractCODNotes_(working);
+  semCOD.notes.forEach((n) => structuredNotes.push(n));
+  working = semCOD.cleanedText;
+
+  const semTime = extractTimeNotes_(working);
+  semTime.notes.forEach((n) => structuredNotes.push(n));
+  working = semTime.cleanedText;
+
+  const semFragile = extractFragileNotes_(working);
+  semFragile.notes.forEach((n) => structuredNotes.push(n));
+  working = semFragile.cleanedText;
+
+  const semInstr = extractInstructionNotes_(working);
+  semInstr.notes.forEach((n) => structuredNotes.push(n));
+  working = semInstr.cleanedText;
 
   // --- Step 3: ดึง Delivery Notes ออก (global replace) ---
+  // [V6.0.001] ยังคงไว้เพื่อ backward compat — structured notes ด้านบนจับได้ละเอียดกว่า
   DELIVERY_NOTE_LIST.forEach((noteWord) => {
     if (working.includes(noteWord)) {
       notes.push(noteWord);
@@ -295,20 +341,23 @@ function normalizePersonNameFull(rawName) {
     .replace(/[^\u0E00-\u0E7Fa-zA-Z0-9\s]/g, '')
     .trim();
 
-  return buildNormResult_(original, working, isCompany, extractedPhone, extractedDoc, notes);
+  return buildNormResult_(original, working, isCompany, extractedPhone, extractedDoc, notes, structuredNotes);
 }
 
 /**
  * buildNormResult_ — สร้าง Object ผลลัพธ์ Normalize
+ * [V6.0.001] เพิ่ม structuredNotes parameter (Semantic Note Parser)
  */
-function buildNormResult_(original, cleanName, isCompany, phone, docNo, notes) {
+function buildNormResult_(original, cleanName, isCompany, phone, docNo, notes, structuredNotes) {
   return {
     cleanName: cleanName,
     isCompany: isCompany,
     extractedPhone: phone,
     extractedDocNo: docNo,
     deliveryNotes: notes,
-    originalName: original
+    originalName: original,
+    // [V6.0.001] Semantic Note Parser — array of { noteType, noteValue, noteRaw, source, confidence }
+    structuredNotes: structuredNotes || []
   };
 }
 
@@ -445,25 +494,48 @@ function normCleanHonorific_(working) {
 /**
  * normalizePlaceName — ล้างชื่อสถานที่
  * [FIX v003] Regex บ้าน → กัน false positive "บ้านโป่ง" "บ้านนา"
+ * [V6.0.001] เพิ่ม structuredNotes array ในผลลัพธ์ (Semantic Note Parser)
  */
 function normalizePlaceName(rawPlace) {
   let working = String(rawPlace || '').trim();
   const notes = [];
+  // [V6.0.001] structuredNotes — collected by Semantic Note Parser helpers (no sheet write here)
+  const structuredNotes = [];
   let placeType = 'other';
 
   if (!working) {
-    return { cleanPlace: '', placeType, notes: [] };
+    return { cleanPlace: '', placeType, notes: [], structuredNotes: [] };
   }
 
   // --- Step 1: ดึงเบอร์โทรและเลขเอกสารออก (เก็บลง Note) ---
   const phoneMatches = working.match(PHONE_PATTERN);
   if (phoneMatches) {
     phoneMatches.forEach((p) => notes.push(p));
+    // [V6.0.001] Add CONTACT structured note
+    phoneMatches.forEach((p) => {
+      structuredNotes.push({
+        noteType: 'CONTACT',
+        noteValue: String(p).replace(/[-.\s]/g, ''),
+        noteRaw: String(p),
+        source: 'SCG_RAW',
+        confidence: 100
+      });
+    });
     working = working.replace(PHONE_PATTERN, '').trim();
   }
   const docMatches = working.match(DOC_NO_PATTERN);
   if (docMatches) {
     docMatches.forEach((d) => notes.push(d));
+    // [V6.0.001] Add OTHER structured note for doc numbers
+    docMatches.forEach((d) => {
+      structuredNotes.push({
+        noteType: 'OTHER',
+        noteValue: String(d),
+        noteRaw: String(d),
+        source: 'SCG_RAW',
+        confidence: 95
+      });
+    });
     working = working.replace(DOC_NO_PATTERN, '').trim();
   }
 
@@ -478,7 +550,26 @@ function normalizePlaceName(rawPlace) {
     placeType = 'site';
   }
 
+  // [V6.0.001] BEFORE Step 3 — collect structured notes via Semantic Note Parser helpers
+  //   ทำก่อน DELIVERY_NOTE_LIST stripping เพื่อจับ raw text ก่อนถูกตัด
+  const semCOD = extractCODNotes_(working);
+  semCOD.notes.forEach((n) => structuredNotes.push(n));
+  working = semCOD.cleanedText;
+
+  const semTime = extractTimeNotes_(working);
+  semTime.notes.forEach((n) => structuredNotes.push(n));
+  working = semTime.cleanedText;
+
+  const semFragile = extractFragileNotes_(working);
+  semFragile.notes.forEach((n) => structuredNotes.push(n));
+  working = semFragile.cleanedText;
+
+  const semInstr = extractInstructionNotes_(working);
+  semInstr.notes.forEach((n) => structuredNotes.push(n));
+  working = semInstr.cleanedText;
+
   // --- Step 3: ดึง Delivery Notes ออก ---
+  // [V6.0.001] ยังคงไว้เพื่อ backward compat — structured notes ด้านบนจับได้ละเอียดกว่า
   DELIVERY_NOTE_LIST.forEach((noteWord) => {
     if (working.includes(noteWord)) {
       notes.push(noteWord);
@@ -497,7 +588,7 @@ function normalizePlaceName(rawPlace) {
   });
 
   working = working.replace(/\s+/g, ' ').trim();
-  return { cleanPlace: working, placeType, notes };
+  return { cleanPlace: working, placeType, notes, structuredNotes };
 }
 
 // ============================================================
@@ -607,4 +698,649 @@ function normalizeProvinceForCompare_(province) {
 
   // ถ้าไม่พบใน list คืน original (อาจเป็นจังหวัดที่ยังไม่มีใน list)
   return normalized;
+}
+
+// ============================================================
+// SECTION 7: [V6.0.001] Semantic Note Parser
+//   Extract structured notes (CONTACT/TIME/COD/FRAGILE/INSTRUCTION/OTHER)
+//   from raw text and store them in SYS_NOTES sheet for entity enrichment.
+//   Helpers are pure (no sheet writes) so they can be safely called from
+//   normalizePersonNameFull / normalizePlaceName for in-memory collection;
+//   the sheet write happens later via parseAndStoreSemanticNotes().
+// ============================================================
+
+/**
+ * parseAndStoreSemanticNotes — [V6.0.001] Main entry: extract structured notes
+ *   from raw text and write them to SYS_NOTES sheet for the given entity.
+ *
+ * Extraction order (each step cleans text for the next):
+ *   1. CONTACT     → phone numbers (PHONE_PATTERN)
+ *   2. COD         → "COD", "เก็บเงินปลายทาง" + optional amounts (฿/B/บาท + digits)
+ *   3. TIME        → "ก่อนเที่ยง", "หลัง 5 โมง", "นัดส่ง 9โมง", "ส่งด่วน", "ด่วนพิเศษ"
+ *   4. FRAGILE     → "ห้ามโยน", "ระวังแตก", "ระวังหัก", "บอบบาง", "แช่เย็น"
+ *   5. INSTRUCTION → "ฝากป้อม", "ฝากยาม", "ฝากรปภ", "ฝากหน้าร้าน"
+ *   6. OTHER       → any non-trivial remaining text
+ *
+ * @param {string} rawText - ข้อความดิบที่จะ extract (เช่น ชื่อ+ที่อยู่+หมายเหตุ)
+ * @param {string} entityType - 'PERSON' | 'PLACE' | 'FACT'
+ * @param {string} entityId - FK ไปยัง M_PERSON / M_PLACE / FACT_DELIVERY
+ * @param {string} [source='SCG_RAW'] - 'SCG_RAW' | 'DRIVER_INPUT' | 'AI_EXTRACTED'
+ * @return {{ cleanText: string, notesExtracted: number, notesByType: Object }}
+ */
+function parseAndStoreSemanticNotes(rawText, entityType, entityId, source) {
+  const originalText = String(rawText || '');
+  const validSource = source || 'SCG_RAW';
+  const notesByType = {
+    CONTACT: [],
+    TIME: [],
+    INSTRUCTION: [],
+    COD: [],
+    FRAGILE: [],
+    OTHER: []
+  };
+  let working = originalText;
+  let notesExtracted = 0;
+
+  // Step 1: CONTACT (phone)
+  const contact = extractContactPhone_(working);
+  contact.notes.forEach((n) => {
+    notesByType.CONTACT.push(n);
+    notesExtracted++;
+  });
+  working = contact.cleanedText;
+
+  // Step 2: COD (amounts + keywords)
+  const cod = extractCODNotes_(working);
+  cod.notes.forEach((n) => {
+    notesByType.COD.push(n);
+    notesExtracted++;
+  });
+  working = cod.cleanedText;
+
+  // Step 3: TIME
+  const time = extractTimeNotes_(working);
+  time.notes.forEach((n) => {
+    notesByType.TIME.push(n);
+    notesExtracted++;
+  });
+  working = time.cleanedText;
+
+  // Step 4: FRAGILE
+  const fragile = extractFragileNotes_(working);
+  fragile.notes.forEach((n) => {
+    notesByType.FRAGILE.push(n);
+    notesExtracted++;
+  });
+  working = fragile.cleanedText;
+
+  // Step 5: INSTRUCTION
+  const instr = extractInstructionNotes_(working);
+  instr.notes.forEach((n) => {
+    notesByType.INSTRUCTION.push(n);
+    notesExtracted++;
+  });
+  working = instr.cleanedText;
+
+  // Step 6: OTHER (remaining non-trivial text)
+  const remaining = working.replace(/\s+/g, ' ').trim();
+  if (remaining && remaining.length > 0) {
+    const otherNote = {
+      noteType: 'OTHER',
+      noteValue: remaining,
+      noteRaw: remaining,
+      confidence: 50
+    };
+    notesByType.OTHER.push(otherNote);
+    notesExtracted++;
+  }
+
+  // Persist all extracted notes to SYS_NOTES sheet (skip if no entityId)
+  if (entityType && entityId) {
+    Object.keys(notesByType).forEach((noteType) => {
+      notesByType[noteType].forEach((note) => {
+        storeNote_(entityType, entityId, note.noteType, note.noteValue, note.noteRaw, validSource, note.confidence);
+      });
+    });
+  }
+
+  return {
+    cleanText: remaining,
+    notesExtracted,
+    notesByType
+  };
+}
+
+/**
+ * getNotesForEntity — [V6.0.001] Query notes for an entity from SYS_NOTES sheet
+ * @param {string} entityType - 'PERSON' | 'PLACE' | 'FACT'
+ * @param {string} entityId - FK
+ * @param {string[]} [noteTypes] - Optional filter (e.g. ['CONTACT', 'COD']); null/undefined = all types
+ * @return {Array<Object>} array of note objects (one per SYS_NOTES row that matches)
+ */
+function getNotesForEntity(entityType, entityId, noteTypes) {
+  if (!entityType || !entityId) return [];
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.SYS_NOTES);
+    if (!sheet || sheet.getLastRow() < 2) return [];
+
+    const data = sheet.getDataRange().getValues();
+    const results = [];
+    const typeFilter = noteTypes && noteTypes.length > 0 ? new Set(noteTypes) : null;
+
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const rowEntityType = String(row[NOTES_IDX.ENTITY_TYPE] || '');
+      const rowEntityId = String(row[NOTES_IDX.ENTITY_ID] || '');
+      const rowNoteType = String(row[NOTES_IDX.NOTE_TYPE] || '');
+      const activeFlag = row[NOTES_IDX.ACTIVE_FLAG];
+      if (rowEntityType !== entityType || rowEntityId !== entityId) continue;
+      if (activeFlag === false || String(activeFlag).toUpperCase() === 'FALSE') continue;
+      if (typeFilter && !typeFilter.has(rowNoteType)) continue;
+
+      results.push({
+        noteId: String(row[NOTES_IDX.NOTE_ID] || ''),
+        entityType: rowEntityType,
+        entityId: rowEntityId,
+        noteType: rowNoteType,
+        noteValue: String(row[NOTES_IDX.NOTE_VALUE] || ''),
+        noteRaw: String(row[NOTES_IDX.NOTE_RAW] || ''),
+        source: String(row[NOTES_IDX.SOURCE] || ''),
+        confidence: Number(row[NOTES_IDX.CONFIDENCE] || 0),
+        createdAt: row[NOTES_IDX.CREATED_AT],
+        createdBy: String(row[NOTES_IDX.CREATED_BY] || ''),
+        activeFlag
+      });
+    }
+    return results;
+  } catch (err) {
+    logError('NormalizeService', `getNotesForEntity ล้มเหลว: ${err.message}`, err);
+    return [];
+  }
+}
+
+/**
+ * extractContactPhone_ — [V6.0.001] Extract phone number(s) from text
+ *   Uses PHONE_PATTERN (global). Returns one note per match.
+ * @param {string} text
+ * @return {{ notes: Array<{noteType,noteValue,noteRaw,confidence}>, cleanedText: string }}
+ * @private
+ */
+function extractContactPhone_(text) {
+  const input = String(text || '');
+  if (!input) return { notes: [], cleanedText: '' };
+  const matches = input.match(PHONE_PATTERN);
+  if (!matches) return { notes: [], cleanedText: input };
+  const cleanedText = input.replace(PHONE_PATTERN, '').trim();
+  const notes = matches.map((m) => ({
+    noteType: 'CONTACT',
+    noteValue: String(m).replace(/[-.\s]/g, ''),
+    noteRaw: String(m),
+    confidence: 100
+  }));
+  return { notes, cleanedText };
+}
+
+/**
+ * extractCODNotes_ — [V6.0.001] Extract COD amounts and "เก็บเงินปลายทาง" keywords
+ *   Patterns (in order):
+ *     1. "COD" + amount  → e.g. "COD 1500", "COD ฿1,500 บาท"
+ *     2. "เก็บเงินปลายทาง" + optional amount
+ *     3. Standalone "COD" (without amount)
+ *   Deduplicates by noteRaw before returning.
+ * @param {string} text
+ * @return {{ notes: Array, cleanedText: string }}
+ * @private
+ */
+function extractCODNotes_(text) {
+  const input = String(text || '');
+  if (!input) return { notes: [], cleanedText: '' };
+  const notes = [];
+  let cleanedText = input;
+
+  // Pattern 1: "COD" + amount (e.g. "COD 1500", "COD ฿1,500 บาท", "COD: 1500")
+  const codAmountPattern = /\bCOD\s*[:\-]?\s*(?:฿|B|บาท)?\s*([0-9][0-9,]*)\s*(?:บาท|baht)?/gi;
+  const amountMatches = [...input.matchAll(codAmountPattern)];
+  amountMatches.forEach((m) => {
+    const amount = m[1].replace(/,/g, '');
+    notes.push({
+      noteType: 'COD',
+      noteValue: amount,
+      noteRaw: m[0].trim(),
+      confidence: 95
+    });
+  });
+  cleanedText = cleanedText.replace(codAmountPattern, ' ');
+
+  // Pattern 2: "เก็บเงินปลายทาง" + optional amount
+  const codThaiPattern = /เก็บเงินปลายทาง\s*[:\-]?\s*(?:฿|B|บาท)?\s*([0-9][0-9,]*)?\s*(?:บาท)?/g;
+  const thaiMatches = [...input.matchAll(codThaiPattern)];
+  thaiMatches.forEach((m) => {
+    const amount = m[1] ? m[1].replace(/,/g, '') : '';
+    notes.push({
+      noteType: 'COD',
+      noteValue: amount || 'COD',
+      noteRaw: m[0].trim(),
+      confidence: 95
+    });
+  });
+  cleanedText = cleanedText.replace(codThaiPattern, ' ');
+
+  // Pattern 3: standalone "COD" (no amount following)
+  const codStandalonePattern = /\bCOD\b(?![:\s\-]*[0-9])/gi;
+  const standaloneMatches = [...cleanedText.matchAll(codStandalonePattern)];
+  standaloneMatches.forEach((m) => {
+    notes.push({
+      noteType: 'COD',
+      noteValue: 'COD',
+      noteRaw: m[0],
+      confidence: 80
+    });
+  });
+  cleanedText = cleanedText.replace(codStandalonePattern, ' ');
+
+  // Deduplicate notes (by noteRaw) — same keyword may match multiple patterns
+  const seen = new Set();
+  const uniqueNotes = notes.filter((n) => {
+    if (seen.has(n.noteRaw)) return false;
+    seen.add(n.noteRaw);
+    return true;
+  });
+
+  return { notes: uniqueNotes, cleanedText: cleanedText.replace(/\s+/g, ' ').trim() };
+}
+
+/**
+ * extractTimeNotes_ — [V6.0.001] Extract time-related delivery instructions
+ *   Patterns: explicit times (09:00, 5ทุ่ม), time keywords (ก่อนเที่ยง, หลัง 5 โมง),
+ *   urgency keywords (ส่งด่วน, ด่วนพิเศษ, ส่งก่อน, ส่งหลัง, นัดส่ง, โทรก่อนส่ง, โทรนัด)
+ * @param {string} text
+ * @return {{ notes: Array, cleanedText: string }}
+ * @private
+ */
+function extractTimeNotes_(text) {
+  const input = String(text || '');
+  if (!input) return { notes: [], cleanedText: '' };
+  const notes = [];
+  let cleanedText = input;
+
+  const timePatterns = [
+    /\b\d{1,2}[:.]\d{2}\s*(?:น\.?|AM|PM|am|pm)?/g, // 09:00, 09.00น, 2:30pm — no trailing \b (Thai-safe)
+    /\b\d{1,2}\s*(?:โมงเช้า|โมงเย็น|ทุ่ม|น\.?|AM|PM|am|pm)/g, // 9โมง, 5ทุ่ม, 2pm
+    /ก่อนเที่ยง/g,
+    /หลังเที่ยง/g,
+    /ก่อน\s*\d{1,2}\s*โมง/g,
+    /หลัง\s*\d{1,2}\s*โมง/g,
+    /นัดส่ง\w*/g, // นัดส่ง, นัดส่ง 9โมง — Latin \w only, no false match on Thai
+    /ส่งด่วน/g,
+    /ด่วนมาก/g,
+    /ด่วนพิเศษ/g,
+    /ส่งก่อน/g,
+    /ส่งหลัง/g,
+    /โทรก่อนส่ง/g,
+    /โทรนัด/g
+  ];
+
+  timePatterns.forEach((pattern) => {
+    const matches = [...cleanedText.matchAll(pattern)];
+    matches.forEach((m) => {
+      notes.push({
+        noteType: 'TIME',
+        noteValue: m[0].trim(),
+        noteRaw: m[0].trim(),
+        confidence: 85
+      });
+    });
+    cleanedText = cleanedText.replace(pattern, ' ');
+  });
+
+  // Deduplicate
+  const seen = new Set();
+  const uniqueNotes = notes.filter((n) => {
+    if (seen.has(n.noteRaw)) return false;
+    seen.add(n.noteRaw);
+    return true;
+  });
+
+  return { notes: uniqueNotes, cleanedText: cleanedText.replace(/\s+/g, ' ').trim() };
+}
+
+/**
+ * extractFragileNotes_ — [V6.0.001] Extract fragile/handling warnings
+ *   Patterns: ห้ามโยน, ระวังแตก, ระวังหัก, บอบบาง, แช่เย็น, เก็บในที่เย็น, Fragile
+ * @param {string} text
+ * @return {{ notes: Array, cleanedText: string }}
+ * @private
+ */
+function extractFragileNotes_(text) {
+  const input = String(text || '');
+  if (!input) return { notes: [], cleanedText: '' };
+  const notes = [];
+  let cleanedText = input;
+
+  const fragilePatterns = [/ห้ามโยน/g, /ระวังแตก/g, /ระวังหัก/g, /บอบบาง/g, /แช่เย็น/g, /เก็บในที่เย็น/g, /Fragile/gi];
+
+  fragilePatterns.forEach((pattern) => {
+    const matches = [...cleanedText.matchAll(pattern)];
+    matches.forEach((m) => {
+      notes.push({
+        noteType: 'FRAGILE',
+        noteValue: m[0].trim(),
+        noteRaw: m[0].trim(),
+        confidence: 90
+      });
+    });
+    cleanedText = cleanedText.replace(pattern, ' ');
+  });
+
+  // Deduplicate
+  const seen = new Set();
+  const uniqueNotes = notes.filter((n) => {
+    if (seen.has(n.noteRaw)) return false;
+    seen.add(n.noteRaw);
+    return true;
+  });
+
+  return { notes: uniqueNotes, cleanedText: cleanedText.replace(/\s+/g, ' ').trim() };
+}
+
+/**
+ * extractInstructionNotes_ — [V6.0.001] Extract delivery instructions
+ *   Patterns: ฝากป้อม, ฝากรปภ, ฝากยาม, ฝากรักษาความปลอดภัย,
+ *             ฝากหน้าป้อม, ฝากหน้าร้าน, ฝากเพื่อนบ้าน, ฝากคนขับรถ
+ * @param {string} text
+ * @return {{ notes: Array, cleanedText: string }}
+ * @private
+ */
+function extractInstructionNotes_(text) {
+  const input = String(text || '');
+  if (!input) return { notes: [], cleanedText: '' };
+  const notes = [];
+  let cleanedText = input;
+
+  const instrPatterns = [
+    /ฝากป้อม/g,
+    /ฝากรปภ/g,
+    /ฝากยาม/g,
+    /ฝากรักษาความปลอดภัย/g,
+    /ฝากหน้าป้อม/g,
+    /ฝากหน้าร้าน/g,
+    /ฝากเพื่อนบ้าน/g,
+    /ฝากคนขับรถ/g
+  ];
+
+  instrPatterns.forEach((pattern) => {
+    const matches = [...cleanedText.matchAll(pattern)];
+    matches.forEach((m) => {
+      notes.push({
+        noteType: 'INSTRUCTION',
+        noteValue: m[0].trim(),
+        noteRaw: m[0].trim(),
+        confidence: 90
+      });
+    });
+    cleanedText = cleanedText.replace(pattern, ' ');
+  });
+
+  // Deduplicate
+  const seen = new Set();
+  const uniqueNotes = notes.filter((n) => {
+    if (seen.has(n.noteRaw)) return false;
+    seen.add(n.noteRaw);
+    return true;
+  });
+
+  return { notes: uniqueNotes, cleanedText: cleanedText.replace(/\s+/g, ' ').trim() };
+}
+
+/**
+ * storeNote_ — [V6.0.001] Write a single note to SYS_NOTES sheet
+ *   Generates note_id (N+12 hex via generateShortId), stamps created_at + created_by,
+ *   and appends a new row to SYS_NOTES.
+ * @param {string} entityType - 'PERSON' | 'PLACE' | 'FACT'
+ * @param {string} entityId - FK to M_PERSON / M_PLACE / FACT_DELIVERY
+ * @param {string} noteType - 'CONTACT' | 'TIME' | 'INSTRUCTION' | 'COD' | 'FRAGILE' | 'OTHER'
+ * @param {string} noteValue - structured value (e.g. phone, COD amount, time string)
+ * @param {string} noteRaw - original text snippet that was extracted
+ * @param {string} source - 'SCG_RAW' | 'DRIVER_INPUT' | 'AI_EXTRACTED'
+ * @param {number} confidence - 0-100
+ * @return {string|null} note_id หรือ null ถ้าล้มเหลว / ไม่มี entityId
+ * @private
+ */
+function storeNote_(entityType, entityId, noteType, noteValue, noteRaw, source, confidence) {
+  try {
+    if (!entityType || !entityId) return null;
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.SYS_NOTES);
+    if (!sheet) {
+      logWarn('NormalizeService', 'storeNote_: ไม่พบชีต SYS_NOTES — ข้ามการบันทึก');
+      return null;
+    }
+
+    const noteId = generateShortId('N');
+    const now = new Date();
+    // [V6.0.001] Capture current user email for audit trail (fallback to 'system')
+    let userEmail = 'system';
+    try {
+      if (typeof Session !== 'undefined' && Session.getActiveUser) {
+        const email = Session.getActiveUser().getEmail();
+        if (email) userEmail = email;
+      }
+    } catch (_e) {
+      // GAS may throw in some contexts (e.g. custom function) — fallback to 'system'
+    }
+
+    const newRow = [
+      noteId,
+      entityType,
+      entityId,
+      noteType,
+      String(noteValue || ''),
+      String(noteRaw || ''),
+      source || 'SCG_RAW',
+      Number(confidence) || 0,
+      now,
+      userEmail,
+      true
+    ];
+
+    const lastRow = sheet.getLastRow();
+    sheet.getRange(lastRow + 1, 1, 1, newRow.length).setValues([newRow]);
+    return noteId;
+  } catch (err) {
+    logError('NormalizeService', `storeNote_ ล้มเหลว: ${err.message}`, err);
+    return null;
+  }
+}
+
+// ============================================================
+// SECTION 8: [V6.0.001] Double Metaphone Thai
+//   Upgrades buildThaiPhoneticKey with primary + secondary keys
+//   for more robust fuzzy name matching (handles ล/ร confusion).
+// ============================================================
+
+/**
+ * buildThaiDoubleMetaphone — [V6.0.001] Compute Double Metaphone keys for Thai name
+ *   Algorithm:
+ *     1. Remove vowels + tone marks + symbols (U+0E30-U+0E7F) + spaces
+ *     2. Phonetic substitutions per consonant class
+ *     3. Collapse consecutive duplicate consonants
+ *     4. Truncate to 8 chars
+ *
+ *   Primary vs Secondary difference:
+ *     - ล/ร collapse to 'L' in primary, 'R' in secondary
+ *       (handles the common Thai spelling variation ล↔ร)
+ *     - All other consonants map identically in both keys
+ *
+ * @param {string} thaiName - Thai name (with or without vowels/tone marks)
+ * @return {{ primary: string, secondary: string }} max 8 chars each (may be '' for empty input)
+ */
+function buildThaiDoubleMetaphone(thaiName) {
+  const input = String(thaiName || '').trim();
+  if (!input) return { primary: '', secondary: '' };
+
+  // Step 1: Remove vowels + tone marks + symbols (U+0E30-U+0E7F covers both ranges) + spaces
+  //   U+0E30-U+0E4E: Thai vowels + tone marks
+  //   U+0E4F-U+0E7F: Thai symbols, digits, punctuation (kept out for clean consonant key)
+  const consonantsOnly = input.replace(/[\u0E30-\u0E7F\s]/g, '');
+
+  if (!consonantsOnly) return { primary: '', secondary: '' };
+
+  // Step 2: Phonetic substitutions per consonant class
+  //   Primary and Secondary differ only in ล/ร handling
+  let primary = '';
+  let secondary = '';
+
+  for (let i = 0; i < consonantsOnly.length; i++) {
+    const ch = consonantsOnly[i];
+    const p = phoneticSubstitute_(ch, true);
+    const s = phoneticSubstitute_(ch, false);
+    if (p) primary += p;
+    if (s) secondary += s;
+  }
+
+  // Step 3: Collapse consecutive duplicate consonants (e.g. "KKL" → "KL")
+  primary = collapseDuplicates_(primary);
+  secondary = collapseDuplicates_(secondary);
+
+  // Step 4: Truncate to 8 chars
+  return {
+    primary: primary.substring(0, 8),
+    secondary: secondary.substring(0, 8)
+  };
+}
+
+/**
+ * phoneticSubstitute_ — [V6.0.001] Map a single Thai consonant to its phonetic letter
+ *   Mapping (per task spec):
+ *     ศ/ษ/ส/ซ → S
+ *     จ → J  | ฉ/ช/ฌ → C
+ *     ฎ/ด/ฏ/ต/ฑ/ท/ธ → D
+ *     บ/ป/พ/ฟ/ภ → B
+ *     ก/ข/ค/ฃ/ฅ/ฆ/ง → K
+ *     ม → M  | น/ณ/ญ/ฬ → N
+ *     ย → Y  | ล/ร → L (primary) / R (secondary)
+ *     ว → W  | ห/ฮ → H  | อ → A
+ * @param {string} ch - single Thai consonant character
+ * @param {boolean} isPrimary - true for primary key, false for secondary
+ * @return {string} phonetic letter (uppercase) or '' if unmapped
+ * @private
+ */
+function phoneticSubstitute_(ch, isPrimary) {
+  switch (ch) {
+    case 'ศ':
+    case 'ษ':
+    case 'ส':
+    case 'ซ':
+      return 'S';
+    case 'จ':
+      return 'J'; // จ → J (alternative: C)
+    case 'ฉ':
+    case 'ช':
+    case 'ฌ':
+      return 'C';
+    case 'ฎ':
+    case 'ด':
+    case 'ฏ':
+    case 'ต':
+    case 'ฑ':
+    case 'ท':
+    case 'ธ':
+      return 'D';
+    case 'บ':
+    case 'ป':
+    case 'พ':
+    case 'ฟ':
+    case 'ภ':
+      return 'B';
+    case 'ก':
+    case 'ข':
+    case 'ค':
+    case 'ฃ':
+    case 'ฅ':
+    case 'ฆ':
+    case 'ง':
+      return 'K';
+    case 'ม':
+      return 'M';
+    case 'น':
+    case 'ณ':
+    case 'ญ':
+    case 'ฬ':
+      return 'N';
+    case 'ย':
+      return 'Y';
+    case 'ล':
+    case 'ร':
+      // [V6.0.001] ล/ร → L (primary), R (secondary) — handles common ล↔ร spelling confusion
+      return isPrimary ? 'L' : 'R';
+    case 'ว':
+      return 'W';
+    case 'ห':
+    case 'ฮ':
+      return 'H';
+    case 'อ':
+      return 'A';
+    default:
+      return '';
+  }
+}
+
+/**
+ * collapseDuplicates_ — [V6.0.001] Collapse consecutive duplicate characters
+ *   e.g. "KKL" → "KL", "BBLD" → "BLD"
+ * @param {string} str
+ * @return {string}
+ * @private
+ */
+function collapseDuplicates_(str) {
+  if (!str) return '';
+  let result = '';
+  for (let i = 0; i < str.length; i++) {
+    if (i === 0 || str[i] !== str[i - 1]) {
+      result += str[i];
+    }
+  }
+  return result;
+}
+
+/**
+ * phoneticMatch — [V6.0.001] Compare two names using Double Metaphone keys
+ *   Match rules (highest score wins):
+ *     - primary1 == primary2                          → score 100, matchedKey 'primary'
+ *     - primary1 == secondary2 OR secondary1 == primary2 → score 90, matchedKey 'cross'
+ *     - secondary1 == secondary2                      → score 80, matchedKey 'secondary'
+ *     - No match                                       → score 0, matchedKey ''
+ *
+ *   Note: Match requires non-empty keys on both sides. If either side has empty
+ *   primary, the comparison falls back to cross/secondary matching.
+ *
+ * @param {string} name1
+ * @param {string} name2
+ * @return {{ match: boolean, score: number, matchedKey: string }}
+ *   matchedKey: 'primary' | 'cross' | 'secondary' | '' (empty if no match)
+ */
+function phoneticMatch(name1, name2) {
+  const a = buildThaiDoubleMetaphone(name1);
+  const b = buildThaiDoubleMetaphone(name2);
+
+  // Both primaries present and equal → score 100
+  if (a.primary && b.primary && a.primary === b.primary) {
+    return { match: true, score: 100, matchedKey: 'primary' };
+  }
+
+  // Cross-match: primary↔secondary
+  if (a.primary && b.secondary && a.primary === b.secondary) {
+    return { match: true, score: 90, matchedKey: 'cross' };
+  }
+  if (a.secondary && b.primary && a.secondary === b.primary) {
+    return { match: true, score: 90, matchedKey: 'cross' };
+  }
+
+  // Secondary == secondary
+  if (a.secondary && b.secondary && a.secondary === b.secondary) {
+    return { match: true, score: 80, matchedKey: 'secondary' };
+  }
+
+  return { match: false, score: 0, matchedKey: '' };
 }

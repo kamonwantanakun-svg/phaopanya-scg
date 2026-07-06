@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.050
+ * VERSION: 6.0.001
  * FILE: 01_Config.gs
  * LMDS V5.5 — System Configuration & Constants
  * ===================================================
@@ -63,8 +63,10 @@
  * ===================================================
  */
 
-const APP_VERSION = '5.5.050';
-const SCHEMA_VERSION = '5.5.050';
+// [V6.0.001] Bump from 5.5.050 → 6.0.001 — V6.0 Phase 1 Data Cleansing
+//   (Semantic Note Parser + Double Metaphone Thai)
+const APP_VERSION = '6.0.001';
+const SCHEMA_VERSION = '6.0.001';
 const APP_NAME = 'LMDS V5.5';
 
 // [NEW v5.2.001] Global RAM Caches for batch runs
@@ -129,6 +131,8 @@ const SHEET = Object.freeze({
   SYS_LOG: 'SYS_LOG',
   SYS_TH_GEO: 'SYS_TH_GEO',
   RPT_QUALITY: 'RPT_DATA_QUALITY',
+  // [V6.0.001] Semantic Note Parser storage — extract structured notes from raw text
+  SYS_NOTES: 'SYS_NOTES',
   // [REMOVE v5.5.013] MAPS_CACHE ถูกลบออก — ไม่ได้ใช้ใน pipeline อีกต่อไป
   //   สูตร Google Maps ใช้ CacheService.getDocumentCache แทน (ดู 15_GoogleMapsAPI.gs)
   DAILY_JOB: 'ตารางงานประจำวัน',
@@ -153,7 +157,10 @@ const PERSON_IDX = Object.freeze({
   USAGE_COUNT: 6,
   STATUS: 7,
   NOTE: 8,
-  MASTER_UUID: 9
+  MASTER_UUID: 9,
+  // [V6.0.001] Double Metaphone Thai — Phonetic keys for fuzzy name matching
+  PHONETIC_PRIMARY: 10,
+  PHONETIC_SECONDARY: 11
 });
 
 const PERSON_ALIAS_IDX = Object.freeze({
@@ -179,7 +186,10 @@ const PLACE_IDX = Object.freeze({
   USAGE_COUNT: 10,
   STATUS: 11,
   NOTE: 12,
-  MASTER_UUID: 13
+  MASTER_UUID: 13,
+  // [V6.0.001] Double Metaphone Thai — Phonetic keys for fuzzy place matching
+  PHONETIC_PRIMARY: 14,
+  PHONETIC_SECONDARY: 15
 });
 
 const PLACE_ALIAS_IDX = Object.freeze({
@@ -609,6 +619,24 @@ const CACHE_KEY = Object.freeze({
 // [REMOVE v5.5.013] MAPS_CACHE_IDX ถูกลบออก — MAPS_CACHE sheet ไม่ได้ใช้แล้ว
 //   สูตร Google Maps ใช้ CacheService.getDocumentCache แทน
 
+// [V6.0.001] NOTES_IDX — SYS_NOTES column indices (Semantic Note Parser storage)
+//   เก็บ structured notes ที่ extract จาก raw text (ชื่อ/ที่อยู่/หมายเหตุ) เพื่อใช้สำหรับ
+//   audit trail, entity enrichment และ search/matching
+//   ใช้โดย parseAndStoreSemanticNotes() และ getNotesForEntity() ใน 05_NormalizeService.gs
+const NOTES_IDX = Object.freeze({
+  NOTE_ID: 0,
+  ENTITY_TYPE: 1,
+  ENTITY_ID: 2,
+  NOTE_TYPE: 3,
+  NOTE_VALUE: 4,
+  NOTE_RAW: 5,
+  SOURCE: 6,
+  CONFIDENCE: 7,
+  CREATED_AT: 8,
+  CREATED_BY: 9,
+  ACTIVE_FLAG: 10
+});
+
 // [ADD R3] OWNER_SUM_IDX — สรุป_เจ้าของสินค้า column indices (6 columns)
 // ใช้แทน hardcoded column positions ใน 18_ServiceSCG.gs
 const OWNER_SUM_IDX = Object.freeze({
@@ -690,7 +718,9 @@ function validateConfig() {
       { name: SHEET.SHIPMENT_SUM, idx: SHIPMENT_SUM_IDX, label: 'SHIPMENT_SUM' },
       // [ADD v5.5.011] เพิ่มการตรวจ SOURCE และ DAILY_JOB — ก่อนหน้านี้ไม่ได้ตรวจใน validateConfig
       { name: SHEET.SOURCE, idx: SRC_IDX, label: 'SOURCE (SCGนครหลวงJWDภูมิภาค)' },
-      { name: SHEET.DAILY_JOB, idx: DATA_IDX, label: 'DAILY_JOB (ตารางงานประจำวัน)' }
+      { name: SHEET.DAILY_JOB, idx: DATA_IDX, label: 'DAILY_JOB (ตารางงานประจำวัน)' },
+      // [V6.0.001] เพิ่มการตรวจ SYS_NOTES — Semantic Note Parser storage
+      { name: SHEET.SYS_NOTES, idx: NOTES_IDX, label: 'SYS_NOTES (Semantic Note Parser)' }
     ];
     checks.forEach((item) => {
       const schemaArr = SCHEMA[item.name];

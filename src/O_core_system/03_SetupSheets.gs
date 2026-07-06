@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.050
+ * VERSION: 6.0.001
  * FILE: 03_SetupSheets.gs
  * LMDS V5.5 — Sheet Setup & Configuration Service
  * ===================================================
@@ -179,6 +179,10 @@ function setupSystemSheets_(ss) {
 
   // [FIX v003] SYS_TH_GEO ต้องสร้างถ้าไม่มี
   createSheetIfMissing_(ss, SHEET.SYS_TH_GEO, getSheetHeaders(SHEET.SYS_TH_GEO));
+
+  // [V6.0.001] SYS_NOTES — Semantic Note Parser storage (parseAndStoreSemanticNotes)
+  //   สร้างชีตถ้ายังไม่มี — ใช้สำหรับ audit trail + entity enrichment
+  createSheetIfMissing_(ss, SHEET.SYS_NOTES, getSheetHeaders(SHEET.SYS_NOTES));
 
   // เพิ่มค่า Config เริ่มต้น
   setupDefaultConfig_(ss);
