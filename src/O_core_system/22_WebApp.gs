@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.049
+ * VERSION: 5.5.050
  * FILE: 22_WebApp.gs
  * LMDS V5.5 — Web App Server (Dashboard)
  * ===================================================
@@ -997,6 +997,32 @@ function submitReviewDecision(reviewId, decision, note) {
     // เรียกใช้ฟังก์ชันที่มีอยู่แล้วใน 12_ReviewService.gs
     const result = applyReviewDecision(reviewId, decision, rowData, targetRow);
 
+    // [FIX V5.5.049 BUG-QREVIEW] เขียน factRowData ลง FACT_DELIVERY จริง
+    //   ปัญหา: applyReviewDecision คืน factRowData แต่ไม่ได้เขียนลง sheet
+    //   ใน batch flow (applyAllPendingDecisions) มี batch write แต่ single decision ไม่มี
+    //   ทำให้กด Approve แล้วข้อมูลไม่ถูกสร้างใน FACT_DELIVERY
+    let factRowWritten = false;
+    if (result && result.factRowData) {
+      try {
+        const factSheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
+        if (factSheet) {
+          // [FIX BUG-PM-004 V5.5.041] Math.min guard สำหรับ column count mismatch
+          const factSchemaLen = SCHEMA[SHEET.FACT_DELIVERY].length;
+          const factSheetCols = Math.min(factSchemaLen, factSheet.getLastColumn());
+          const rowsToWrite =
+            factSheetCols === factSchemaLen ? [result.factRowData] : [result.factRowData.slice(0, factSheetCols)];
+          factSheet.getRange(factSheet.getLastRow() + 1, 1, 1, factSheetCols).setValues(rowsToWrite);
+          factRowWritten = true;
+          logInfo(
+            'WebApp',
+            'submitReviewDecision: เขียน FACT_DELIVERY สำเร็จ — txId=' + result.factRowData[FACT_IDX.TX_ID]
+          );
+        }
+      } catch (factErr) {
+        logError('WebApp', 'submitReviewDecision: เขียน FACT_DELIVERY ล้มเหลว — ' + factErr.message, factErr);
+      }
+    }
+
     logInfo(
       'WebApp',
       'submitReviewDecision: ' + reviewId + ' → ' + decision + ' โดย ' + (getCurrentDashboardUser_().email || '?')
@@ -1007,7 +1033,7 @@ function submitReviewDecision(reviewId, decision, note) {
       reviewId: reviewId,
       decision: decision,
       message: 'บันทึกการตัดสินใจสำเร็จ',
-      result: result ? { factRowWritten: true } : null
+      result: { factRowWritten: factRowWritten }
     };
   } catch (err) {
     logError('WebApp', 'submitReviewDecision ล้มเหลว: ' + err.message, err);

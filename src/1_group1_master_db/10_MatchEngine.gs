@@ -1,5 +1,5 @@
 /**
- * VERSION: 5.5.049
+ * VERSION: 5.5.050
  * FILE: 10_MatchEngine.gs
  * LMDS V5.5 — Core Match & Resolution Engine
  * ===================================================
@@ -1620,8 +1620,61 @@ function resolveAndPersistMerge_(srcObj, candidates) {
     targetPersonId = candidates.candPersonIds[0];
   }
 
-  const targetPlaceId =
+  let targetPlaceId =
     candidates && candidates.candPlaceIds && candidates.candPlaceIds.length > 0 ? candidates.candPlaceIds[0] : null;
+
+  // [FIX V5.5.050 BUG-QREVIEW-MPERSON] ถ้าไม่มี candidate เลย → fallback เป็น CREATE_NEW
+  //   ปัญหา: MERGE_TO_CANDIDATE แต่ candPersonIds=[] และ candPlaceIds=[]
+  //   → targetPersonId=null, targetPlaceId=null → ไม่สร้างอะไรเลยใน M_PERSON/M_PLACE
+  //   แก้: ถ้าไม่มี candidate ทั้งคู่ → เรียก resolveAndPersistCreate_ แทน
+  if (!targetPersonId && !targetPlaceId) {
+    logInfo(
+      'MatchEngine',
+      'resolveAndPersistMerge_: ไม่มี candidate — fallback เป็น CREATE_NEW (person="' + srcObj.rawPersonName + '")'
+    );
+    return resolveAndPersistCreate_(srcObj);
+  }
+
+  // [FIX V5.5.050 BUG-QREVIEW-MPERSON] ถ้ามี place candidate แต่ไม่มี person candidate
+  //   → สร้าง person ใหม่ (เพราะ MERGE หมายถึง merge เข้า candidate ที่มี
+  //   แต่ถ้าไม่มี person candidate เลย ต้องสร้างใหม่)
+  if (!targetPersonId && srcObj.rawPersonName) {
+    const personResult = resolvePerson(srcObj.rawPersonName);
+    targetPersonId = personResult.personId;
+    if (!targetPersonId) {
+      targetPersonId = createPerson(personResult.normResult);
+      logInfo('MatchEngine', 'resolveAndPersistMerge_: สร้าง Person ใหม่ — ' + targetPersonId);
+    }
+  }
+
+  // [FIX V5.5.050 BUG-QREVIEW-MPERSON] ถ้ามี person candidate แต่ไม่มี place candidate
+  //   → สร้าง place ใหม่
+  if (!targetPlaceId && (srcObj.rawPlaceName || srcObj.rawAddress)) {
+    const rawPlace = srcObj.rawPlaceName || srcObj.rawAddress;
+    const rawAddr = srcObj.rawAddress || '';
+    const placeResult = resolvePlace(rawPlace, rawAddr);
+    let newPlaceId = placeResult.placeId;
+    if (!newPlaceId) {
+      let geoEnrich = null;
+      try {
+        geoEnrich = getEnrichedGeoData(rawAddr, rawPlace);
+      } catch (e) {
+        logDebug('MatchEngine', 'resolveAndPersistMerge_: getEnrichedGeoData skipped — ' + e.message);
+      }
+      const safeGeoEnrich = geoEnrich || {};
+      const placeNorm = placeResult.normResult || {};
+      if (safeGeoEnrich.fullAddress) placeNorm.fullAddress = safeGeoEnrich.fullAddress;
+      newPlaceId = createPlace(
+        placeNorm,
+        safeGeoEnrich.province || '',
+        safeGeoEnrich.district || '',
+        safeGeoEnrich.subDistrict || '',
+        safeGeoEnrich.postcode || ''
+      );
+      targetPlaceId = newPlaceId;
+      logInfo('MatchEngine', 'resolveAndPersistMerge_: สร้าง Place ใหม่ — ' + newPlaceId);
+    }
+  }
 
   // [NEW v5.5.046 — Self-Healing Alias 3.1]
   //   Admin ยืนยัน MERGE_TO_CANDIDATE = Human-in-the-loop ที่แม่นยำที่สุด
