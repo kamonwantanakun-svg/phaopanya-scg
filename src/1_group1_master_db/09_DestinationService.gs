@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.001
+ * VERSION: 6.0.002
  * FILE: 09_DestinationService.gs
  * LMDS V5.5 — Destination Master Service
  * ===================================================

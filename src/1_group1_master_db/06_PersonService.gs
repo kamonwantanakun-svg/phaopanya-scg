@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.001
+ * VERSION: 6.0.002
  * FILE: 06_PersonService.gs
  * LMDS V5.5 — Person Master Service
  * ===================================================
@@ -140,7 +140,18 @@ function resolvePerson(rawName, preNormResult, contextHint) {
     return { personId: bestPerson.personId, status: 'FOUND', confidence: bestScore, normResult };
   }
   if (bestScore >= AI_CONFIG.THRESHOLD_REVIEW) {
-    return { personId: bestPerson.personId, status: 'NEEDS_REVIEW', confidence: bestScore, normResult };
+    // [V6.0.002] Expose secondBestPerson/Score so 10_MatchEngine.processOneRow can
+    //   invoke breakTieAmongCandidates() when scores are within ±2. Non-breaking:
+    //   existing callers don't read these fields. secondBestPerson may be null when
+    //   only one candidate scored above THRESHOLD_REVIEW.
+    return {
+      personId: bestPerson.personId,
+      status: 'NEEDS_REVIEW',
+      confidence: bestScore,
+      normResult,
+      secondBestPerson: secondBestPerson,
+      secondBestScore: secondBestScore
+    };
   }
   return { personId: null, status: 'NOT_FOUND', confidence: bestScore, normResult };
 }
@@ -187,6 +198,23 @@ function findPersonCandidates(cleanName, phone) {
   // Strategy 5: Note Search — only if results still empty
   if (results.length === 0) {
     accumulateByNoteSearch_(cleanName, allPersons, results, existingIds);
+  }
+
+  // [V6.0.002] Strategy 6: Double Metaphone Phonetic Match — find persons whose
+  //   primary/secondary phonetic key matches the query. Handles ล↔ร confusion and
+  //   similar spelling variations that the single-key buildThaiPhoneticKey (Strategy 4)
+  //   misses. Uses existing allPersons + existingIds (no extra sheet read).
+  if (typeof phoneticMatch === 'function' && cleanName) {
+    for (const p of allPersons) {
+      if (existingIds.has(p.personId)) continue; // skip already-found candidates
+      const phResult = phoneticMatch(cleanName, p.canonical || p.normalized);
+      if (phResult.match && phResult.score >= 80) {
+        p._phoneticScore = phResult.score;
+        p._matchedKey = phResult.matchedKey;
+        results.push(p);
+        existingIds.add(p.personId);
+      }
+    }
   }
 
   return results;
@@ -442,7 +470,16 @@ function scorePersonCandidate(queryName, candidate, queryPhone) {
   }
 
   // [FIX v003] ใช้ Config แทน hardcode 60
-  return nameScore < AI_CONFIG.SCORE_MIN_THRESHOLD ? 0 : nameScore;
+  let finalScore = nameScore < AI_CONFIG.SCORE_MIN_THRESHOLD ? 0 : nameScore;
+
+  // [V6.0.002] Phonetic match bonus — adds 0-2 points when Double Metaphone matched
+  //   (primary=100 → +2, cross=90 → +1, secondary=80 → +0). Only applies to non-phone
+  //   matches; phone-match returns above already short-circuit before this line.
+  if (candidate._phoneticScore) {
+    finalScore += Math.round((candidate._phoneticScore - 80) * 0.1);
+  }
+
+  return finalScore;
 }
 
 /**

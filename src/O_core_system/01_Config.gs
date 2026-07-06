@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.001
+ * VERSION: 6.0.002
  * FILE: 01_Config.gs
  * LMDS V5.5 — System Configuration & Constants
  * ===================================================
@@ -65,8 +65,10 @@
 
 // [V6.0.001] Bump from 5.5.050 → 6.0.001 — V6.0 Phase 1 Data Cleansing
 //   (Semantic Note Parser + Double Metaphone Thai)
-const APP_VERSION = '6.0.001';
-const SCHEMA_VERSION = '6.0.001';
+// [V6.0.002] Bump from 6.0.001 → 6.0.002 — V6.0 Phase 2 Matching Engine
+//   (Geofencing Tie-breaker + phoneticMatch wiring + parseAndStoreSemanticNotes wiring)
+const APP_VERSION = '6.0.002';
+const SCHEMA_VERSION = '6.0.002';
 const APP_NAME = 'LMDS V5.5';
 
 // [NEW v5.2.001] Global RAM Caches for batch runs

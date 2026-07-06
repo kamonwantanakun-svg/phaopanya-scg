@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.001
+ * VERSION: 6.0.002
  * FILE: 10_MatchEngine.gs
  * LMDS V5.5 — Core Match & Resolution Engine
  * ===================================================
@@ -970,6 +970,24 @@ function processOneRow(srcObj) {
 
   const geoResult = resolveGeo(srcObj.rawLat, srcObj.rawLng);
 
+  // [V6.0.002] Tie-breaker: if person needs review with multiple candidates, try tie-breaker
+  //   using driver history + street distance as secondary signals. Only fires when
+  //   best & second-best scores are within ±2 (handled inside breakTieAmongCandidates).
+  //   Non-breaking: if no tiebreaker fires (no destId/latLng context), personResult
+  //   is left unchanged and downstream makeMatchDecision proceeds as before.
+  if (personResult.status === 'NEEDS_REVIEW' && personResult.secondBestPerson) {
+    const candidates = [
+      { personId: personResult.personId, score: personResult.confidence },
+      { personId: personResult.secondBestPerson.personId, score: personResult.secondBestScore }
+    ];
+    const chosen = breakTieAmongCandidates(candidates, srcObj);
+    if (chosen && chosen.tiebreaker) {
+      personResult.personId = chosen.personId;
+      personResult.confidence = chosen.score;
+      personResult.status = chosen.score >= AI_CONFIG.THRESHOLD_AUTO ? 'FOUND' : 'NEEDS_REVIEW';
+    }
+  }
+
   const decision = makeMatchDecision(srcObj, personResult, placeResult, geoResult);
   const result = executeDecision(srcObj, decision, personResult, placeResult, geoResult);
 
@@ -1755,6 +1773,19 @@ function resolveAndPersistCreate_(srcObj) {
   let personId = personResult.personId;
   if (!personId) personId = createPerson(personResult.normResult);
 
+  // [V6.0.002] Store structured notes (CONTACT/TIME/COD/FRAGILE/INSTRUCTION/OTHER)
+  //   extracted from rawPersonName during normalizePersonNameFull → SYS_NOTES.
+  //   Defensive typeof check guards against Phase-1 partial deployment.
+  if (personId && personResult.normResult && personResult.normResult.structuredNotes) {
+    try {
+      if (typeof parseAndStoreSemanticNotes === 'function') {
+        parseAndStoreSemanticNotes(srcObj.rawPersonName, 'PERSON', personId, 'SCG_RAW');
+      }
+    } catch (e) {
+      logDebug('MatchEngine', 'parseAndStoreSemanticNotes (PERSON) skipped: ' + e.message);
+    }
+  }
+
   // Place
   const placeResult = resolvePlace(rawPlace, rawAddr);
   let placeId = placeResult.placeId;
@@ -1768,6 +1799,18 @@ function resolveAndPersistCreate_(srcObj) {
       safeGeoEnrich.subDistrict,
       safeGeoEnrich.postcode
     );
+  }
+
+  // [V6.0.002] Store structured notes extracted from rawPlaceName/rawAddress → SYS_NOTES.
+  //   Defensive typeof check guards against Phase-1 partial deployment.
+  if (placeId && placeResult.normResult && placeResult.normResult.structuredNotes) {
+    try {
+      if (typeof parseAndStoreSemanticNotes === 'function') {
+        parseAndStoreSemanticNotes(srcObj.rawPlaceName || srcObj.rawAddress, 'PLACE', placeId, 'SCG_RAW');
+      }
+    } catch (e) {
+      logDebug('MatchEngine', 'parseAndStoreSemanticNotes (PLACE) skipped: ' + e.message);
+    }
   }
 
   // Geo
@@ -1803,6 +1846,161 @@ function resolveAndPersistCreate_(srcObj) {
 
   if (factResult && factResult.isNew && factResult.rowData) {
     return { factRowData: factResult.rowData };
+  }
+  return null;
+}
+
+// ============================================================
+// SECTION 8: Tie-breaker — Geofencing Multi-Candidate [V6.0.002]
+//   Resolve ties between candidates with similar scores using
+//   driver history + street distance as secondary signals.
+//   Invoked from processOneRow when personResult.status === 'NEEDS_REVIEW'.
+// ============================================================
+
+/**
+ * breakTieAmongCandidates — [V6.0.002] Resolve tie between candidates with similar scores
+ *   When top candidates have score within ±2, use driver history + street distance as tie-breaker
+ * @param {Array} candidates - array of { personId, placeId, geoId, destId, score, resolvedLat, resolvedLng }
+ * @param {Object} srcObj - source row
+ * @return {Object} chosen candidate (mutated with tiebreaker info)
+ */
+function breakTieAmongCandidates(candidates, srcObj) {
+  if (!candidates || candidates.length <= 1) return candidates ? candidates[0] : null;
+
+  // Filter to top candidates within ±2 score
+  const topScore = candidates[0].score;
+  const tied = candidates.filter((c) => topScore - c.score <= 2);
+  if (tied.length === 1) return tied[0];
+
+  // Tie-breaker 1: Driver history (same driver visited this destination before)
+  if (srcObj.driverName) {
+    const driverHistory = getDriverHistory_(srcObj.driverName);
+    if (driverHistory.length > 0) {
+      for (const c of tied) {
+        if (c.destId && driverHistory.some((h) => h.destId === c.destId)) {
+          c.score += 5;
+          c.tiebreaker = 'driver_history';
+        }
+      }
+    }
+  }
+
+  // Tie-breaker 2: Street distance (if scores still tied)
+  const stillTied = tied.filter((c) => c.score === Math.max(...tied.map((t) => t.score)));
+  if (stillTied.length > 1 && srcObj.rawLat && srcObj.rawLng) {
+    for (const c of stillTied) {
+      if (c.resolvedLat && c.resolvedLng) {
+        const streetDist = getStreetDistance_(srcObj.rawLat, srcObj.rawLng, c.resolvedLat, c.resolvedLng);
+        if (streetDist !== null) {
+          c.streetDistM = streetDist;
+        }
+      }
+    }
+    const withDist = stillTied.filter((c) => c.streetDistM !== undefined);
+    if (withDist.length > 1) {
+      withDist.sort((a, b) => a.streetDistM - b.streetDistM);
+      withDist[0].score += 3;
+      withDist[0].tiebreaker = (withDist[0].tiebreaker || '') + '+street_dist';
+    }
+  }
+
+  // Sort and return top
+  tied.sort((a, b) => b.score - a.score);
+  return tied[0];
+}
+
+/**
+ * getDriverHistory_ — [V6.0.002] Query FACT_DELIVERY for driver's past destinations
+ * @param {string} driverName
+ * @return {Array} array of { destId, personId, deliveryDate }
+ * @private
+ */
+function getDriverHistory_(driverName) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
+    if (!sheet || sheet.getLastRow() < 2) return [];
+
+    const cols = Math.min(SCHEMA[SHEET.FACT_DELIVERY].length, sheet.getLastColumn());
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, cols).getValues();
+    const history = [];
+
+    for (let i = 0; i < data.length; i++) {
+      const rowDriver = String(data[i][FACT_IDX.DRIVER_NAME] || '').trim();
+      if (rowDriver !== driverName) continue;
+      const destId = String(data[i][FACT_IDX.DEST_ID] || '').trim();
+      const personId = String(data[i][FACT_IDX.PERSON_ID] || '').trim();
+      if (destId) {
+        history.push({ destId: destId, personId: personId, deliveryDate: data[i][FACT_IDX.DELIVERY_DATE] });
+      }
+    }
+    return history;
+  } catch (e) {
+    logError('MatchEngine', 'getDriverHistory_ failed: ' + e.message, e);
+    return [];
+  }
+}
+
+/**
+ * getStreetDistance_ — [V6.0.002] Get street distance via Google Maps API
+ *   Uses cache (6h TTL) to reduce API calls.
+ *   NOTE: GOOGLEMAPS_DISTANCE returns a string like "15.2 km" — we parse it
+ *   to meters; if parsing fails we fall back to Haversine (always available).
+ * @param {number} lat1
+ * @param {number} lng1
+ * @param {number} lat2
+ * @param {number} lng2
+ * @return {number|null} distance in meters, or null if unavailable
+ * @private
+ */
+function getStreetDistance_(lat1, lng1, lat2, lng2) {
+  const cacheKey = 'street_dist_' + lat1 + '_' + lng1 + '_' + lat2 + '_' + lng2;
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(cacheKey);
+  if (cached) return Number(cached);
+
+  try {
+    // Use existing GOOGLEMAPS_DISTANCE custom function from 15_GoogleMapsAPI.gs
+    if (typeof GOOGLEMAPS_DISTANCE === 'function') {
+      const dist = GOOGLEMAPS_DISTANCE(lat1 + ',' + lng1, lat2 + ',' + lng2, 'driving');
+      // [V6.0.002] GOOGLEMAPS_DISTANCE returns a string like "15.2 km" or "850 m".
+      //   Parse to meters so the cache + tie-breaker logic can use a numeric value.
+      const meters = parseDistanceStringToMeters_(dist);
+      if (meters !== null) {
+        cache.put(cacheKey, String(meters), 6 * 60 * 60); // 6h TTL
+        return meters;
+      }
+    }
+  } catch (e) {
+    logDebug('MatchEngine', 'getStreetDistance_ failed (fallback to Haversine): ' + e.message);
+  }
+
+  // Fallback: Haversine distance (less accurate but always available)
+  const havDist = haversineDistanceM(lat1, lng1, lat2, lng2);
+  return havDist;
+}
+
+/**
+ * parseDistanceStringToMeters_ — [V6.0.002] Parse GOOGLEMAPS_DISTANCE output to meters
+ *   Handles formats: "15.2 km", "850 m", "1,200 m", "0.5 km"
+ * @param {string} distStr - distance string from GOOGLEMAPS_DISTANCE
+ * @return {number|null} meters, or null if parsing fails
+ * @private
+ */
+function parseDistanceStringToMeters_(distStr) {
+  if (!distStr || typeof distStr !== 'string') return null;
+  const s = distStr.trim().toLowerCase();
+  // km match — e.g. "15.2 km"
+  const kmMatch = s.match(/^([\d.]+)\s*km$/);
+  if (kmMatch) {
+    const val = Number(kmMatch[1]);
+    if (!isNaN(val)) return Math.round(val * 1000);
+  }
+  // m match — e.g. "850 m" or "1,200 m"
+  const mMatch = s.match(/^([\d,.]+)\s*m$/);
+  if (mMatch) {
+    const val = Number(mMatch[1].replace(/,/g, ''));
+    if (!isNaN(val)) return Math.round(val);
   }
   return null;
 }

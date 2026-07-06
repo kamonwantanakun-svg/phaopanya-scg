@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.001
+ * VERSION: 6.0.002
  * FILE: 07_PlaceService.gs
  * LMDS V5.5 — Place Master Service
  * ===================================================
@@ -199,6 +199,23 @@ function findPlaceCandidates(cleanPlace, rawAddress) {
         existingIds.add(place.placeId);
       }
     });
+  }
+
+  // [V6.0.002] 5. Double Metaphone Phonetic Match — find places whose primary/secondary
+  //   phonetic key matches the query. Handles ล↔ร confusion and similar spelling
+  //   variations that the single-key buildThaiPhoneticKey (step 3 above) misses.
+  //   Uses existing allPlaces + existingIds (no extra sheet read).
+  if (typeof phoneticMatch === 'function' && cleanPlace) {
+    for (const p of allPlaces) {
+      if (existingIds.has(p.placeId)) continue; // skip already-found candidates
+      const phResult = phoneticMatch(cleanPlace, p.canonical || p.normalized);
+      if (phResult.match && phResult.score >= 80) {
+        p._phoneticScore = phResult.score;
+        p._matchedKey = phResult.matchedKey;
+        results.push(p);
+        existingIds.add(p.placeId);
+      }
+    }
   }
 
   return results;
@@ -617,7 +634,15 @@ function scorePlaceCandidate(queryPlace, candidate, srcProvince) {
   }
 
   // [FIX v003] ใช้ Config แทน hardcode 55
-  return finalScore < AI_CONFIG.PLACE_SCORE_MIN ? 0 : Math.round(finalScore);
+  let returnScore = finalScore < AI_CONFIG.PLACE_SCORE_MIN ? 0 : Math.round(finalScore);
+
+  // [V6.0.002] Phonetic match bonus — adds 0-2 points when Double Metaphone matched
+  //   (primary=100 → +2, cross=90 → +1, secondary=80 → +0).
+  if (candidate._phoneticScore) {
+    returnScore += Math.round((candidate._phoneticScore - 80) * 0.1);
+  }
+
+  return returnScore;
 }
 
 // ============================================================

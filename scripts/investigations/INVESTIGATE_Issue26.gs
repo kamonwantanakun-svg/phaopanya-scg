@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.001
+ * VERSION: 6.0.002
  * FILE: INVESTIGATE_Issue26.gs
  * LMDS V5.5 — Investigation Script for Issue #26
  * ===================================================
