@@ -525,7 +525,23 @@ function hardeningBuildOneAliasRow_(
     const globalKey = 'PERSON::' + masterUuid + '::' + rawNorm;
     if (!existingGlobalAliasSet.has(globalKey)) {
       existingGlobalAliasSet.add(globalKey);
-      gaRow = [generateShortId('A'), masterUuid, rawName, 'PERSON', aliasEnrichScore, 'HISTORY_ENRICH', now, true];
+      // [FIX V6.0.007] Push 11 columns to match SCHEMA.M_ALIAS (V6.0.003 added 3 cols)
+      //   Same fix as matchEnrichEntityAliases_ in 10_MatchEngine.gs
+      //   0-7: alias_id, master_uuid, variant_name, entity_type, confidence, source, created_at, active_flag
+      //   8-10: verified_by, review_id, verified_at (empty for HISTORY_ENRICH — not human-verified)
+      gaRow = [
+        generateShortId('A'), // [0] alias_id
+        masterUuid, // [1] master_uuid
+        rawName, // [2] variant_name
+        'PERSON', // [3] entity_type
+        aliasEnrichScore, // [4] confidence
+        'HISTORY_ENRICH', // [5] source
+        now, // [6] created_at
+        true, // [7] active_flag
+        '', // [8] verified_by (empty — HISTORY_ENRICH is not human-verified)
+        '', // [9] review_id (empty — not from Q_REVIEW)
+        '' // [10] verified_at (empty — not verified)
+      ];
     }
   }
 

@@ -663,15 +663,23 @@ function matchEnrichEntityAliases_(
     const canonKey = entityType + '::' + masterUuid + '::' + canonicalNorm;
     if (!context.existingGlobalAliasSet.has(canonKey)) {
       context.existingGlobalAliasSet.add(canonKey);
+      // [FIX V6.0.007] Push 11 columns to match SCHEMA.M_ALIAS (V6.0.003 added 3 cols)
+      //   0-7: alias_id, master_uuid, variant_name, entity_type, confidence, source, created_at, active_flag
+      //   8-10: verified_by, review_id, verified_at (empty for AUTO_ENRICH — not human-verified)
+      //   Previous bug: pushed only 8 cols → Sheets API threw
+      //   "จำนวนคอลัมน์ในข้อมูลไม่ตรงกับจำนวนคอลัมน์ในช่วง ข้อมูลมี 8 คอลัมน์ แต่ช่วงดังกล่าวมี 11 คอลัมน์"
       globalRows.push([
-        generateShortId('A'),
-        masterUuid,
-        canonical,
-        entityType,
-        100,
-        context.source || 'AUTO_ENRICH_FACT',
-        now,
-        true
+        generateShortId('A'), // [0] alias_id
+        masterUuid, // [1] master_uuid
+        canonical, // [2] variant_name
+        entityType, // [3] entity_type
+        100, // [4] confidence (canonical = 100)
+        context.source || 'AUTO_ENRICH_FACT', // [5] source
+        now, // [6] created_at
+        true, // [7] active_flag
+        '', // [8] verified_by (empty — AUTO_ENRICH is not human-verified)
+        '', // [9] review_id (empty — not from Q_REVIEW)
+        '' // [10] verified_at (empty — not verified)
       ]);
     }
   }
@@ -684,15 +692,20 @@ function matchEnrichEntityAliases_(
       const variantKey = entityType + '::' + masterUuid + '::' + rawNorm;
       if (!context.existingGlobalAliasSet.has(variantKey)) {
         context.existingGlobalAliasSet.add(variantKey);
+        // [FIX V6.0.007] Push 11 columns to match SCHEMA.M_ALIAS (V6.0.003 added 3 cols)
+        //   Same fix as canonical push above — must include verified_by/review_id/verified_at
         globalRows.push([
-          generateShortId('A'),
-          masterUuid,
-          rawVariant,
-          entityType,
-          variantConfidence,
-          context.source || 'AUTO_ENRICH_FACT',
-          now,
-          true
+          generateShortId('A'), // [0] alias_id
+          masterUuid, // [1] master_uuid
+          rawVariant, // [2] variant_name
+          entityType, // [3] entity_type
+          variantConfidence, // [4] confidence (95 for PERSON, 90 for PLACE)
+          context.source || 'AUTO_ENRICH_FACT', // [5] source
+          now, // [6] created_at
+          true, // [7] active_flag
+          '', // [8] verified_by (empty — AUTO_ENRICH is not human-verified)
+          '', // [9] review_id (empty — not from Q_REVIEW)
+          '' // [10] verified_at (empty — not verified)
         ]);
       }
 
@@ -932,12 +945,38 @@ function cleanupStaleCanonicalAliases_(newGlobalAliasRows, context) {
 
 /**
  * matchCommitGlobalAlias_ — [F-12] เขียน M_ALIAS + cache invalidation
+ *   [V6.0.007] Defensive width check — auto-pad short rows to SCHEMA.M_ALIAS.length
+ *   to prevent "จำนวนคอลัมน์ไม่ตรง" Sheets API error if a future schema change
+ *   misses a row push site.
  * @param {Sheet} mAliasSheet - Sheet object สำหรับ M_ALIAS
  * @param {Array} rows - Array of row arrays สำหรับ M_ALIAS
  */
 function matchCommitGlobalAlias_(mAliasSheet, rows) {
   if (rows.length > 0 && mAliasSheet) {
-    mAliasSheet.getRange(mAliasSheet.getLastRow() + 1, 1, rows.length, SCHEMA[SHEET.M_ALIAS].length).setValues(rows);
+    const expectedWidth = SCHEMA[SHEET.M_ALIAS].length; // 11 (V6.0.003)
+    // [V6.0.007] Defensive: pad short rows to expected width (fill with '')
+    //   This prevents total pipeline failure if a row push site was missed
+    //   during a schema migration. Logs a warning so the missed site can be fixed.
+    let widthMismatchFound = false;
+    const paddedRows = rows.map(function (row) {
+      if (row.length < expectedWidth) {
+        widthMismatchFound = true;
+        const padded = row.slice();
+        while (padded.length < expectedWidth) padded.push('');
+        return padded;
+      }
+      return row;
+    });
+    if (widthMismatchFound) {
+      logWarn(
+        'MatchEngine',
+        'matchCommitGlobalAlias_: detected row(s) with width < ' +
+          expectedWidth +
+          ' — auto-padded with empty strings. Check matchEnrichEntityAliases_ and generatePersonAliasesFromHistory_' +
+          ' to ensure all row pushes include the V6.0.003 columns (verified_by, review_id, verified_at).'
+      );
+    }
+    mAliasSheet.getRange(mAliasSheet.getLastRow() + 1, 1, paddedRows.length, expectedWidth).setValues(paddedRows);
     // [FIX BUG-C01 V5.5.022] Use invalidateChunkedCache_ instead of removeAll
     //   เดิมใช้ removeAll เฉพาะ base keys ทำให้ chunk keys (_CHUNKS, _0, _1, ...) ตกค้าง
     //   loadGlobalAliasesMap_/loadGlobalAliasReverseIndex_ อ่านจาก chunk keys เก่า → stale alias data
