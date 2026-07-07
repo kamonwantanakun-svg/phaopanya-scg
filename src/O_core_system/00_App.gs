@@ -136,6 +136,7 @@ function onOpen() {
         .addItem('👥 [V6] ตั้งค่า Roles (RBAC)', 'setupRoleAssignments_UI')
         .addSeparator()
         .addItem('🧹 [V6] ลบ Trigger ค้าง (Cleanup)', 'cleanupStaleTriggers_UI')
+        .addItem('🧹 [V6] Cleanup Auto-Resume Triggers', 'cleanupAutoResumeTriggers_UI')
         .addSeparator()
         .addItem('📜 [V6] Prune Audit Trail (90 วัน)', 'cleanupAuditTrail_UI')
         .addItem('📖 ดู Version Info', 'showVersionInfo')
@@ -753,6 +754,155 @@ function cleanupStaleTriggers_UI() {
     }
   } catch (e) {
     logError('App', 'cleanupStaleTriggers_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+/**
+ * cleanupAutoResumeTriggers_UI — [V6.0.007] Menu wrapper to cleanup orphan
+ *   time-based triggers that call runMatchEngine. These orphans accumulate
+ *   when installAutoResume_ fails mid-way (e.g., trigger created but property
+ *   not set, or property cleared but trigger not deleted).
+ *
+ *   Workflow:
+ *     1. Scan all project triggers
+ *     2. Filter to those with handler='runMatchEngine'
+ *     3. Read AUTO_RESUME_TRIGGER_ID property — that's the "current" one (keep)
+ *     4. Everything else is an orphan (delete candidate)
+ *     5. Show detailed report (current vs orphans) + ask for confirmation
+ *     6. On YES → delete orphans + clear stale property if no current trigger remains
+ *     7. On NO → exit without changes
+ *
+ *   Safety:
+ *     - Only deletes time-based triggers with handler='runMatchEngine'
+ *     - Preserves any user-created triggers for other functions
+ *     - Confirmation dialog before any deletion
+ *     - Wrapped in try/catch — non-fatal on any error
+ */
+function cleanupAutoResumeTriggers_UI() {
+  try {
+    const ui = SpreadsheetApp.getUi();
+    const triggers = ScriptApp.getProjectTriggers();
+    const props = PropertiesService.getScriptProperties();
+    const knownTriggerId = props.getProperty('AUTO_RESUME_TRIGGER_ID');
+
+    // Filter to runMatchEngine triggers only
+    const runMatchEngineTriggers = [];
+    for (let i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'runMatchEngine') {
+        runMatchEngineTriggers.push(triggers[i]);
+      }
+    }
+
+    if (runMatchEngineTriggers.length === 0) {
+      safeUiAlert_(
+        '✅ ไม่พบ runMatchEngine triggers',
+        'ไม่มี time-based trigger ใดที่เรียก runMatchEngine\n' + 'ระบบสะอาด — ไม่จำเป็นต้อง cleanup'
+      );
+      return;
+    }
+
+    // Classify each as "current" (matches known ID) or "orphan"
+    const current = [];
+    const orphans = [];
+    runMatchEngineTriggers.forEach(function (t) {
+      const tid = t.getUniqueId();
+      const info = {
+        id: tid,
+        type: t.getEventType(),
+        handler: t.getHandlerFunction(),
+        createdAt: t.getTriggerSourceId() || 'n/a'
+      };
+      if (knownTriggerId && tid === knownTriggerId) {
+        current.push(info);
+      } else {
+        orphans.push(info);
+      }
+    });
+
+    // Build report
+    const lines = [];
+    lines.push('📊 Auto-Resume Trigger Report\n');
+    lines.push('รวม runMatchEngine triggers: ' + runMatchEngineTriggers.length + ' ตัว');
+    lines.push('  • Current (active): ' + current.length);
+    lines.push('  • Orphan (stale): ' + orphans.length + '\n');
+
+    if (current.length > 0) {
+      lines.push('─── ✅ Current (จะ KEPT) ───');
+      current.forEach(function (c) {
+        lines.push('• ID: ' + c.id);
+      });
+    }
+
+    if (orphans.length > 0) {
+      lines.push('\n─── ❌ Orphan (จะ DELETED) ───');
+      orphans.forEach(function (o) {
+        lines.push('• ID: ' + o.id);
+      });
+    }
+
+    if (orphans.length === 0) {
+      safeUiAlert_(
+        '✅ ไม่มี orphan triggers',
+        lines.join('\n') + '\n\nทุก trigger เป็น current — ไม่จำเป็นต้อง cleanup'
+      );
+      return;
+    }
+
+    // Ask for confirmation
+    const confirm = ui.alert(
+      '🧹 Cleanup Auto-Resume Triggers',
+      lines.join('\n') + '\n\nยืนยันการลบ ' + orphans.length + ' orphan trigger(s)?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่มีการลบ trigger');
+      return;
+    }
+
+    // Delete orphans
+    let deletedCount = 0;
+    const deletedIds = [];
+    orphans.forEach(function (o) {
+      // Find the original trigger object by ID (need to re-fetch because we
+      // can't store the trigger object across the forEach above reliably)
+      for (let i = 0; i < triggers.length; i++) {
+        if (triggers[i].getUniqueId() === o.id) {
+          ScriptApp.deleteTrigger(triggers[i]);
+          deletedCount++;
+          deletedIds.push(o.id);
+          break;
+        }
+      }
+    });
+
+    // If no current trigger remains, clear the stale property
+    if (current.length === 0 && deletedCount === runMatchEngineTriggers.length) {
+      props.deleteProperty('AUTO_RESUME_TRIGGER_ID');
+      logInfo(
+        'App',
+        'cleanupAutoResumeTriggers_UI: cleared stale AUTO_RESUME_TRIGGER_ID property (no current trigger remains)'
+      );
+    }
+
+    logInfo('App', 'cleanupAutoResumeTriggers_UI: deleted ' + deletedCount + ' orphan runMatchEngine triggers');
+
+    safeUiAlert_(
+      '✅ ลบ orphan triggers เรียบร้อย',
+      'ลบทั้งหมด ' +
+        deletedCount +
+        ' ตัว:\n\n' +
+        deletedIds
+          .map(function (id) {
+            return '• ' + id;
+          })
+          .join('\n') +
+        '\n\nCurrent triggers ที่เหลือ: ' +
+        current.length +
+        ' ตัว'
+    );
+  } catch (e) {
+    logError('App', 'cleanupAutoResumeTriggers_UI failed: ' + e.message, e);
     safeUiAlert_('❌ ล้มเหลว: ' + e.message);
   }
 }
