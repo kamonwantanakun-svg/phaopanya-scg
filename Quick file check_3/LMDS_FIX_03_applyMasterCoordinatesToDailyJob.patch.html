@@ -1,0 +1,80 @@
+<!--
+  LMDS_FIX_03_ServiceSCG.gs.patch
+  ============================================================
+  File: src/2_group2_daily_ops/18_ServiceSCG.gs
+  Lines: 593-617
+  Issue: BUGHUNT-03 — Uses PropertiesService flag (eventually consistent)
+         instead of LockService. Two parallel executions can both
+         pass the check before either writes the flag.
+
+  Apply with Apps Script editor Find/Replace, OR with sed.
+============================================================
+-->
+
+// ============================================================
+// SECTION 6: Apply Master Coordinates
+// ============================================================
+
+// [FIX BUGHUNT-03] Replace PropertiesService flag with LockService
+// OLD:
+/*
+function applyMasterCoordinatesToDailyJob() {
+  // [FIX v5.5.021 H6] PropertiesService lock ป้องกัน Recursive runLookupEnrichment
+  const prop = PropertiesService.getScriptProperties();
+  if (prop.getProperty('LOCK_ENRICHMENT') === '1') {
+    logWarn('ServiceSCG', 'applyMasterCoordinatesToDailyJob is already running. Skipped.');
+    return;
+  }
+  prop.setProperty('LOCK_ENRICHMENT', '1');
+
+  try {
+    logInfo('ServiceSCG', 'applyMasterCoordinates → เรียก Module 17');
+    runLookupEnrichment();
+    copyDriverVerifiedToDailyJob_();
+    enrichEmployeeEmailsToDailyJob_();
+    logInfo('ServiceSCG', 'applyMasterCoordinates เสร็จสิ้น');
+  } catch (err) {
+    logError('ServiceSCG', 'applyMasterCoordinates ล้มเหลว: ' + err.message, err);
+    safeUiAlert_('เกิดข้อผิดพลาด: ' + err.message);
+  } finally {
+    prop.deleteProperty('LOCK_ENRICHMENT');
+  }
+}
+*/
+
+// NEW:
+function applyMasterCoordinatesToDailyJob() {
+  // [FIX BUGHUNT-03 from LMDS_PREDEPLOY_AUDIT 2026-07-08]
+  //   Replace eventually-consistent PropertiesService flag with proper
+  //   LockService — guarantees mutual exclusion across concurrent executions.
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(APP_CONST.LOCK_TIMEOUT_MS || 10000)) {
+    logWarn('ServiceSCG', 'applyMasterCoordinatesToDailyJob is already running. Skipped.');
+    safeUiAlert_('⚠️ Enrichment กำลังทำงานอยู่ กรุณารอสักครู่');
+    return;
+  }
+
+  try {
+    logInfo('ServiceSCG', 'applyMasterCoordinates → เรียก Module 17');
+    runLookupEnrichment();
+    // [ADD v5.5.014] คัดลอก "ชื่อจริง" + "ที่อยู่จริง" จาก Source sheet → DAILY_JOB
+    copyDriverVerifiedToDailyJob_();
+    // [ADD v5.5.022-PATCH1] Restore Email พนักงาน logic จาก Service_SCG.gs (V5.0)
+    enrichEmployeeEmailsToDailyJob_();
+    logInfo('ServiceSCG', 'applyMasterCoordinates เสร็จสิ้น');
+  } catch (err) {
+    logError('ServiceSCG', 'applyMasterCoordinates ล้มเหลว: ' + err.message, err);
+    // [FIX B4 v5.5.002] เปลี่ยน getUi().alert() → safeUiAlert_() — trigger-safe
+    safeUiAlert_('เกิดข้อผิดพลาด: ' + err.message);
+  } finally {
+    if (lock.hasLock()) lock.releaseLock();
+    // [PERF-012] Flush log buffer
+    if (typeof flushLogBuffer_ === 'function') flushLogBuffer_();
+  }
+}
+
+// [MIGRATION NOTE]
+//   Old code stored LOCK_ENRICHMENT in PropertiesService. After this patch
+//   is deployed, manually delete the stale property:
+//     PropertiesService.getScriptProperties().deleteProperty('LOCK_ENRICHMENT');
+//   (one-time cleanup — safe to delete even if not set)
