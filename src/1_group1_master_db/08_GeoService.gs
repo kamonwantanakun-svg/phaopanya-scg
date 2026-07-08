@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.010
+ * VERSION: 6.0.011
  * FILE: 08_GeoService.gs
  * LMDS V5.5 — Geo Point Master Service
  * ===================================================

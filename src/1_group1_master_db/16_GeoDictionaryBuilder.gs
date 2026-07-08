@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.010
+ * VERSION: 6.0.011
  * FILE: 16_GeoDictionaryBuilder.gs
  * LMDS V5.5 — Geo Dictionary Builder (SYS_TH_GEO)
  * ===================================================
