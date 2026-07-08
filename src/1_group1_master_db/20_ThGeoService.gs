@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.007
+ * VERSION: 6.0.008
  * FILE: 20_ThGeoService.gs
  * LMDS V5.5 — Thai Geo Service
  * ===================================================
@@ -176,9 +176,21 @@ function populateGeoMetadata() {
     safeUiAlert_('🔒 คุณไม่มีสิทธิ์รัน Populate Geo Metadata\nกรุณาติดต่อ Admin');
     return;
   }
+
+  // [V6.0.008 P1.4 — BUGHUNT #1 fix from LMDS_PREDEPLOY_AUDIT 2026-07-08]
+  //   LockService guard — ป้องกัน double-click ทำให้ checkpoint ปนกัน
+  //   withEntryPointGuard_ ไม่ acquire lock ให้อัตโนมัติ — ต้องส่ง {lock: lock} เข้าไป
+  //   Pattern เดียวกับ fetchDataFromSCGJWD + buildGeoDictionary
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    safeUiAlert_('⚠️ populateGeoMetadata กำลังรันอยู่อีก instance หนึ่ง กรุณารอให้เสร็จก่อน');
+    return;
+  }
+
   // [REF-011 V5.5.020 PILOT] Apply withEntryPointGuard_ for standardized error handling
   //   - Preserve Behavior 100%: errorPrefix='เกิดข้อผิดพลาด: ' (same as original alert message)
   //   - finally block (flushLogBuffer_) handled by guard automatically
+  //   - [V6.0.008 P1.4] Pass {lock: lock} ให้ guard release ใน finally block
   withEntryPointGuard_(
     'ThGeoService',
     'populateGeoMetadata',
@@ -268,7 +280,7 @@ function populateGeoMetadata() {
       logInfo('GeoMigration', 'เติมข้อมูล Metadata เสร็จสิ้น!');
       safeUiAlert_('✅ เติมข้อมูล Geo Metadata สำเร็จ!\nกรุณากด "สร้าง Geo Dictionary" อีกครั้งเพื่อใช้งาน');
     },
-    { errorPrefix: 'เกิดข้อผิดพลาด: ' }
+    { errorPrefix: 'เกิดข้อผิดพลาด: ', lock: lock }
   );
 }
 
