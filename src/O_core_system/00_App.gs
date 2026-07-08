@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.008
+ * VERSION: 6.0.011
  * FILE: 00_App.gs
  * LMDS V5.5 — Application Entry Point & Menu Controller
  * ===================================================
@@ -151,6 +151,17 @@ function onOpen() {
     .addToUi();
 }
 
+/**
+ * onInstall — [V6.0.010 P3.10] Triggered when the add-on is installed in Google Sheets
+ *   Google Apps Script calls onInstall(e) automatically when a user installs the add-on.
+ *   Without this function, the menu doesn't appear until the user manually reopens the sheet.
+ *   Simple delegation to onOpen(e) — same menu setup + config validation.
+ * @param {Object} e — install event object
+ */
+function onInstall(e) {
+  onOpen(e);
+}
+
 // ============================================================
 // SECTION 2: onEdit Trigger
 // ============================================================
@@ -178,24 +189,37 @@ function onEdit(e) {
       if (!reviewId) return;
 
       try {
-        // [FIX v003] ประมวลผลทันทีที่เลือก
-        applyReviewDecision(reviewId, decision);
-
-        // [PERF-006] ส่ง row เข้า highlightHighPriorityReviews → single-row update
-        //   เดิม: เรียกแบบไม่ส่ง row → full-sheet refresh (44,000 cell ops/click)
-        //   ใหม่: ส่ง row → single-row update (22 cell ops/click, ลด ~95%)
-        //   ถ้าเป็น bulk paste (multi-row) → fallback ไป full refresh อัตโนมัติ
-        if (e.range.getNumRows() > 1) {
-          highlightHighPriorityReviews(); // multi-row edit → full refresh
-        } else {
-          highlightHighPriorityReviews(row); // single-row edit → targeted update
+        // [V6.0.010 P3.15] LockService guard — ป้องกัน double-edit ใน Q_REVIEW
+        //   (user paste multiple decisions หรือ double-click dropdown)
+        const editLock = LockService.getScriptLock();
+        if (!editLock.tryLock(5000)) {
+          logWarn('App_onEdit', 'onEdit: lock busy — another edit is being processed');
+          return;
         }
 
-        sheet.getParent().toast(`✅ ประมวลผล ${reviewId} สำเร็จ`, APP_NAME, 3);
+        try {
+          // [FIX v003] ประมวลผลทันทีที่เลือก
+          applyReviewDecision(reviewId, decision);
+
+          // [PERF-006] ส่ง row เข้า highlightHighPriorityReviews → single-row update
+          //   เดิม: เรียกแบบไม่ส่ง row → full-sheet refresh (44,000 cell ops/click)
+          //   ใหม่: ส่ง row → single-row update (22 cell ops/click, ลด ~95%)
+          //   ถ้าเป็น bulk paste (multi-row) → fallback ไป full refresh อัตโนมัติ
+          if (e.range.getNumRows() > 1) {
+            highlightHighPriorityReviews(); // multi-row edit → full refresh
+          } else {
+            highlightHighPriorityReviews(row); // single-row edit → targeted update
+          }
+
+          sheet.getParent().toast('✅ ประมวลผล ' + reviewId + ' สำเร็จ', APP_NAME, 3);
+        } finally {
+          // [V6.0.010 P3.15] Release lock after processing
+          releaseScriptLock_(editLock);
+        }
       } catch (err) {
-        logError('App_onEdit', `reviewId ${reviewId} ล้มเหลว: ${err.message}`, err);
+        logError('App_onEdit', 'reviewId ' + reviewId + ' ล้มเหลว: ' + err.message, err);
         // [FIX BUG-04 v5.5.001] เปลี่ยน getUi().alert() เป็น safeUiAlert_() — trigger-safe (onEdit)
-        safeUiAlert_(`❌ ประมวลผลล้มเหลว: ${err.message}`);
+        safeUiAlert_('❌ ประมวลผลล้มเหลว: ' + err.message);
       }
     }
   }
@@ -221,6 +245,9 @@ function safeRun(funcName, fn) {
 
 function runFullPipeline() {
   // [FIX CodeQL js/unused-local-variable V5.5.035] ui ไม่ถูกใช้ — ใช้ safeUiAlert_() แทน
+
+  // [V6.0.010 P3.16] RBAC: require admin to run pipeline
+  if (typeof requirePermission_ === 'function') requirePermission_('action:run_pipeline');
 
   // [ADD v003] LockService กัน double-click
   const lock = LockService.getScriptLock();
@@ -497,7 +524,14 @@ function populateAliasFromSCGRawData() {
     safeUiAlert_('🔒 คุณไม่มีสิทธิ์รัน Alias Enrichment\nกรุณาติดต่อ Admin');
     return 0;
   }
-  return populateAliasFromSCGRawData_();
+  // [V6.0.010 P3.3] LockService guard — prevent concurrent alias population
+  const lock = acquireScriptLockOrWarn_(5000, '⚠️ populateAliasFromSCGRawData กำลังรันอยู่ กรุณารอให้เสร็จก่อน');
+  if (!lock) return 0;
+  try {
+    return populateAliasFromSCGRawData_();
+  } finally {
+    releaseScriptLock_(lock);
+  }
 }
 
 function showVersionInfo() {
@@ -732,6 +766,9 @@ function diagnoseRecentErrors_(ss, lines, fixes) {
  *   ยังค้างอยู่ทำให้เกิด error "Script function not found"
  */
 function cleanupStaleTriggers_UI() {
+  // [V6.0.010 P3.9] LockService guard — prevent concurrent trigger cleanup
+  const lock = acquireScriptLockOrWarn_(5000, '⚠️ cleanupStaleTriggers_UI กำลังรันอยู่ กรุณารอให้เสร็จก่อน');
+  if (!lock) return;
   try {
     const triggers = ScriptApp.getProjectTriggers();
     const staleHandlers = [
@@ -761,6 +798,8 @@ function cleanupStaleTriggers_UI() {
   } catch (e) {
     logError('App', 'cleanupStaleTriggers_UI failed: ' + e.message, e);
     safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  } finally {
+    releaseScriptLock_(lock);
   }
 }
 

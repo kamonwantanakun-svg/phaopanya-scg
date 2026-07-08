@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.008
+ * VERSION: 6.0.011
  * FILE: 14_Utils.gs
  * LMDS V5.5 — Utility Functions
  * ===================================================
@@ -138,6 +138,9 @@ function resetSourceSyncStatus() {
     safeUiAlert_('🔒 คุณไม่มีสิทธิ์รีเซ็ตสถานะ SYNC\nกรุณาติดต่อ Admin');
     return;
   }
+  // [V6.0.010 P3.6] LockService guard — YES_NO confirmation already exists below; no extra confirm
+  const lock = acquireScriptLockOrWarn_(5000, '⚠️ resetSourceSyncStatus กำลังรันอยู่ กรุณารอให้เสร็จก่อน');
+  if (!lock) return;
   // [FIX BUG-04 v5.4.003] หุ้ม try-catch ครอบทั้งฟังก์ชัน — ก่อนหน้านี้ ui.alert() นอก try-catch ทำให้ throw ได้
   try {
     const ui = SpreadsheetApp.getUi();
@@ -179,6 +182,8 @@ function resetSourceSyncStatus() {
   } catch (err) {
     logError('Utils', 'resetSourceSyncStatus ล้มเหลว: ' + err.message, err);
     safeUiAlert_('❌ เกิดข้อผิดพลาด: ' + err.message);
+  } finally {
+    releaseScriptLock_(lock);
   }
 }
 
@@ -657,6 +662,25 @@ function clearSheetsPreserveHeaders_(ss, sheetNames) {
   });
 
   return { clearedCount: clearedCount, clearedNames: clearedNames, errors: errors };
+}
+
+/**
+ * columnNumberToLetter_ — [V6.0.009] Convert 1-based column number to A1 letter (1=A, 27=AA, etc.)
+ *   Used by getFactDeliveryPage/getSourcePage to build getRangeList A1 notations for pagination.
+ * @param {number} col - 1-based column number
+ * @return {string} column letter(s)
+ * @private
+ */
+function columnNumberToLetter_(col) {
+  let letter = '';
+  let c = col;
+  let temp;
+  while (c > 0) {
+    temp = (c - 1) % 26;
+    letter = String.fromCharCode(temp + 65) + letter;
+    c = (c - temp - 1) / 26;
+  }
+  return letter;
 }
 
 // ============================================================

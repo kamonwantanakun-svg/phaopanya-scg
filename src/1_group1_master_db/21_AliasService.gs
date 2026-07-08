@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.008
+ * VERSION: 6.0.011
  * FILE: 21_AliasService.gs
  * LMDS V5.5 — Hybrid Alias Architecture (Global M_ALIAS + Entity-Specific Views)
  * ===================================================
@@ -723,76 +723,84 @@ function assignMasterUuidIfMissing() {
     return 0;
   }
 
-  // [SEC-003 FIX] Confirmation dialog — ป้องกันการรันโดยไม่ตั้งใจ
+  // [V6.0.010 P3.5] LockService guard — prevent concurrent UUID assignment
+  const lock = acquireScriptLockOrWarn_(5000, '⚠️ assignMasterUuidIfMissing กำลังรันอยู่ กรุณารอให้เสร็จก่อน');
+  if (!lock) return 0;
+
   try {
-    const ui = SpreadsheetApp.getUi();
-    const confirm = ui.alert(
-      '⚠️ ยืนยันการ Assign Master UUID',
-      'ฟังก์ชันนี้จะสร้าง master_uuid ใหม่ให้แถวที่ยังไม่มี UUID ใน:\n' +
-        '  • M_PERSON\n' +
-        '  • M_PLACE\n\n' +
-        'หาก M_ALIAS มีข้อมูลอ้างอิง UUID เดิมอยู่ จะใช้งานไม่ได้หลังจากนี้\n\n' +
-        'แนะนำให้รัน Hybrid Alias Migration ครบถ้วนก่อน\n\n' +
-        'ดำเนินการต่อ?',
-      ui.ButtonSet.YES_NO
-    );
-    if (confirm !== ui.Button.YES) {
-      logInfo('AliasService', 'assignMasterUuidIfMissing: ผู้ใช้ยกเลิก');
-      return 0;
-    }
-  } catch (e) {
-    // Trigger context ไม่มี UI — ข้าม confirmation แต่ยังอยู่ใน guard
-    logWarn('AliasService', 'assignMasterUuidIfMissing: ข้าม confirmation (no UI context)');
-  }
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let fixedTotal = 0;
-
-  [SHEET.M_PERSON, SHEET.M_PLACE].forEach(function (sheetName) {
+    // [SEC-003 FIX] Confirmation dialog — ป้องกันการรันโดยไม่ตั้งใจ
     try {
-      // [FIX CRIT-015] Per-sheet isolation — error ใน sheet หนึ่งไม่ทำให้ sheet อื่นเสีย
-      const sheet = ss.getSheetByName(sheetName);
-      if (!sheet) return;
-
-      // [FIX S3 v5.5.002] ใช้ *_IDX constant แทน headers.indexOf() — Rule 2
-      const mUuidColIdx = sheetName === SHEET.M_PERSON ? PERSON_IDX.MASTER_UUID : PLACE_IDX.MASTER_UUID;
-
-      // Guard: ตรวจว่าคอลัมน์มีอยู่จริงในชีต
-      if (mUuidColIdx >= sheet.getLastColumn()) {
-        logWarn('AliasService', sheetName + ': คอลัมน์ master_uuid เกินขอบเขตชีต — ข้าม');
-        return;
+      const ui = SpreadsheetApp.getUi();
+      const confirm = ui.alert(
+        '⚠️ ยืนยันการ Assign Master UUID',
+        'ฟังก์ชันนี้จะสร้าง master_uuid ใหม่ให้แถวที่ยังไม่มี UUID ใน:\n' +
+          '  • M_PERSON\n' +
+          '  • M_PLACE\n\n' +
+          'หาก M_ALIAS มีข้อมูลอ้างอิง UUID เดิมอยู่ จะใช้งานไม่ได้หลังจากนี้\n\n' +
+          'แนะนำให้รัน Hybrid Alias Migration ครบถ้วนก่อน\n\n' +
+          'ดำเนินการต่อ?',
+        ui.ButtonSet.YES_NO
+      );
+      if (confirm !== ui.Button.YES) {
+        logInfo('AliasService', 'assignMasterUuidIfMissing: ผู้ใช้ยกเลิก');
+        return 0;
       }
-
-      const lr = sheet.getLastRow();
-      if (lr < 2) return;
-
-      const uuidColRange = sheet.getRange(2, mUuidColIdx + 1, lr - 1, 1);
-      const uidData = uuidColRange.getValues();
-      let fixedCount = 0;
-
-      for (let i = 0; i < uidData.length; i++) {
-        if (!uidData[i][0]) {
-          uidData[i][0] = Utilities.getUuid();
-          fixedCount++;
-        }
-      }
-
-      if (fixedCount > 0) {
-        uuidColRange.setValues(uidData);
-        logInfo('AliasService', sheetName + ': มอบ master_uuid ให้ ' + fixedCount + ' แถวที่ยังไม่มี');
-      }
-      fixedTotal += fixedCount;
-    } catch (sheetErr) {
-      logError('AliasService', sheetName + ': ' + sheetErr.message, sheetErr);
+    } catch (e) {
+      // Trigger context ไม่มี UI — ข้าม confirmation แต่ยังอยู่ใน guard
+      logWarn('AliasService', 'assignMasterUuidIfMissing: ข้าม confirmation (no UI context)');
     }
-  });
 
-  // ล้าง Cache เพื่อให้ loader เห็นข้อมูลใหม่
-  if (fixedTotal > 0) {
-    invalidateAllGlobalCaches();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let fixedTotal = 0;
+
+    [SHEET.M_PERSON, SHEET.M_PLACE].forEach(function (sheetName) {
+      try {
+        // [FIX CRIT-015] Per-sheet isolation — error ใน sheet หนึ่งไม่ทำให้ sheet อื่นเสีย
+        const sheet = ss.getSheetByName(sheetName);
+        if (!sheet) return;
+
+        // [FIX S3 v5.5.002] ใช้ *_IDX constant แทน headers.indexOf() — Rule 2
+        const mUuidColIdx = sheetName === SHEET.M_PERSON ? PERSON_IDX.MASTER_UUID : PLACE_IDX.MASTER_UUID;
+
+        // Guard: ตรวจว่าคอลัมน์มีอยู่จริงในชีต
+        if (mUuidColIdx >= sheet.getLastColumn()) {
+          logWarn('AliasService', sheetName + ': คอลัมน์ master_uuid เกินขอบเขตชีต — ข้าม');
+          return;
+        }
+
+        const lr = sheet.getLastRow();
+        if (lr < 2) return;
+
+        const uuidColRange = sheet.getRange(2, mUuidColIdx + 1, lr - 1, 1);
+        const uidData = uuidColRange.getValues();
+        let fixedCount = 0;
+
+        for (let i = 0; i < uidData.length; i++) {
+          if (!uidData[i][0]) {
+            uidData[i][0] = Utilities.getUuid();
+            fixedCount++;
+          }
+        }
+
+        if (fixedCount > 0) {
+          uuidColRange.setValues(uidData);
+          logInfo('AliasService', sheetName + ': มอบ master_uuid ให้ ' + fixedCount + ' แถวที่ยังไม่มี');
+        }
+        fixedTotal += fixedCount;
+      } catch (sheetErr) {
+        logError('AliasService', sheetName + ': ' + sheetErr.message, sheetErr);
+      }
+    });
+
+    // ล้าง Cache เพื่อให้ loader เห็นข้อมูลใหม่
+    if (fixedTotal > 0) {
+      invalidateAllGlobalCaches();
+    }
+
+    return fixedTotal;
+  } finally {
+    releaseScriptLock_(lock);
   }
-
-  return fixedTotal;
 }
 
 // ============================================================
@@ -818,6 +826,10 @@ function MIGRATION_HybridAliasSystem() {
 
   // [SEC-002] Authorization Guard + Confirmation
   if (!confirmMigrationDialog_()) return;
+
+  // [V6.0.010 P3.4] LockService guard — heavy migration op, 30s timeout
+  const lock = acquireScriptLockOrWarn_(30000, '⚠️ MIGRATION_HybridAliasSystem กำลังรันอยู่ กรุณารอให้เสร็จก่อน');
+  if (!lock) return;
 
   // [FIX BUG-A2] try-catch ครอบ execution ทั้งหมด
   try {
@@ -904,6 +916,7 @@ function MIGRATION_HybridAliasSystem() {
   } finally {
     // [FIX v5.5.008 P2 #11] flush log buffer ก่อน exit — ป้องกัน log entries <50 หาย
     if (typeof flushLogBuffer_ === 'function') flushLogBuffer_();
+    releaseScriptLock_(lock);
   }
 }
 

@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.008
+ * VERSION: 6.0.011
  * FILE: 01_Config.gs
  * LMDS V5.5 — System Configuration & Constants
  * ===================================================
@@ -70,8 +70,8 @@
 // [V6.0.003] Bump from 6.0.002 → 6.0.003 — V6.0 Phase 3 System Learning
 //   (Self-Healing Alias verified_by/review_id/verified_at + SYS_NEGATIVE_SAMPLES
 //    negative learning feedback loop)
-const APP_VERSION = '6.0.008';
-const SCHEMA_VERSION = '6.0.008';
+const APP_VERSION = '6.0.011';
+const SCHEMA_VERSION = '6.0.011';
 const APP_NAME = 'LMDS V6.0';
 
 // [NEW v5.2.001] Global RAM Caches for batch runs
@@ -95,26 +95,58 @@ let _GLOBAL_GEO_POINTS_CACHE = null;
  *   _ALIAS_ENRICHMENT_CONTEXT เป็น per-MatchEngine-run — ไม่ต้องล้างที่นี่
  */
 function invalidateAllGlobalCaches() {
-  // [FIX v5.5.007] ล้าง RAM caches ที่ประกาศใน 01_Config.gs
-  _GLOBAL_GEO_DICT_CACHE = null;
-  _GLOBAL_GEO_DICT_CACHE_PLACE = null; // [FIX-02 v5.4.003]
-  _GLOBAL_GEO_POINTS_CACHE = null;
+  // [V6.0.010 P3.8] LockService guard + YES_NO confirmation (destructive op)
+  //   Pattern: acquire lock → show YES_NO confirm (trigger-safe) → if NO, release lock + return
+  const lock = acquireScriptLockOrWarn_(5000, '⚠️ invalidateAllGlobalCaches กำลังรันอยู่ กรุณารอให้เสร็จก่อน');
+  if (!lock) return;
 
-  // [FIX v5.5.007] เรียก invalidate*Cache_* ของทุกโมดูล เพื่อล้างทั้ง RAM และ CacheService
-  // แต่ละฟังก์ชันจะล้าง RAM cache ของตัวเอง + invalidate chunked CacheService entries
-  if (typeof invalidateGeoDictCache === 'function') invalidateGeoDictCache(); // ล้าง _GLOBAL_GEO_DICT_CACHE, _GLOBAL_GEO_DICT_PROVINCE_INDEX, _GLOBAL_GEO_DICT_SEARCH_KEY_INDEX + TH_GEO_* CacheService
-  if (typeof invalidatePersonCache_ === 'function') invalidatePersonCache_(); // ล้าง _PERSON_NOTE_INVERTED_INDEX + M_PERSON_ALL CacheService
-  if (typeof invalidateAliasCache_ === 'function') invalidateAliasCache_(); // ล้าง M_PERSON_ALIAS_ALL CacheService
-  if (typeof invalidatePlaceCache_ === 'function') invalidatePlaceCache_(); // ล้าง _GLOBAL_GEO_DICT_CACHE_PLACE + M_PLACE_ALL CacheService
-  if (typeof invalidatePlaceAliasCache_ === 'function') invalidatePlaceAliasCache_(); // ล้าง M_PLACE_ALIAS_ALL CacheService
-  if (typeof invalidateGeoCache_ === 'function') invalidateGeoCache_(); // ล้าง _GLOBAL_GEO_POINTS_CACHE + M_GEO_ALL CacheService
-  if (typeof invalidateDestCache_ === 'function') invalidateDestCache_(); // ล้าง M_DEST_ALL CacheService
-  if (typeof invalidateSourceCache === 'function') invalidateSourceCache(); // ล้าง _SOURCE_ROWS_RAM_CACHE + SOURCE_ROWS_V3, PROCESSED_INVOICES_V3 CacheService
-  if (typeof invalidateFactInvoiceCache_ === 'function') invalidateFactInvoiceCache_(); // ล้าง _FACT_INVOICE_RAM_CACHE
-  if (typeof invalidateGeoLatLngCache_ === 'function') invalidateGeoLatLngCache_(); // [P1 #5] ล้าง _GEO_LATLNG_RAM_CACHE
-  // [REMOVED V5.5.044] invalidateSameDayDestCache_ — ลบ dead code (ดู comment ใน 10_MatchEngine SECTION 5)
+  try {
+    // YES_NO confirmation — wrapped so non-UI contexts (triggers, internal callers)
+    //   bypass the prompt and proceed (preserves existing internal-caller behavior).
+    try {
+      const ui = SpreadsheetApp.getUi();
+      const confirm = ui.alert(
+        '🧹 ยืนยันการล้าง Cache ทั้งหมด?',
+        'ระบบจะล้างข้อมูลในความจำ (RAM cache + CacheService) ทั้งหมด\n' +
+          'การล้าง Cache ไม่กระทบข้อมูลใน Sheet — เป็นเพียงการบังคับโหลดใหม่\n\n' +
+          'ยืนยันการดำเนินการ?',
+        ui.ButtonSet.YES_NO
+      );
+      if (confirm !== ui.Button.YES) {
+        logInfo('System', 'invalidateAllGlobalCaches: ผู้ใช้ยกเลิก (NO)');
+        return;
+      }
+    } catch (e) {
+      // Trigger / non-UI context — ข้าม confirmation แล้วทำงานต่อ (preserves internal callers)
+      logInfo('System', 'invalidateAllGlobalCaches: ข้าม YES_NO (no UI context)');
+    }
 
-  logInfo('System', 'ล้างข้อมูลในความจำ (Cache) ทั้งหมดเรียบร้อยแล้ว — ครอบคลุม 10 RAM caches + 13 CacheService keys');
+    // [FIX v5.5.007] ล้าง RAM caches ที่ประกาศใน 01_Config.gs
+    _GLOBAL_GEO_DICT_CACHE = null;
+    _GLOBAL_GEO_DICT_CACHE_PLACE = null; // [FIX-02 v5.4.003]
+    _GLOBAL_GEO_POINTS_CACHE = null;
+
+    // [FIX v5.5.007] เรียก invalidate*Cache_* ของทุกโมดูล เพื่อล้างทั้ง RAM และ CacheService
+    // แต่ละฟังก์ชันจะล้าง RAM cache ของตัวเอง + invalidate chunked CacheService entries
+    if (typeof invalidateGeoDictCache === 'function') invalidateGeoDictCache(); // ล้าง _GLOBAL_GEO_DICT_CACHE, _GLOBAL_GEO_DICT_PROVINCE_INDEX, _GLOBAL_GEO_DICT_SEARCH_KEY_INDEX + TH_GEO_* CacheService
+    if (typeof invalidatePersonCache_ === 'function') invalidatePersonCache_(); // ล้าง _PERSON_NOTE_INVERTED_INDEX + M_PERSON_ALL CacheService
+    if (typeof invalidateAliasCache_ === 'function') invalidateAliasCache_(); // ล้าง M_PERSON_ALIAS_ALL CacheService
+    if (typeof invalidatePlaceCache_ === 'function') invalidatePlaceCache_(); // ล้าง _GLOBAL_GEO_DICT_CACHE_PLACE + M_PLACE_ALL CacheService
+    if (typeof invalidatePlaceAliasCache_ === 'function') invalidatePlaceAliasCache_(); // ล้าง M_PLACE_ALIAS_ALL CacheService
+    if (typeof invalidateGeoCache_ === 'function') invalidateGeoCache_(); // ล้าง _GLOBAL_GEO_POINTS_CACHE + M_GEO_ALL CacheService
+    if (typeof invalidateDestCache_ === 'function') invalidateDestCache_(); // ล้าง M_DEST_ALL CacheService
+    if (typeof invalidateSourceCache === 'function') invalidateSourceCache(); // ล้าง _SOURCE_ROWS_RAM_CACHE + SOURCE_ROWS_V3, PROCESSED_INVOICES_V3 CacheService
+    if (typeof invalidateFactInvoiceCache_ === 'function') invalidateFactInvoiceCache_(); // ล้าง _FACT_INVOICE_RAM_CACHE
+    if (typeof invalidateGeoLatLngCache_ === 'function') invalidateGeoLatLngCache_(); // [P1 #5] ล้าง _GEO_LATLNG_RAM_CACHE
+    // [REMOVED V5.5.044] invalidateSameDayDestCache_ — ลบ dead code (ดู comment ใน 10_MatchEngine SECTION 5)
+
+    logInfo(
+      'System',
+      'ล้างข้อมูลในความจำ (Cache) ทั้งหมดเรียบร้อยแล้ว — ครอบคลุม 10 RAM caches + 13 CacheService keys'
+    );
+  } finally {
+    releaseScriptLock_(lock);
+  }
 }
 
 // ============================================================

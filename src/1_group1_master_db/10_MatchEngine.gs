@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.008
+ * VERSION: 6.0.011
  * FILE: 10_MatchEngine.gs
  * LMDS V5.5 — Core Match & Resolution Engine
  * ===================================================
@@ -1244,12 +1244,53 @@ function makeMatchDecision(srcObj, personResult, placeResult, geoResult) {
 
   // Rule 6: มีความกำกวม (Fuzzy Match / Needs Review)
   if (personResult.status === 'NEEDS_REVIEW' || placeResult.status === 'NEEDS_REVIEW') {
-    const confidence = Math.max(personResult.confidence, placeResult.confidence);
+    let confidence = Math.max(personResult.confidence, placeResult.confidence);
+    let reason = APP_CONST.MATCH_FUZZY;
+    let evidence = 'fuzzy';
+
+    // [V6.0.011] Geo-distance guard — ถ้า source มีพิกัด + candidate มีพิกัด
+    //   ให้ตรวจระยะห่าง ถ้าห่างเกินไป → ลด confidence (ชื่อคล้ายแต่พิกัดห่าง = คนละที่)
+    //   ปัญหาเดิม: FUZZY_MATCH ไม่ได้ดูพิกัดเลย → แนะนำ MERGE แม้พิกัดห่าง 3 กม.
+    if (srcObj.hasGeo && srcObj.rawLat && srcObj.rawLng) {
+      const srcLat = Number(srcObj.rawLat);
+      const srcLng = Number(srcObj.rawLng);
+      if (!isNaN(srcLat) && !isNaN(srcLng) && srcLat !== 0 && srcLng !== 0) {
+        // หา candidate coordinates — ลองทั้ง place และ person
+        let candidateCoords = null;
+        let candidateType = '';
+
+        if (placeResult.placeId) {
+          candidateCoords = getCandidateResolvedCoords_('PLACE', placeResult.placeId);
+          if (candidateCoords) candidateType = 'place';
+        }
+
+        if (!candidateCoords && personResult.personId) {
+          candidateCoords = getCandidateResolvedCoords_('PERSON', personResult.personId);
+          if (candidateCoords) candidateType = 'person';
+        }
+
+        if (candidateCoords && candidateCoords.lat && candidateCoords.lng) {
+          const distM = haversineDistanceM(srcLat, srcLng, candidateCoords.lat, candidateCoords.lng);
+          if (distM > 1000) {
+            // ห่างเกิน 1 กม. → ลด confidence ลงมาก (ชื่อคล้ายแต่พิกัดห่าง = คนละที่)
+            confidence = Math.min(confidence, 50);
+            reason = 'FUZZY_MATCH_FAR_APART';
+            evidence = 'fuzzy|far_apart|dist=' + Math.round(distM) + 'm|' + candidateType;
+          } else if (distM > 500) {
+            // ห่าง 500-1000 ม. → ลด confidence เล็กน้อย
+            confidence = Math.min(confidence, 65);
+            evidence = 'fuzzy|moderate_dist|dist=' + Math.round(distM) + 'm|' + candidateType;
+          }
+        }
+      }
+    }
+
     return {
       action: 'REVIEW',
-      reason: APP_CONST.MATCH_FUZZY,
-      confidence,
-      priority: 2
+      reason: reason,
+      confidence: confidence,
+      priority: 2,
+      evidence: evidence
     };
   }
 
@@ -1562,6 +1603,53 @@ function getGeoProvince_(geoId) {
   const allGeos = loadAllGeos_();
   const geo = allGeos.find((g) => g.geoId === geoId);
   return geo ? geo.province || '' : '';
+}
+
+/**
+ * getCandidateResolvedCoords_ — [V6.0.011] Get resolved lat/lng for a candidate entity
+ *   Looks up M_DESTINATION by placeId or personId and returns its lat/lng directly
+ *   (destinations already store resolved coordinates — no need to look up M_GEO_POINT)
+ *
+ *   Uses in-memory cache (_CANDIDATE_COORDS_CACHE_) built once per execution context
+ *   to avoid repeated loadAllDestinations_() calls per row.
+ *
+ * @param {string} entityType — 'PLACE' or 'PERSON'
+ * @param {string} entityId — placeId or personId
+ * @return {{lat: number, lng: number}|null} coordinates or null if not found
+ * @private
+ */
+let _CANDIDATE_COORDS_CACHE_ = null;
+function getCandidateResolvedCoords_(entityType, entityId) {
+  if (!entityType || !entityId) return null;
+
+  // Build cache once per execution
+  if (!_CANDIDATE_COORDS_CACHE_) {
+    _CANDIDATE_COORDS_CACHE_ = { PLACE: {}, PERSON: {} };
+    try {
+      if (typeof loadAllDestinations_ !== 'function') return null;
+      const dests = loadAllDestinations_();
+      for (let i = 0; i < dests.length; i++) {
+        const d = dests[i];
+        if (d.status !== APP_CONST.STATUS_ACTIVE) continue;
+        if (d.lat === null || d.lng === null) continue;
+
+        // Index by placeId
+        if (d.placeId) {
+          _CANDIDATE_COORDS_CACHE_.PLACE[d.placeId] = { lat: d.lat, lng: d.lng };
+        }
+        // Index by personId (first active destination wins)
+        if (d.personId && !_CANDIDATE_COORDS_CACHE_.PERSON[d.personId]) {
+          _CANDIDATE_COORDS_CACHE_.PERSON[d.personId] = { lat: d.lat, lng: d.lng };
+        }
+      }
+    } catch (e) {
+      // Non-fatal — return null
+    }
+  }
+
+  const cache = _CANDIDATE_COORDS_CACHE_[entityType];
+  if (!cache) return null;
+  return cache[entityId] || null;
 }
 
 // ============================================================

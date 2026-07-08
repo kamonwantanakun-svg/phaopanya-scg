@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.008
+ * VERSION: 6.0.011
  * FILE: 12_ReviewService.gs
  * LMDS V5.5 — Review Queue Service
  * [FIX BUG-B2] v5.4.003: updateReviewRowStatus_() helper — 1 setValues แทน 5× setValue
@@ -231,6 +231,9 @@ function buildRecommendedAction_(personResult, placeResult, geoResult, decision)
 // ============================================================
 
 function applyAllPendingDecisions() {
+  // [V6.0.010 P3.16] RBAC: require reviewer/admin to batch-apply decisions
+  if (typeof requirePermission_ === 'function') requirePermission_('action:approve_review');
+
   // [PERF-008] Idiomatic LockService pattern (เหมือน fetchDataFromSCGJWD)
   //   เดิมใช้ try-catch + hasLock แยก 2 step + ข้อความ error ซ้ำซ้อน 2 อัน
   //   ตอนนี้ใช้ if (!lock.tryLock(...)) แบบ idiomatic — ลด 13 บรรทัด → 5 บรรทัด + 1 ข้อความชัดเจน
@@ -1777,6 +1780,9 @@ function clearDoneReviews_UI() {
     safeUiAlert_('🔒 คุณไม่มีสิทธิ์ล้าง Q_REVIEW\nกรุณาติดต่อ Admin');
     return;
   }
+  // [V6.0.010 P3.2] LockService guard — prevent concurrent clear operations
+  const lock = acquireScriptLockOrWarn_(5000, '⚠️ clearDoneReviews_UI กำลังรันอยู่ กรุณารอให้เสร็จก่อน');
+  if (!lock) return;
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(SHEET.Q_REVIEW);
@@ -1829,5 +1835,7 @@ function clearDoneReviews_UI() {
   } catch (e) {
     logError('ReviewService', 'clearDoneReviews_UI ล้มเหลว: ' + e.message, e);
     safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  } finally {
+    releaseScriptLock_(lock);
   }
 }

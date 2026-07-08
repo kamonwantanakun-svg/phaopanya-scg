@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.008
+ * VERSION: 6.0.011
  * FILE: 18_ServiceSCG.gs
  * LMDS V5.5 — SCG API Service (Group 2 Commander)
  * ===================================================
@@ -591,13 +591,22 @@ function checkIsEPOD_(ownerName, invoiceNo) {
  * เรียก runLookupEnrichment จาก 17_SearchService.gs
  */
 function applyMasterCoordinatesToDailyJob() {
-  // [FIX v5.5.021 H6] PropertiesService lock ป้องกัน Recursive runLookupEnrichment
-  const prop = PropertiesService.getScriptProperties();
-  if (prop.getProperty('LOCK_ENRICHMENT') === '1') {
-    logWarn('ServiceSCG', 'applyMasterCoordinatesToDailyJob is already running. Skipped.');
-    return;
+  // [V6.0.009 P2.3] Replace PropertiesService flag-based lock with real LockService
+  //   เดิมใช้ prop.getProperty('LOCK_ENRICHMENT') === '1' เป็น pseudo-lock ซึ่งไม่ atomic
+  //   (race condition ได้ถ้า 2 executions เช็คพร้อมกันก่อนจะ set)
+  //   และถ้า execution crash ก่อน delete property → lock ค้างตลอดไป (ต้อง manual clear)
+  //   แก้เป็น LockService.getScriptLock().tryLock() ที่ atomic + auto-release on crash
+  //   One-time cleanup: ลบ stale LOCK_ENRICHMENT property ถ้ามีค้างอยู่จาก execution เก่า
+  const lock = acquireScriptLockOrWarn_(30000, '⚠️ applyMasterCoordinatesToDailyJob กำลังรันอยู่ กรุณารอให้เสร็จก่อน');
+  if (!lock) return;
+
+  // [V6.0.009 P2.3] One-time cleanup — ลบ stale LOCK_ENRICHMENT property จาก execution เก่า
+  //   (ถ้ามีค้างอยู่จาก pre-V6.0.009 crash, ลบทิ้งเพื่อความสะอาด)
+  try {
+    PropertiesService.getScriptProperties().deleteProperty('LOCK_ENRICHMENT');
+  } catch (cleanupErr) {
+    // ignore — non-fatal
   }
-  prop.setProperty('LOCK_ENRICHMENT', '1');
 
   try {
     logInfo('ServiceSCG', 'applyMasterCoordinates → เรียก Module 17');
@@ -613,7 +622,8 @@ function applyMasterCoordinatesToDailyJob() {
     // [FIX B4 v5.5.002] เปลี่ยน getUi().alert() → safeUiAlert_() — trigger-safe
     safeUiAlert_('เกิดข้อผิดพลาด: ' + err.message);
   } finally {
-    prop.deleteProperty('LOCK_ENRICHMENT');
+    // [V6.0.009 P2.3] Release real LockService lock (replaces deleteProperty('LOCK_ENRICHMENT'))
+    releaseScriptLock_(lock);
   }
 }
 

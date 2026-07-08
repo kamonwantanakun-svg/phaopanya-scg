@@ -11,8 +11,10 @@
     <!--   สาเหตุ: Tailwind v3+ เลิกให้ precompiled CSS บน CDN แล้ว ต้องใช้ build process -->
     <!--   แก้โดยใช้ @tailwindcss/browser@4 ซึ่งเป็น runtime compiler ทางการจาก Tailwind Labs -->
     <!--   รองรับ utility classes ทั้งหมดที่ใช้ (bg-*, text-*, grid-*, flex-*, etc.) -->
+    <!-- [V6.0.010 P3.12] Pin to specific version @4.3.2 (was @4 range) — prevents -->
+    <!--   silent breaking changes when jsdelivr updates the 4.x latest -->
     <script
-      src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"
+      src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.2"
       integrity="sha384-shaHAtPgz0ulP7R/YmFe0nZtC8FxdhJPi73vwJQcADVttxvHLJBJt/pjzkLSbIvL"
       crossorigin="anonymous"
     ></script>

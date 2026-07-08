@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.008
+ * VERSION: 6.0.011
  * FILE: 19_Hardening.gs
  * LMDS V5.5 — System Hardening & Preflight Audit
  * [FIX BUG-A2] v5.4.003: runPreflightAudit() เพิ่ม try-catch
@@ -222,13 +222,13 @@ function detectDoubleProcessing() {
 
 function generatePersonAliasesFromHistory() {
   // [REF-006] V5.5.019: Refactored into 4 section helpers for Separation of Concerns
-  //   1. acquireAliasHistoryLock_   — SECTION A: AuthZ guard + early validation
+  //   1. acquireAliasHistoryLock_   — SECTION A: AuthZ guard + early validation + LockService
   //   2. prepareAliasHistoryContext_ — SECTION B: Load FACT_DELIVERY + Person maps + checkpoint
   //   3. runAliasHistoryLoop_       — SECTION C: Main loop with Time Guard + partial flush
   //   4. finalizeAliasHistory_      — SECTION D: Final flush + clear checkpoint + report
-  // Preserve Behavior 100% — same AuthZ, same checkpoint, same flush pattern, same report message
+  // [V6.0.009 P2.2] acquireAliasHistoryLock_ now actually acquires a real LockService lock
+  //   and returns it in setup.lock so the finally block can release it.
 
-  // [FIX BUG-M02 V5.5.022] var → const/let — Rule 1 (Clean Code)
   const setup = acquireAliasHistoryLock_();
   if (!setup) return;
 
@@ -242,15 +242,20 @@ function generatePersonAliasesFromHistory() {
     logError('Hardening', 'generatePersonAliasesFromHistory ล้มเหลว: ' + err.message, err);
     safeUiAlert_('เกิดข้อผิดพลาด: ' + err.message);
   } finally {
+    // [V6.0.009 P2.2] Release the real LockService lock acquired in setup
+    releaseScriptLock_(setup.lock);
     // [PERF-007] flushLogBuffer_ ใน finally — กัน log entries สูญหายเมื่อ Timeout
     if (typeof flushLogBuffer_ === 'function') flushLogBuffer_();
   }
 }
 
 /**
- * acquireAliasHistoryLock_ — [REF-006] SECTION A: AuthZ guard + sheet validation
+ * acquireAliasHistoryLock_ — [REF-006] SECTION A: AuthZ guard + sheet validation + LockService
+ *   [V6.0.009 P2.2] Now actually acquires a real LockService lock (was misleading name —
+ *     the original function only did AuthZ + sheet validation, no actual lock).
+ *   Returns the lock object in setup.lock so caller can release it in finally block.
  *   รักษา behavior เดิม 100% — same AuthZ message, same sheet existence check
- * @return {{ss: object}|null} null ถ้า AuthZ fail หรือ sheet missing
+ * @return {{ss: object, lock: Lock}|null} null ถ้า AuthZ fail, sheet missing, หรือ lock busy
  * @private
  */
 function acquireAliasHistoryLock_() {
@@ -274,9 +279,15 @@ function acquireAliasHistoryLock_() {
     return null;
   }
 
+  // [V6.0.009 P2.2] Acquire real LockService lock — ป้องกัน double-click ทำให้
+  //   checkpoint ปนกัน (same pattern as buildGeoDictionary/populateGeoMetadata)
+  //   ใช้ shared helper acquireScriptLockOrWarn_
+  const lock = acquireScriptLockOrWarn_(30000, '⚠️ generatePersonAliasesFromHistory กำลังรันอยู่ กรุณารอให้เสร็จก่อน');
+  if (!lock) return null;
+
   ss.toast('กำลังวิเคราะห์ประวัติการจัดส่งเพื่อสร้าง Alias...', 'Processing', 5);
 
-  return { ss: ss };
+  return { ss: ss, lock: lock };
 }
 
 /**

@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.008
+ * VERSION: 6.0.011
  * FILE: 22_WebApp.gs
  * LMDS V5.5 — Web App Server (Dashboard)
  * ===================================================
@@ -693,33 +693,66 @@ function getFactDeliveryPage(offset, limit, filter) {
     };
   }
 
-  // อ่านข้อมูลทั้งหมด batch
-  const data = sheet.getRange(2, 1, lastRow - 1, SCHEMA[SHEET.FACT_DELIVERY].length).getValues();
+  // [V6.0.009 P2.4] Performance optimization — read status column ONLY for counting
+  //   (was reading ALL columns just to count statuses + paginate)
+  //   Step 1: read only MATCH_STATUS column to build statusCounts + filtered row indices
+  //   Step 2: read only the page rows (offset..offset+limit) full columns
+  //   This reduces API payload from N×25 to N×1 + limit×25 (10-50x reduction for large sheets)
+  const statusColIdx = FACT_IDX.MATCH_STATUS + 1; // 1-based column number
+  const totalRows = lastRow - 1;
+  const statusValues = sheet.getRange(2, statusColIdx, totalRows, 1).getValues();
 
-  // นับ match status ทั้งหมด (สำหรับ filter tabs)
+  // Build statusCounts + filtered row indices in single pass
   const statusCounts = {};
-  data.forEach(function (row) {
-    const s = String(row[FACT_IDX.MATCH_STATUS] || 'UNKNOWN').trim();
-    statusCounts[s] = (statusCounts[s] || 0) + 1;
-  });
-
-  // Filter — รองรับ filter.status (string) หรือ filter.statuses (array)
   const filterObj = filter || {};
-  let filtered = data;
-  if (filterObj.status && filterObj.status !== 'all' && filterObj.status !== '') {
-    filtered = data.filter(function (row) {
-      return String(row[FACT_IDX.MATCH_STATUS] || '').trim() === filterObj.status;
-    });
-  } else if (Array.isArray(filterObj.statuses) && filterObj.statuses.length > 0) {
-    filtered = data.filter(function (row) {
-      return filterObj.statuses.indexOf(String(row[FACT_IDX.MATCH_STATUS] || '').trim()) !== -1;
-    });
+  const hasStatusFilter = filterObj.status && filterObj.status !== 'all' && filterObj.status !== '';
+  const hasStatusesFilter = Array.isArray(filterObj.statuses) && filterObj.statuses.length > 0;
+  const filteredRowIndices = []; // 0-based indices into statusValues (which maps to sheet row - 2)
+
+  for (let i = 0; i < statusValues.length; i++) {
+    const s = String(statusValues[i][0] || 'UNKNOWN').trim();
+    statusCounts[s] = (statusCounts[s] || 0) + 1;
+
+    // Check if this row matches the filter
+    let matches = true;
+    if (hasStatusFilter) {
+      matches = s === filterObj.status;
+    } else if (hasStatusesFilter) {
+      matches = filterObj.statuses.indexOf(s) !== -1;
+    }
+    if (matches) {
+      filteredRowIndices.push(i);
+    }
   }
 
-  // Pagination
+  // Pagination on filtered indices
   const safeOffset = Math.max(0, parseInt(offset, 10) || 0);
   const safeLimit = Math.max(1, Math.min(200, parseInt(limit, 10) || 50));
-  const pageRows = filtered.slice(safeOffset, safeOffset + safeLimit);
+  const pageIndices = filteredRowIndices.slice(safeOffset, safeOffset + safeLimit);
+  const totalFiltered = filteredRowIndices.length;
+
+  // [V6.0.009 P2.4] Read only the page rows (full columns) — not the entire sheet
+  //   pageIndices are 0-based into the data array; sheet row = pageIndex + 2
+  //   Use getRangeList for non-contiguous rows (efficient batch read)
+  let pageRows = [];
+  if (pageIndices.length > 0) {
+    const schemaLen = SCHEMA[SHEET.FACT_DELIVERY].length;
+    // Build A1 notations for each row (column A to column corresponding to schemaLen)
+    const lastColLetter = columnNumberToLetter_(schemaLen);
+    const a1Notations = pageIndices.map(function (idx) {
+      return 'A' + (idx + 2) + ':' + lastColLetter + (idx + 2); // +2 because data starts at row 2
+    });
+    const rangeList = sheet.getRangeList(a1Notations);
+    const ranges = rangeList.getRanges();
+    // getValues on each range — returns array of arrays (one per range)
+    // Combine into single 2D array
+    const allValues = [];
+    for (let r = 0; r < ranges.length; r++) {
+      const vals = ranges[r].getValues();
+      if (vals.length > 0) allValues.push(vals[0]);
+    }
+    pageRows = allValues;
+  }
 
   // แปลง rows เป็น objects
   const rows = pageRows.map(function (row) {
@@ -767,7 +800,7 @@ function getFactDeliveryPage(offset, limit, filter) {
       ' → ' +
       rows.length +
       '/' +
-      filtered.length +
+      totalFiltered +
       ' rows in ' +
       elapsedMs +
       'ms'
@@ -775,7 +808,7 @@ function getFactDeliveryPage(offset, limit, filter) {
 
   return {
     rows: rows,
-    total: filtered.length,
+    total: totalFiltered,
     offset: safeOffset,
     limit: safeLimit,
     filter: filterObj,
@@ -960,6 +993,22 @@ function submitReviewDecision(reviewId, decision, note) {
     return { ok: false, message: 'decision ไม่ถูกต้อง ต้องเป็น: ' + validDecisions.join(', ') };
   }
 
+  // [V6.0.009 P2.1] LockService guard — ป้องกัน double-submit จาก WebApp
+  //   (user กด Approve สองครั้งรวด → ไม่ให้ applyReviewDecision ทำงานซ้อนกัน
+  //   ซึ่งอาจทำให้ FACT_DELIVERY มี duplicate rows หรือ Q_REVIEW status inconsistent)
+  //   ใช้ WebApp context — ไม่สามารถใช้ acquireScriptLockOrWarn_ ได้เพราะไม่มี UI
+  //   ต้อง return error กลับไปที่ frontend แทนการ show alert
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) {
+    logWarn('WebApp', 'submitReviewDecision: lock not acquired (another submit in progress) — reviewId=' + reviewId);
+    return {
+      ok: false,
+      message: 'กำลังประมวลผล review อื่นอยู่ กรุณารอสักครู่แล้วลองอีกครั้ง',
+      reviewId: reviewId,
+      code: 'LOCK_BUSY'
+    };
+  }
+
   try {
     // ดึง rowData ล่าสุดจาก sheet (frontend ส่งมาอาจเก่าแล้ว)
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1102,6 +1151,9 @@ function submitReviewDecision(reviewId, decision, note) {
   } catch (err) {
     logError('WebApp', 'submitReviewDecision ล้มเหลว: ' + err.message, err);
     return { ok: false, message: err.message || 'Unknown error', reviewId: reviewId };
+  } finally {
+    // [V6.0.009 P2.1] Always release lock — ใช้ shared helper
+    releaseScriptLock_(lock);
   }
 }
 
@@ -1541,11 +1593,11 @@ function getSourcePage(offset, limit, filter) {
     };
   }
 
-  // อ่านข้อมูลทั้งหมด batch — sheet SOURCE มี 39 columns
-  const lastCol = Math.max(SRC_IDX.DRIVER_VERIFIED_ADDR + 1, sheet.getLastColumn());
-  const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
-
-  // คำนวณ sync status — bucket เป็น SUCCESS / PENDING / ERROR / EMPTY
+  // [V6.0.009 P2.4] Performance optimization — read SYNC_STATUS column ONLY for counting
+  //   (was reading ALL 39 columns just to count statuses + paginate)
+  //   Step 1: read only SYNC_STATUS column to build syncStatusCounts + filtered row indices
+  //   Step 2: read only the page rows (offset..offset+limit) full columns
+  //   This reduces API payload from N×39 to N×1 + limit×39 (10-50x reduction for large sheets)
   const bucketSyncStatus_ = function (rawStatus) {
     const s = String(rawStatus || '')
       .trim()
@@ -1556,32 +1608,53 @@ function getSourcePage(offset, limit, filter) {
     return 'PENDING';
   };
 
-  // นับ sync status ทั้งหมด
-  const syncStatusCounts = { SUCCESS: 0, PENDING: 0, ERROR: 0, EMPTY: 0 };
-  data.forEach(function (row) {
-    const bucket = bucketSyncStatus_(row[SRC_IDX.SYNC_STATUS]);
-    syncStatusCounts[bucket] = (syncStatusCounts[bucket] || 0) + 1;
-  });
+  const syncStatusColIdx = SRC_IDX.SYNC_STATUS + 1; // 1-based column number
+  const totalRows = lastRow - 1;
+  const syncStatusValues = sheet.getRange(2, syncStatusColIdx, totalRows, 1).getValues();
 
-  // Filter
+  // Build syncStatusCounts + filtered row indices in single pass
+  const syncStatusCounts = { SUCCESS: 0, PENDING: 0, ERROR: 0, EMPTY: 0 };
   const filterObj = filter || {};
   const wantSync = (filterObj.syncStatus || 'all').toUpperCase();
-  let filtered = data;
-  if (wantSync !== 'ALL' && wantSync !== '') {
-    filtered = data.filter(function (row) {
-      return bucketSyncStatus_(row[SRC_IDX.SYNC_STATUS]) === wantSync;
-    });
+  const hasSyncFilter = wantSync !== 'ALL' && wantSync !== '';
+  const filteredRowIndices = [];
+
+  for (let i = 0; i < syncStatusValues.length; i++) {
+    const bucket = bucketSyncStatus_(syncStatusValues[i][0]);
+    syncStatusCounts[bucket] = (syncStatusCounts[bucket] || 0) + 1;
+    if (!hasSyncFilter || bucket === wantSync) {
+      filteredRowIndices.push(i);
+    }
   }
 
-  // Pagination
+  // Pagination on filtered indices
   const safeOffset = Math.max(0, parseInt(offset, 10) || 0);
   const safeLimit = Math.max(1, Math.min(200, parseInt(limit, 10) || 50));
-  const pageRows = filtered.slice(safeOffset, safeOffset + safeLimit);
+  const pageIndices = filteredRowIndices.slice(safeOffset, safeOffset + safeLimit);
+  const totalFiltered = filteredRowIndices.length;
+
+  // [V6.0.009 P2.4] Read only the page rows (full columns) — not the entire sheet
+  const lastCol = Math.max(SRC_IDX.DRIVER_VERIFIED_ADDR + 1, sheet.getLastColumn());
+  let pageRows = [];
+  if (pageIndices.length > 0) {
+    const lastColLetter = columnNumberToLetter_(lastCol);
+    const a1Notations = pageIndices.map(function (idx) {
+      return 'A' + (idx + 2) + ':' + lastColLetter + (idx + 2);
+    });
+    const rangeList = sheet.getRangeList(a1Notations);
+    const ranges = rangeList.getRanges();
+    const allValues = [];
+    for (let r = 0; r < ranges.length; r++) {
+      const vals = ranges[r].getValues();
+      if (vals.length > 0) allValues.push(vals[0]);
+    }
+    pageRows = allValues;
+  }
 
   // แปลง rows เป็น objects (เลือก field ที่ frontend ใช้)
   const rows = pageRows.map(function (row, idx) {
     return {
-      _sheetRow: safeOffset + idx + 2,
+      _sheetRow: pageIndices[idx] + 2,
       rowId: Number(row[SRC_IDX.ROW_ID] || 0),
       sourceId: String(row[SRC_IDX.SOURCE_ID] || ''),
       deliveryDate:
@@ -1625,7 +1698,7 @@ function getSourcePage(offset, limit, filter) {
       ' → ' +
       rows.length +
       '/' +
-      filtered.length +
+      totalFiltered +
       ' rows in ' +
       elapsedMs +
       'ms'
@@ -1633,7 +1706,7 @@ function getSourcePage(offset, limit, filter) {
 
   return {
     rows: rows,
-    total: filtered.length,
+    total: totalFiltered,
     offset: safeOffset,
     limit: safeLimit,
     filter: filterObj,
