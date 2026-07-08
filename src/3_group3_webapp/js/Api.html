@@ -1,8 +1,14 @@
 <script>
   /**
-   * js/Api.html — Promisified google.script.run wrapper
+   * js/Api.html — Promisified google.script.run wrapper (v6.0.008)
    * ===================================================
    * ห่อ google.script.run แบบ callback ให้เป็น Promise เพื่อใช้ async/await ได้
+   *
+   * [V6.0.008 P1.1 — BI-02 fix from LMDS_PREDEPLOY_AUDIT 2026-07-08]
+   *   - เพิ่ม 30s timeout ทุก call (BI-02 fix)
+   *   - เพิ่ม concurrent call counter (ป้องกันการสะสม pending calls)
+   *   - เพิ่ม diagnostic logging
+   *   - MAX_CONCURRENT = 6 (dashboard อาจเรียก concurrent: getDashboardData + getMatchEngineLiveStatus + getMapAnalyticsData)
    *
    * ใช้งาน:
    *   const data = await api.getDashboardData();
@@ -14,7 +20,23 @@
     'use strict';
 
     /**
+     * CONFIG — [V6.0.008 P1.1] TIMEOUT_MS สำหรับทุก backend call
+     *   ถ้า backend ไม่ตอบภายใน 30s → Promise reject
+     *   (GAS execution limit คือ 6 นาที, แต่ 30s เป็น SLA ที่ UX acceptable)
+     */
+    const TIMEOUT_MS = 30000;
+
+    /**
+     * concurrentCalls_ — [V6.0.008 P1.1] นับจำนวน call ที่กำลังค้างอยู่
+     *   ถ้าเกิน MAX_CONCURRENT → reject ทันที (ป้องกัน client overload)
+     *   MAX_CONCURRENT = 6 (dashboard อาจเรียก 3-4 endpoints concurrent)
+     */
+    let concurrentCalls_ = 0;
+    const MAX_CONCURRENT = 6;
+
+    /**
      * promisify_ — แปลง google.script.run callback pattern เป็น Promise
+     *   พร้อม 30s timeout fallback
      *
      * @param {string} fnName - ชื่อ server function
      * @param {...any} args - arguments ที่จะส่งไป
@@ -23,18 +45,52 @@
      */
     function promisify_(fnName, ...args) {
       return new Promise((resolve, reject) => {
+        // [V6.0.008 P1.1] Concurrent guard — ถ้า call ค้างเยอะเกินไป ปฏิเสธก่อน
+        if (concurrentCalls_ >= MAX_CONCURRENT) {
+          const err = new Error('Too many concurrent requests (' + concurrentCalls_ + '). Please wait.');
+          err.code = 'CLIENT_OVERLOAD';
+          console.warn('[api] ' + fnName + ' rejected — overload');
+          reject(err);
+          return;
+        }
+
+        // [V6.0.008 P1.1] Timeout guard — 30s hard timeout
+        let timedOut = false;
+        const timer = setTimeout(function () {
+          timedOut = true;
+          concurrentCalls_ = Math.max(0, concurrentCalls_ - 1);
+          const err = new Error(fnName + ' timeout after ' + TIMEOUT_MS + 'ms');
+          err.code = 'TIMEOUT';
+          err.fnName = fnName;
+          console.error('[api] ' + fnName + ' timeout after ' + TIMEOUT_MS + 'ms');
+          reject(err);
+        }, TIMEOUT_MS);
+
+        concurrentCalls_++;
+
         try {
           google.script.run
-            .withSuccessHandler((result) => {
+            .withSuccessHandler(function (result) {
+              if (timedOut) return; // already rejected by timeout
+              clearTimeout(timer);
+              concurrentCalls_ = Math.max(0, concurrentCalls_ - 1);
+              console.debug('[api] ' + fnName + ' ok (' + concurrentCalls_ + ' in flight)');
               resolve(result);
             })
-            .withFailureHandler((err) => {
+            .withFailureHandler(function (err) {
+              if (timedOut) return; // already rejected by timeout
+              clearTimeout(timer);
+              concurrentCalls_ = Math.max(0, concurrentCalls_ - 1);
               console.error('[api] ' + fnName + ' failed:', err);
               reject(normalizeError_(err));
             })
             [fnName](...args);
         } catch (err) {
           // กรณี google.script.run ยังไม่พร้อม (เช่น ใน IDE preview)
+          if (!timedOut) {
+            clearTimeout(timer);
+            concurrentCalls_ = Math.max(0, concurrentCalls_ - 1);
+          }
           console.error('[api] google.script.run not available:', err);
           reject(normalizeError_(err));
         }
@@ -57,6 +113,18 @@
         return e;
       }
       return new Error('Unknown error');
+    }
+
+    /**
+     * getStats — [V6.0.008 P1.1] ดึงสถิติปัจจุบัน (debug helper)
+     * @return {{ concurrent: number, max: number, timeoutMs: number }}
+     */
+    function getStats() {
+      return {
+        concurrent: concurrentCalls_,
+        max: MAX_CONCURRENT,
+        timeoutMs: TIMEOUT_MS
+      };
     }
 
     // ────────────────────────────────────────────────────────────
@@ -146,9 +214,16 @@
        * getMatchEngineLiveStatus — [V6.0.004] ดึงสถานะล่าสุดของ MatchEngine
        * @return {Promise<{isRunning,currentRow,totalRows,startedAt,lastMatchAt,errorCount,recentMatches}>}
        */
-      getMatchEngineLiveStatus: () => promisify_('getMatchEngineLiveStatus')
+      getMatchEngineLiveStatus: () => promisify_('getMatchEngineLiveStatus'),
+
+      // [V6.0.008 P1.1] Expose diagnostic stats for debugging
+      getStats: getStats
     };
   })();
 
-  console.log('[api] LMDS API wrapper loaded —', Object.keys(globalThis.api));
+  console.log(
+    '[api] LMDS API wrapper loaded (v6.0.008) —',
+    Object.keys(globalThis.api).length,
+    'methods, timeout=30s, max_concurrent=6'
+  );
 </script>

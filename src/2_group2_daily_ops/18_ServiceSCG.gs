@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.007
+ * VERSION: 6.0.008
  * FILE: 18_ServiceSCG.gs
  * LMDS V5.5 — SCG API Service (Group 2 Commander)
  * ===================================================
@@ -1008,12 +1008,42 @@ function clearAllSCGSheets_UI() {
     safeUiAlert_('🔒 คุณไม่มีสิทธิ์ล้างข้อมูล\nกรุณาติดต่อ Admin');
     return;
   }
-  // [FIX B4 v5.5.002] เพิ่ม try-catch — menu entry point ต้องมี error handling
+
+  // [V6.0.008 P1.2 — BUGHUNT-01 fix from LMDS_PREDEPLOY_AUDIT 2026-07-08]
+  //   LockService guard — ป้องกัน double-click ทำให้ clearContent ทับซ้อนกัน
+  //   (และป้องกัน race กับ safeResetTransactional_UI ที่ใช้ lock เดียวกัน)
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) {
+    safeUiAlert_('⚠️ มีการล้างข้อมูลอื่นกำลังทำงานอยู่ กรุณารอสักครู่');
+    return;
+  }
+
   try {
+    // [V6.0.008 P1.2] Add YES_NO confirmation (parity with safeResetTransactional_UI)
+    //   ก่อนหน้านี้คลิกเมนูทีเดียว → clearContent 4 ชีตทันที (ไม่มีทาง undo)
+    //   ตอนนี้ต้องยืนยัน YES_NO ก่อน — ลดความเสี่ยง accidental wipe
+    const ui = SpreadsheetApp.getUi();
+    const confirm = ui.alert(
+      '🗑️ ล้างข้อมูลชีต SCG',
+      'กำลังจะล้างข้อมูล 4 ชีต:\n' +
+        '• DAILY_JOB\n' +
+        '• OWNER_SUMMARY\n' +
+        '• SHIPMENT_SUM\n' +
+        '• INPUT (Cookie + Shipment Numbers)\n\n' +
+        '⚠️ การล้างไม่สามารถกู้คืนได้\n\n' +
+        'ยืนยันการล้างข้อมูล?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่มีการล้างข้อมูล');
+      return;
+    }
+
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     ss.toast('🗑️ กำลังล้างข้อมูลชีตที่เลือก...', APP_NAME, -1);
 
     let cleared = 0;
+    const clearedNames = [];
 
     // [FIX V6.0.005] เพิ่ม SHEET.INPUT ในรายการชีตที่ต้องล้าง
     const sheetsToClear = [SHEET.DAILY_JOB, SHEET.OWNER_SUMMARY, SHEET.SHIPMENT_SUM, SHEET.INPUT];
@@ -1023,23 +1053,29 @@ function clearAllSCGSheets_UI() {
         // [FIX v5.5.021 M5] ใช้ clearContent แทน deleteRows เพื่อความรวดเร็วและไม่กระทบโครงสร้างตาราง
         sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getMaxColumns()).clearContent();
         cleared++;
+        clearedNames.push(name);
       } else if (sheet && name === SHEET.INPUT) {
         // Input sheet อาจมีข้อมูลใน B1 (COOKIE) และ B3 (ShipmentNos) ไม่ได้อยู่ใน row 2+
-        // ล้างเฉพาะข้อมูลในคอลัมน์ B (ไม่ล้าก label ในคอลัมน์ A)
+        // ล้างเฉพาะข้อมูลในคอลัมน์ B (ไม่ล้าง label ในคอลัมน์ A)
         const lastRow = sheet.getLastRow();
         if (lastRow >= 1) {
           sheet.getRange(1, 2, lastRow, 1).clearContent();
           cleared++;
+          clearedNames.push(name + ' (col B only)');
         }
       }
     });
 
-    logInfo('ServiceSCG', `clearAllSCGSheets_UI: ล้าง ${cleared} ชีต`);
+    logInfo('ServiceSCG', 'clearAllSCGSheets_UI: ล้าง ' + cleared + ' ชีต → ' + clearedNames.join(', '));
     // [RF-03] เปลี่ยน ui.alert() → safeUiAlert_() — trigger-safe
-    safeUiAlert_(`✅ ล้างข้อมูล ${cleared} ชีตเรียบร้อย`);
+    safeUiAlert_('✅ ล้างข้อมูล ' + cleared + ' ชีตเรียบร้อย\n\n' + clearedNames.join('\n'));
   } catch (e) {
     logError('ServiceSCG', 'clearAllSCGSheets_UI ล้มเหลว: ' + e.message, e);
     safeUiAlert_('เกิดข้อผิดพลาดในการล้างข้อมูล: ' + e.message);
+  } finally {
+    // [V6.0.008 P1.2] Always release lock + flush log buffer
+    if (lock.hasLock()) lock.releaseLock();
+    if (typeof flushLogBuffer_ === 'function') flushLogBuffer_();
   }
 }
 

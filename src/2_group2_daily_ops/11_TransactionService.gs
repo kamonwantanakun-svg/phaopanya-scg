@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.007
+ * VERSION: 6.0.008
  * FILE: 11_TransactionService.gs
  * LMDS V5.5 — FACT_DELIVERY Transaction Service
  * ===================================================

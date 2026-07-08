@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.007
+ * VERSION: 6.0.008
  * FILE: 16_GeoDictionaryBuilder.gs
  * LMDS V5.5 — Geo Dictionary Builder (SYS_TH_GEO)
  * ===================================================
@@ -119,9 +119,22 @@ function buildGeoDictionary() {
     safeUiAlert_('🔒 คุณไม่มีสิทธิ์รัน Build Geo Dictionary\nกรุณาติดต่อ Admin');
     return;
   }
+
+  // [V6.0.008 P1.4 — BUGHUNT #1 fix from LMDS_PREDEPLOY_AUDIT 2026-07-08]
+  //   LockService guard — ป้องกัน double-click ทำให้ checkpoint ปนกัน
+  //   withEntryPointGuard_ ไม่ acquire lock ให้อัตโนมัติ — ต้องส่ง {lock: lock} เข้าไป
+  //   ถ้าไม่ส่ง lock, double-click จะอ่าน checkpoint เดียวกัน + เขียนทับช่วงแถวเดียวกัน
+  //   Pattern เดียวกับ fetchDataFromSCGJWD ใน 18_ServiceSCG.gs:136-141
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    safeUiAlert_('⚠️ buildGeoDictionary กำลังรันอยู่อีก instance หนึ่ง กรุณารอให้เสร็จก่อน');
+    return;
+  }
+
   // [REF-011 V5.5.020 PILOT] Apply withEntryPointGuard_ for standardized error handling
   //   - Preserve Behavior 100%: errorPrefix='เกิดข้อผิดพลาด: ' (same as original alert message)
   //   - finally block (flushLogBuffer_) handled by guard automatically
+  //   - [V6.0.008 P1.4] Pass {lock: lock} ให้ guard release ใน finally block
   withEntryPointGuard_(
     'GeoDictBuilder',
     'buildGeoDictionary',
@@ -260,7 +273,7 @@ function buildGeoDictionary() {
           Object.keys(postcodeMap).length
       );
     },
-    { errorPrefix: 'เกิดข้อผิดพลาด: ' }
+    { errorPrefix: 'เกิดข้อผิดพลาด: ', lock: lock }
   );
 }
 

@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.007
+ * VERSION: 6.0.008
  * FILE: 22_WebApp.gs
  * LMDS V5.5 — Web App Server (Dashboard)
  * ===================================================
@@ -1011,6 +1011,16 @@ function submitReviewDecision(reviewId, decision, note) {
       rowData[REVIEW_IDX.NOTE] = note;
     }
 
+    // [V6.0.008 P1.3 — BUG-WEB-002 atomicity fix from LMDS_Master_Audit_Report]
+    //   Capture original status BEFORE applyReviewDecision so we can rollback
+    //   Q_REVIEW status if FACT_DELIVERY write fails.
+    //   ปัญหาเดิม: applyReviewDecision อัปเดต Q_REVIEW status → 'Done' ก่อน
+    //   แล้วค่อยเขียน FACT_DELIVERY — ถ้า FACT write fail, Q_REVIEW จะ "Done"
+    //   แต่ไม่มี fact row → data inconsistency (review สำเร็จแต่ไม่มี delivery record)
+    //   วิธีแก้: เก็บ original status → applyReviewDecision → ถ้า FACT write fail
+    //   ให้ rollback Q_REVIEW status กลับเป็น original + return error
+    const originalStatus = String(rowData[REVIEW_IDX.STATUS] || '').trim();
+
     // เรียกใช้ฟังก์ชันที่มีอยู่แล้วใน 12_ReviewService.gs
     const result = applyReviewDecision(reviewId, decision, rowData, targetRow);
 
@@ -1036,7 +1046,44 @@ function submitReviewDecision(reviewId, decision, note) {
           );
         }
       } catch (factErr) {
-        logError('WebApp', 'submitReviewDecision: เขียน FACT_DELIVERY ล้มเหลว — ' + factErr.message, factErr);
+        // [V6.0.008 P1.3] Atomicity rollback — FACT write failed, restore Q_REVIEW status
+        //   เพื่อไม่ให้ Q_REVIEW ค้างอยู่ที่ "Done" โดยไม่มี fact row
+        //   user สามารถลอง approve ใหม่ได้หลังจากแก้ปัญหาที่ทำให้ FACT write fail
+        logError(
+          'WebApp',
+          'submitReviewDecision: เขียน FACT_DELIVERY ล้มเหลว — กำลัง rollback Q_REVIEW status จาก Done → ' +
+            (originalStatus || 'Pending') +
+            ' — ' +
+            factErr.message,
+          factErr
+        );
+        try {
+          // Re-read Q_REVIEW row to get current state (applyReviewDecision may have updated it)
+          const currentRowData = sheet.getRange(targetRow, 1, 1, SCHEMA[SHEET.Q_REVIEW].length).getValues()[0];
+          currentRowData[REVIEW_IDX.STATUS] = originalStatus || 'Pending';
+          currentRowData[REVIEW_IDX.REVIEWED_AT] = '';
+          currentRowData[REVIEW_IDX.REVIEWER] = '';
+          currentRowData[REVIEW_IDX.DECISION] = '';
+          sheet.getRange(targetRow, 1, 1, SCHEMA[SHEET.Q_REVIEW].length).setValues([currentRowData]);
+          logInfo('WebApp', 'submitReviewDecision: rollback Q_REVIEW status สำเร็จ — reviewId=' + reviewId);
+        } catch (rollbackErr) {
+          logError(
+            'WebApp',
+            'submitReviewDecision: rollback Q_REVIEW status ล้มเหลวด้วย — reviewId=' +
+              reviewId +
+              ' อาจต้อง manual rollback — ' +
+              rollbackErr.message,
+            rollbackErr
+          );
+        }
+        return {
+          ok: false,
+          message:
+            'เขียน FACT_DELIVERY ล้มเหลว — ได้ rollback Q_REVIEW status แล้ว กรุณาลองอีกครั้ง (' +
+            factErr.message +
+            ')',
+          reviewId: reviewId
+        };
       }
     }
 
