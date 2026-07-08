@@ -3,24 +3,9 @@
   "dependencies": {
     "enabledAdvancedServices": [
       {
-        "userSymbol": "Drive",
-        "version": "v3",
-        "serviceId": "drive"
-      },
-      {
         "userSymbol": "Sheets",
         "version": "v4",
         "serviceId": "sheets"
-      },
-      {
-        "userSymbol": "Docs",
-        "version": "v1",
-        "serviceId": "docs"
-      },
-      {
-        "userSymbol": "Gmail",
-        "version": "v1",
-        "serviceId": "gmail"
       }
     ]
   },

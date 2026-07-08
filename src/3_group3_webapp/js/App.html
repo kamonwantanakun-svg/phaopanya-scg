@@ -289,6 +289,26 @@
             renderIcons_();
           }
           break;
+        case 'map':
+          // [V6.0.004] Map Analytics view
+          if (globalThis.MapAnalyticsView) {
+            globalThis.MapAnalyticsView.render(currentData, viewContainer);
+            renderIcons_();
+          } else {
+            console.error('[app] MapAnalyticsView not loaded!');
+            showError_('MapAnalyticsView not loaded');
+          }
+          break;
+        case 'livefeed':
+          // [V6.0.004] Live Feed view
+          if (globalThis.LiveFeedView) {
+            globalThis.LiveFeedView.render(currentData, viewContainer);
+            renderIcons_();
+          } else {
+            console.error('[app] LiveFeedView not loaded!');
+            showError_('LiveFeedView not loaded');
+          }
+          break;
         default:
           renderNotFound_();
       }

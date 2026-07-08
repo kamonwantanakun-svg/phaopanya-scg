@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.002
+ * VERSION: 6.0.007
  * FILE: 10_MatchEngine.gs
  * LMDS V5.5 — Core Match & Resolution Engine
  * ===================================================
@@ -114,6 +114,24 @@ function runMatchEngine() {
   const setup = acquireMatchEngineLock_();
   if (!setup) return;
 
+  // [V6.0.004] Pre-flight check
+  if (typeof runPipelinePreflight === 'function') {
+    const preflight = runPipelinePreflight();
+    if (!preflight.ready) {
+      const msg = 'Pipeline preflight failed:\n' + preflight.issues.join('\n');
+      logWarn('MatchEngine', msg);
+      if (typeof sendPipelineAlert_ === 'function') {
+        sendPipelineAlert_('Pipeline preflight failed:\n' + preflight.issues.join('\n'), 'WARN');
+      }
+      safeUiAlert_('⚠️ Pipeline ไม่พร้อมรัน', msg);
+      // Release lock + cleanup before returning — preserve existing pattern
+      if (setup.lock && setup.lock.hasLock()) setup.lock.releaseLock();
+      _ALIAS_ENRICHMENT_CONTEXT = null;
+      if (typeof flushLogBuffer_ === 'function') flushLogBuffer_();
+      return;
+    }
+  }
+
   const ctx = prepareMatchEngineContext_();
   if (ctx === null) {
     // Empty pendingRows path — release lock + cleanup + return
@@ -218,12 +236,43 @@ function prepareMatchEngineContext_(startTime) {
 function runMatchEngineLoop_(ctx, startTime) {
   const timeLimit = AI_CONFIG.TIME_LIMIT_MS || 5 * 60 * 1000;
 
+  // [V6.0.007] Emergency Stop Signal Check
+  //   User can request stop via menu "🛑 หยุด Pipeline (Emergency Stop)".
+  //   We check every STOP_CHECK_INTERVAL rows (10) to balance responsiveness
+  //   with PropertiesService read latency (~5-10ms per call).
+  //   On stop: flush current batch via finalizeMatchEngine_ + clear signal +
+  //   set ctx.stoppedByUser = true so finalizeMatchEngine_ removes any
+  //   existing auto-resume trigger (don't want it to fire after user stop).
+  const STOP_CHECK_INTERVAL = 10;
+  let lastStopCheck = -STOP_CHECK_INTERVAL; // force first check at i=0
+
   for (let i = ctx.startIndex; i < ctx.pendingRows.length; i++) {
     if (new Date() - startTime > timeLimit) {
       logWarn('MatchEngine', `Time Guard: หยุดที่แถว ${i}/${ctx.pendingRows.length} (ติดตั้ง Auto-Trigger)`);
       // [FIX v5.2.007] ไม่บันทึก checkpoint อีกต่อไป — SYNC_STATUS ทำหน้าที่แทน
       installAutoResume_('runMatchEngine');
       return;
+    }
+
+    // [V6.0.007] Stop Signal Check — user requested emergency stop
+    if (i - lastStopCheck >= STOP_CHECK_INTERVAL) {
+      lastStopCheck = i;
+      if (isPipelineStopRequested_()) {
+        ctx.stoppedByUser = true;
+        logWarn(
+          'MatchEngine',
+          '🛑 STOP SIGNAL: หยุดที่แถว ' +
+            i +
+            '/' +
+            ctx.pendingRows.length +
+            ' (user requested via menu) — กำลัง flush batch และปิด gracefully...'
+        );
+        // Clear the stop signal so the next manual run starts clean
+        clearPipelineStopSignal_();
+        // Return — finalizeMatchEngine_ will flush the current batch
+        // and remove auto-resume trigger (because ctx.stoppedByUser = true)
+        return;
+      }
     }
 
     const srcObj = ctx.pendingRows[i];
@@ -313,6 +362,15 @@ function finalizeMatchEngine_(ctx, startTime, lock) {
   // [FIX v5.2.007] ถ้าประมวลผลครบทุกแถว → ลบ Auto-Trigger
   if (ctx.processed + ctx.errorCount >= ctx.pendingRows.length) {
     removeAutoResume_();
+  }
+
+  // [V6.0.007] Emergency Stop — remove auto-resume trigger so it doesn't fire
+  //   after user explicitly stopped. Also clear any stop signal that might
+  //   have been set after the loop's last check (defensive).
+  if (ctx.stoppedByUser) {
+    removeAutoResume_();
+    clearPipelineStopSignal_();
+    logInfo('MatchEngine', '🛑 Pipeline หยุดโดย user — ลบ Auto-Resume trigger + clear stop signal เรียบร้อย');
   }
 
   const elapsedSec = Math.round((new Date() - startTime) / 1000);
@@ -645,15 +703,23 @@ function matchEnrichEntityAliases_(
     const canonKey = entityType + '::' + masterUuid + '::' + canonicalNorm;
     if (!context.existingGlobalAliasSet.has(canonKey)) {
       context.existingGlobalAliasSet.add(canonKey);
+      // [FIX V6.0.007] Push 11 columns to match SCHEMA.M_ALIAS (V6.0.003 added 3 cols)
+      //   0-7: alias_id, master_uuid, variant_name, entity_type, confidence, source, created_at, active_flag
+      //   8-10: verified_by, review_id, verified_at (empty for AUTO_ENRICH — not human-verified)
+      //   Previous bug: pushed only 8 cols → Sheets API threw
+      //   "จำนวนคอลัมน์ในข้อมูลไม่ตรงกับจำนวนคอลัมน์ในช่วง ข้อมูลมี 8 คอลัมน์ แต่ช่วงดังกล่าวมี 11 คอลัมน์"
       globalRows.push([
-        generateShortId('A'),
-        masterUuid,
-        canonical,
-        entityType,
-        100,
-        context.source || 'AUTO_ENRICH_FACT',
-        now,
-        true
+        generateShortId('A'), // [0] alias_id
+        masterUuid, // [1] master_uuid
+        canonical, // [2] variant_name
+        entityType, // [3] entity_type
+        100, // [4] confidence (canonical = 100)
+        context.source || 'AUTO_ENRICH_FACT', // [5] source
+        now, // [6] created_at
+        true, // [7] active_flag
+        '', // [8] verified_by (empty — AUTO_ENRICH is not human-verified)
+        '', // [9] review_id (empty — not from Q_REVIEW)
+        '' // [10] verified_at (empty — not verified)
       ]);
     }
   }
@@ -666,15 +732,20 @@ function matchEnrichEntityAliases_(
       const variantKey = entityType + '::' + masterUuid + '::' + rawNorm;
       if (!context.existingGlobalAliasSet.has(variantKey)) {
         context.existingGlobalAliasSet.add(variantKey);
+        // [FIX V6.0.007] Push 11 columns to match SCHEMA.M_ALIAS (V6.0.003 added 3 cols)
+        //   Same fix as canonical push above — must include verified_by/review_id/verified_at
         globalRows.push([
-          generateShortId('A'),
-          masterUuid,
-          rawVariant,
-          entityType,
-          variantConfidence,
-          context.source || 'AUTO_ENRICH_FACT',
-          now,
-          true
+          generateShortId('A'), // [0] alias_id
+          masterUuid, // [1] master_uuid
+          rawVariant, // [2] variant_name
+          entityType, // [3] entity_type
+          variantConfidence, // [4] confidence (95 for PERSON, 90 for PLACE)
+          context.source || 'AUTO_ENRICH_FACT', // [5] source
+          now, // [6] created_at
+          true, // [7] active_flag
+          '', // [8] verified_by (empty — AUTO_ENRICH is not human-verified)
+          '', // [9] review_id (empty — not from Q_REVIEW)
+          '' // [10] verified_at (empty — not verified)
         ]);
       }
 
@@ -874,6 +945,38 @@ function cleanupStaleCanonicalAliases_(newGlobalAliasRows, context) {
         keysToCheck.length +
         ' entities'
     );
+
+    // [V6.0.007] Audit Trail — record batch alias deactivation (Critical-Only scope)
+    //   Since this is a batch operation, we log one DELETE record per deactivated row.
+    //   For very large batches (>50), we summarize to avoid audit spam.
+    //   Failsafe: logAuditTrail never throws — wrapped in its own try/catch
+    if (typeof logAuditTrail === 'function' && typeof AUDIT_ENTITY_TYPES !== 'undefined') {
+      if (rowsToDeactivate.length <= 50) {
+        // Log each row individually for fine-grained audit
+        rowsToDeactivate.forEach(function (rowNum) {
+          logAuditTrail(
+            AUDIT_ENTITY_TYPES.ALIAS,
+            'row:' + rowNum,
+            AUDIT_ACTIONS.DELETE,
+            'active_flag',
+            'true',
+            'false',
+            'cleanupStaleCanonicalAliases_ (batch)'
+          );
+        });
+      } else {
+        // Large batch — log one summary record
+        logAuditTrail(
+          AUDIT_ENTITY_TYPES.ALIAS,
+          'batch:' + keysToCheck.length,
+          AUDIT_ACTIONS.DELETE,
+          'active_flag',
+          String(rowsToDeactivate.length) + ' rows',
+          'false',
+          'cleanupStaleCanonicalAliases_ (batch summary)'
+        );
+      }
+    }
   } catch (err) {
     // Non-fatal — don't break the pipeline just because cleanup failed
     logError('cleanupStaleCanonicalAliases_', err.message, err);
@@ -882,12 +985,38 @@ function cleanupStaleCanonicalAliases_(newGlobalAliasRows, context) {
 
 /**
  * matchCommitGlobalAlias_ — [F-12] เขียน M_ALIAS + cache invalidation
+ *   [V6.0.007] Defensive width check — auto-pad short rows to SCHEMA.M_ALIAS.length
+ *   to prevent "จำนวนคอลัมน์ไม่ตรง" Sheets API error if a future schema change
+ *   misses a row push site.
  * @param {Sheet} mAliasSheet - Sheet object สำหรับ M_ALIAS
  * @param {Array} rows - Array of row arrays สำหรับ M_ALIAS
  */
 function matchCommitGlobalAlias_(mAliasSheet, rows) {
   if (rows.length > 0 && mAliasSheet) {
-    mAliasSheet.getRange(mAliasSheet.getLastRow() + 1, 1, rows.length, SCHEMA[SHEET.M_ALIAS].length).setValues(rows);
+    const expectedWidth = SCHEMA[SHEET.M_ALIAS].length; // 11 (V6.0.003)
+    // [V6.0.007] Defensive: pad short rows to expected width (fill with '')
+    //   This prevents total pipeline failure if a row push site was missed
+    //   during a schema migration. Logs a warning so the missed site can be fixed.
+    let widthMismatchFound = false;
+    const paddedRows = rows.map(function (row) {
+      if (row.length < expectedWidth) {
+        widthMismatchFound = true;
+        const padded = row.slice();
+        while (padded.length < expectedWidth) padded.push('');
+        return padded;
+      }
+      return row;
+    });
+    if (widthMismatchFound) {
+      logWarn(
+        'MatchEngine',
+        'matchCommitGlobalAlias_: detected row(s) with width < ' +
+          expectedWidth +
+          ' — auto-padded with empty strings. Check matchEnrichEntityAliases_ and generatePersonAliasesFromHistory_' +
+          ' to ensure all row pushes include the V6.0.003 columns (verified_by, review_id, verified_at).'
+      );
+    }
+    mAliasSheet.getRange(mAliasSheet.getLastRow() + 1, 1, paddedRows.length, expectedWidth).setValues(paddedRows);
     // [FIX BUG-C01 V5.5.022] Use invalidateChunkedCache_ instead of removeAll
     //   เดิมใช้ removeAll เฉพาะ base keys ทำให้ chunk keys (_CHUNKS, _0, _1, ...) ตกค้าง
     //   loadGlobalAliasesMap_/loadGlobalAliasReverseIndex_ อ่านจาก chunk keys เก่า → stale alias data
@@ -1408,40 +1537,25 @@ function handleReview_(srcObj, decision, personResult, placeResult, geoResult) {
 //   - 01_Config.gs:106 — ลบบรรทัด invalidateSameDayDestCache_()
 //   หากต้องการ restore → ดู git history ของ commit นี้
 
-/**
- * detectSameGeoMultiPerson — [AUDIT-002 V5.5.042] ⚠️ DEAD CODE — ไม่ถูกเรียกใช้ใน production
- *
- *   ฟังก์ชันนี้ถูก implement สมบูรณ์ตั้งแต่ v5.4 แต่ไม่ได้ถูก wire เข้า makeMatchDecision()
- *   หรือ flow อื่นใดใน pipeline ทำให้ฟีเจอร์ "ตรวจจับหลายบุคคลใช้พิกัดเดียวกัน"
- *   ที่ BLUEPRINT.md §6 อ้างว่ามี — จริงๆ แล้วไม่เคยทำงาน
- *
- *   ผู้ดูแลควรตัดสินใจ:
- *   - ถ้าต้องการฟีเจอร์นี้ → wire เข้า makeMatchDecision() ใน Rule 3.5 (NEARBY_PENDING)
- *     โดยเรียก detectSameGeoMultiPerson(geoId, currentPersonId) แล้วส่งเข้า Q_REVIEW
- *     ถ้าพบ conflict (return true)
- *   - ถ้าไม่ต้องการ → ลบฟังก์ชันนี้ทิ้ง + แก้ BLUEPRINT.md §6 ให้ตรงกับโค้ด
- *
- *   ตอนนี้คงไว้เป็น utility function สำหรับ admin เรียกดูด้วยตนเองผ่าน Apps Script Editor
- *
- * @param {string} geoId
- * @param {string} currentPersonId
- * @return {boolean} true ถ้ามี person อื่นใช้ geoId เดียวกัน
- */
-function detectSameGeoMultiPerson(geoId, currentPersonId) {
-  // [AUDIT-002 V5.5.042] Log warning ถ้าถูกเรียก เพื่อให้ผู้ดูแลสังเกตเห็นว่า
-  //   ฟังก์ชันนี้ยังไม่ได้ wire เข้า production pipeline
-  if (typeof logWarn === 'function') {
-    logWarn(
-      'MatchEngine',
-      'detectSameGeoMultiPerson() ถูกเรียก — หมายเหตุ: ฟังก์ชันนี้ไม่ได้ wire เข้า makeMatchDecision ' +
-        '(dead code ตั้งแต่ v5.4) ตรวจสอบ BLUEPRINT.md §6 สำหรับการ wire ที่ถูกต้อง'
-    );
-  }
-  const allDests = loadAllDestinations_();
-  return allDests.some(
-    (d) => d.geoId === geoId && d.personId !== currentPersonId && d.status === APP_CONST.STATUS_ACTIVE
-  );
-}
+// [REMOVED V6.0.007] detectSameGeoMultiPerson — dead code since v5.4
+//   ฟังก์ชันนี้ถูก implement สมบูรณ์ตั้งแต่ v5.4 แต่ไม่เคยถูก wire เข้า makeMatchDecision()
+//   หรือ flow อื่นใดใน pipeline ทำให้เป็น dead code มาตลอด
+//   ตั้งแต่ V5.5.042 ถูก mark เป็น "DEAD CODE — ไม่ถูกเรียกใช้ใน production"
+//   ใน V6.0.007 ลบทิ้งสุดท้ายเพื่อลดความสับสน + ลด code maintenance burden
+//
+//   หากต้องการ restore → ดู git history ของ commit V6.0.007 (Feature 4: Dead Code Cleanup)
+//   หากต้องการฟีเจอร์ "ตรวจจับหลายบุคคลใช้พิกัดเดียวกัน" → สร้างใหม่แบบ wire เข้า
+//   makeMatchDecision() Rule 3.5 (NEARBY_PENDING) ตั้งแต่ต้น อย่า restore แบบเดิม
+//
+//   Original signature (for reference):
+//   function detectSameGeoMultiPerson(geoId, currentPersonId) { ... }
+//   - Returns true ถ้ามี person อื่นใช้ geoId เดียวกัน (ใน M_DESTINATION)
+//   - ใช้ loadAllDestinations_() + .some() check
+//
+//   Reason for removal:
+//   - ไม่มี caller ใน .gs ใด (ตรวจด้วย grep "detectSameGeoMultiPerson" src/ → 0 ผลลัพธ์)
+//   - ฟังก์ชัน log warning ทุกครั้งที่ถูกเรียก = wasted log space
+//   - BLUEPRINT.md (current version) ไม่ได้อ้างถึงฟีเจอร์นี้อีกแล้ว (V6.0 doc sync)
 
 function getGeoProvince_(geoId) {
   if (!geoId) return '';
@@ -1478,16 +1592,215 @@ function resetProcessingState_() {
 /**
  * [NEW v5.2.003] Auto-Trigger System
  * [FIX v5.2.015] ป้องกันการลบทริกเกอร์ตั้งเวลาถาวรของผู้ใช้โดยการจำ ID
+ * [FIX V6.0.007] Resilient trigger creation:
+ *   - 3 retries with exponential backoff (2s, 4s, 8s) for transient GAS server errors
+ *   - Quota check before create (warn if >15 time-based triggers exist)
+ *   - Non-fatal: if all retries fail, log warning + alert user but DON'T throw
+ *     Reason: pipeline has already done useful work in this batch — losing it
+ *     because trigger creation failed would be worse than just asking user
+ *     to manually re-run via menu.
  */
 function installAutoResume_(funcName) {
   removeAutoResume_(); // ลบของเก่าก่อนถ้ามี
-  const trigger = ScriptApp.newTrigger(funcName)
-    .timeBased()
-    .after(60 * 1000) // ให้รันต่อในอีก 1 นาที (หลบ Timeout)
-    .create();
+
+  // [V6.0.007] Pre-check: count existing triggers + cleanup orphans if approaching quota
+  //   GAS limit: 20 time-based triggers per user per script
+  //   If we have >15, try to cleanup any orphans (auto-resume triggers that lost their property mapping)
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    if (triggers.length > 15) {
+      logWarn(
+        'MatchEngine',
+        'installAutoResume_: trigger count = ' +
+          triggers.length +
+          ' (approaching GAS quota of 20) — cleaning up orphans'
+      );
+      cleanupOrphanAutoResumeTriggers_();
+    }
+  } catch (quotaErr) {
+    // Non-fatal — log and continue with trigger creation attempt
+    logWarn('MatchEngine', 'installAutoResume_: quota pre-check failed (non-fatal): ' + quotaErr.message);
+  }
+
+  // [V6.0.007] Retry loop with exponential backoff for transient GAS server errors
+  //   Common error: "ขออภัย มีข้อผิดพลาดของเซิร์ฟเวอร์เกิดขึ้น โปรดรอสักครู่แล้วลองอีกครั้ง"
+  //   This is a Google-side transient error — retry usually succeeds within 2-3 attempts.
+  const maxRetries = 3;
+  const backoffMs = [2000, 4000, 8000]; // 2s, 4s, 8s
+  let lastError = null;
+  let trigger = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      trigger = ScriptApp.newTrigger(funcName)
+        .timeBased()
+        .after(60 * 1000) // ให้รันต่อในอีก 1 นาที (หลบ Timeout)
+        .create();
+      break; // success — exit retry loop
+    } catch (err) {
+      lastError = err;
+      const isLastAttempt = attempt === maxRetries;
+      if (isLastAttempt) {
+        logError(
+          'MatchEngine',
+          'installAutoResume_: trigger creation failed after ' + maxRetries + ' attempts — ' + err.message,
+          err
+        );
+      } else {
+        logWarn(
+          'MatchEngine',
+          'installAutoResume_: attempt ' +
+            attempt +
+            '/' +
+            maxRetries +
+            ' failed — ' +
+            err.message +
+            ' — retrying in ' +
+            backoffMs[attempt - 1] / 1000 +
+            's...'
+        );
+        Utilities.sleep(backoffMs[attempt - 1]);
+      }
+    }
+  }
+
+  // [V6.0.007] Non-fatal failure handling
+  //   If all retries failed, don't throw — just log + alert user
+  //   Pipeline has already done useful work (e.g., processed 72/650 rows)
+  //   Throwing here would discard that work AND make the next manual run harder
+  //   because SYNC_STATUS would still show in-flight.
+  if (!trigger) {
+    const errMsg = lastError ? lastError.message : 'unknown error';
+    logError(
+      'MatchEngine',
+      'installAutoResume_: ALL RETRIES FAILED — trigger NOT created. ' +
+        'Pipeline will NOT auto-resume. User must manually re-run via menu "🔄 รัน Pipeline (Match Engine)". ' +
+        'Last error: ' +
+        errMsg
+    );
+    // Alert user (non-blocking — safeUiAlert_ handles trigger context)
+    if (typeof safeUiAlert_ === 'function') {
+      try {
+        safeUiAlert_(
+          '⚠️ Auto-Resume ล้มเหลว',
+          'ไม่สามารถติดตั้ง trigger สำหรับรันต่อได้หลังจากลอง 3 ครั้ง\n\n' +
+            'Pipeline หยุดที่แถวปัจจุบัน — ข้อมูลที่ประมวลผลแล้วยังถูกบันทึก\n\n' +
+            'กรุณารันต่อด้วยตนเอง:\n' +
+            'เมนู LMDS > Pipeline > 🔄 รัน Pipeline (Match Engine)\n\n' +
+            'Error: ' +
+            errMsg
+        );
+      } catch (alertErr) {
+        // ignore — alert is best-effort
+      }
+    }
+    // Send Telegram alert if available (for visibility)
+    if (typeof sendPipelineAlert_ === 'function') {
+      try {
+        sendPipelineAlert_(
+          '⚠️ Auto-Resume ล้มเหลว — กรุณารัน Pipeline ต่อด้วยตนเอง (last error: ' + errMsg + ')',
+          'WARN'
+        );
+      } catch (alertErr) {
+        // ignore
+      }
+    }
+    return; // exit without throwing
+  }
+
   const triggerId = trigger.getUniqueId();
   PropertiesService.getScriptProperties().setProperty('AUTO_RESUME_TRIGGER_ID', triggerId);
   logInfo('MatchEngine', `ติดตั้ง Auto-Trigger: ${funcName} (ID: ${triggerId}) จะทำงานต่อใน 1 นาที`);
+}
+
+/**
+ * cleanupOrphanAutoResumeTriggers_ — [V6.0.007] Remove orphan time-based triggers
+ *   that call runMatchEngine but have no matching AUTO_RESUME_TRIGGER_ID property.
+ *   These orphans accumulate when removeAutoResume_ fails (e.g., property was
+ *   cleared but trigger wasn't deleted, or vice versa).
+ * @private
+ */
+function cleanupOrphanAutoResumeTriggers_() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const knownTriggerId = props.getProperty('AUTO_RESUME_TRIGGER_ID');
+    const triggers = ScriptApp.getProjectTriggers();
+    let deletedCount = 0;
+
+    for (const trigger of triggers) {
+      const handler = trigger.getHandlerFunction();
+      const triggerId = trigger.getUniqueId();
+      // Only delete time-based triggers that call runMatchEngine AND are not the known one
+      // (preserve any user-created triggers for other functions)
+      if (handler === 'runMatchEngine' && triggerId !== knownTriggerId) {
+        ScriptApp.deleteTrigger(trigger);
+        deletedCount++;
+      }
+    }
+
+    if (deletedCount > 0) {
+      logInfo(
+        'MatchEngine',
+        'cleanupOrphanAutoResumeTriggers_: deleted ' + deletedCount + ' orphan runMatchEngine triggers'
+      );
+    }
+  } catch (err) {
+    logWarn('MatchEngine', 'cleanupOrphanAutoResumeTriggers_ failed (non-fatal): ' + err.message);
+  }
+}
+
+// ============================================================
+// SECTION: [V6.0.007] Emergency Stop Signal
+//   User can request pipeline stop via menu "🛑 หยุด Pipeline (Emergency Stop)".
+//   The running pipeline checks isPipelineStopRequested_() every 10 rows
+//   and exits gracefully if true (flushes current batch + removes auto-resume
+//   trigger so it doesn't fire after user stop).
+//
+//   Communication channel: PropertiesService script property 'PIPELINE_STOP_REQUESTED'
+//   - "true" = stop requested
+//   - absent/other = no stop requested (default)
+//
+//   Why PropertiesService instead of LockService?
+//   - PropertiesService is readable from any execution context (menu UI vs
+//     pipeline execution run in different processes)
+//   - LockService is for mutual exclusion, not signaling
+//   - CacheService would also work but has TTL (we want the signal to persist
+//     until the pipeline sees it)
+// ============================================================
+
+const PIPELINE_STOP_KEY = 'PIPELINE_STOP_REQUESTED';
+
+/**
+ * isPipelineStopRequested_ — [V6.0.007] Check if user requested emergency stop
+ *   Called every 10 rows from runMatchEngineLoop_. Returns true if the
+ *   PIPELINE_STOP_REQUESTED property is set to 'true'.
+ *   Failsafe: returns false on any error (don't break pipeline just because
+ *   PropertiesService had a hiccup).
+ * @return {boolean}
+ * @private
+ */
+function isPipelineStopRequested_() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty(PIPELINE_STOP_KEY) === 'true';
+  } catch (e) {
+    // Non-fatal — don't break pipeline just because stop check failed
+    return false;
+  }
+}
+
+/**
+ * clearPipelineStopSignal_ — [V6.0.007] Clear the stop signal
+ *   Called by finalizeMatchEngine_ after a graceful stop, OR by the
+ *   "🟢 ยกเลิก Stop Signal" menu if user wants to manually clear.
+ *   Failsafe: silently ignores errors.
+ * @private
+ */
+function clearPipelineStopSignal_() {
+  try {
+    PropertiesService.getScriptProperties().deleteProperty(PIPELINE_STOP_KEY);
+  } catch (e) {
+    // ignore
+  }
 }
 
 function removeAutoResume_() {
@@ -1610,11 +1923,12 @@ function persistResult_(factData, reviewData) {
  * @param {Object} srcObj - Source object with raw data
  * @param {string} decisionType - 'MERGE_TO_CANDIDATE' or 'CREATE_NEW'
  * @param {Object} candidates - { candPersonIds: [], candPlaceIds: [] } for MERGE
+ * @param {string} [optReviewId] - Q_REVIEW review_id (for audit trail in M_ALIAS, MERGE only)
  * @return {Object|null} { factRowData } or null
  */
-function resolveAndPersist_(srcObj, decisionType, candidates) {
+function resolveAndPersist_(srcObj, decisionType, candidates, optReviewId) {
   if (decisionType === 'MERGE_TO_CANDIDATE') {
-    return resolveAndPersistMerge_(srcObj, candidates);
+    return resolveAndPersistMerge_(srcObj, candidates, optReviewId);
   } else if (decisionType === 'CREATE_NEW') {
     return resolveAndPersistCreate_(srcObj);
   }
@@ -1624,11 +1938,16 @@ function resolveAndPersist_(srcObj, decisionType, candidates) {
 
 /**
  * resolveAndPersistMerge_ — [REF-001] MERGE path within resolveAndPersist_
+ *   [V6.0.007] Added optReviewId parameter — wired through to createGlobalAlias
+ *   so the M_ALIAS verified_by/review_id/verified_at fields are populated
+ *   for HUMAN-verified aliases (the previous code passed verified_by but
+ *   left review_id empty, which is why M_ALIAS cols 8-10 were empty).
  * @param {Object} srcObj
  * @param {Object} candidates - { candPersonIds: [], candPlaceIds: [] }
+ * @param {string} [optReviewId] - Q_REVIEW review_id (for audit trail in M_ALIAS)
  * @return {Object|null} { factRowData } or null
  */
-function resolveAndPersistMerge_(srcObj, candidates) {
+function resolveAndPersistMerge_(srcObj, candidates, optReviewId) {
   let targetPersonId = null;
   if (candidates && candidates.candPersonIds && candidates.candPersonIds.length > 0) {
     const personResult = resolvePerson(srcObj.rawPersonName);
@@ -1699,11 +2018,31 @@ function resolveAndPersistMerge_(srcObj, candidates) {
   //   เรียนรู้ typo pattern โดยสร้าง Global Alias จากชื่อดิบ → masterUuid ทันที
   //   รอบ Match Engine ถัดไปจะจับคู่ได้เองโดยไม่ต้องเข้า Q_REVIEW ซ้ำ
   //   [Rule 12] ห้ามให้ alias-learning ทำให้ MERGE decision ล้มเหลว
+  // [V6.0.003] Pass verified_by + review_id to createGlobalAlias — audit trail
+  //   - verified_by: ดึงจาก Session.getEffectiveUser().getEmail() (อาจว่างใน WebApp context)
+  //   - review_id:   ไม่มีใน signature ปัจจุบัน (resolveAndPersist_ → resolveAndPersistMerge_
+  //     ไม่ได้รับ reviewId จาก caller) — pass เป็น '' ไปก่อน, ปรับ caller chain ภายหลัง
   try {
+    // [V6.0.003] ดึง email ผู้ Reviewer สำหรับ verified_by field
+    let verifiedBy = '';
+    try {
+      verifiedBy = Session.getEffectiveUser().getEmail() || '';
+    } catch (e) {
+      /* WebApp context — Session may not be available */
+    }
+
     if (targetPersonId && srcObj.rawPersonName) {
       const personUuid = getPersonMasterUuid_(targetPersonId);
       if (personUuid) {
-        const newAliasId = createGlobalAlias(personUuid, srcObj.rawPersonName, 'PERSON', 100, 'HUMAN');
+        const newAliasId = createGlobalAlias(
+          personUuid,
+          srcObj.rawPersonName,
+          'PERSON',
+          100,
+          'HUMAN',
+          verifiedBy,
+          optReviewId || ''
+        );
         if (newAliasId) {
           logInfo('MatchEngine', 'Self-Healing Alias: PERSON "' + srcObj.rawPersonName + '" → ' + targetPersonId);
         }
@@ -1712,7 +2051,15 @@ function resolveAndPersistMerge_(srcObj, candidates) {
     if (targetPlaceId && srcObj.rawPlaceName) {
       const placeUuid = getPlaceMasterUuid_(targetPlaceId);
       if (placeUuid) {
-        const newAliasId = createGlobalAlias(placeUuid, srcObj.rawPlaceName, 'PLACE', 100, 'HUMAN');
+        const newAliasId = createGlobalAlias(
+          placeUuid,
+          srcObj.rawPlaceName,
+          'PLACE',
+          100,
+          'HUMAN',
+          verifiedBy,
+          optReviewId || ''
+        );
         if (newAliasId) {
           logInfo('MatchEngine', 'Self-Healing Alias: PLACE "' + srcObj.rawPlaceName + '" → ' + targetPlaceId);
         }

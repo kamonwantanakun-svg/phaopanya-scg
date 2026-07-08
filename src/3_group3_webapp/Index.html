@@ -157,6 +157,26 @@
             <i data-lucide="search" class="w-4 h-4"></i>
             <span>Search</span>
           </button>
+
+          <button
+            type="button"
+            onclick="globalThis.navigateTo_('map')"
+            class="nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors w-full text-left"
+            data-route="map"
+          >
+            <i data-lucide="map-pin" class="w-4 h-4"></i>
+            <span>Map Analytics</span>
+          </button>
+
+          <button
+            type="button"
+            onclick="globalThis.navigateTo_('livefeed')"
+            class="nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors w-full text-left"
+            data-route="livefeed"
+          >
+            <i data-lucide="activity" class="w-4 h-4"></i>
+            <span>Live Feed</span>
+          </button>
         </nav>
 
         <!-- Divider -->
@@ -241,6 +261,6 @@
     <?!= include_('Api'); ?> <?!= include_('Auth'); ?> <?!= include_('StatCard'); ?> <?!= include_('DataTable'); ?> <?!=
     include_('ChartCard'); ?> <?!= include_('Dashboard'); ?> <?!= include_('QReview'); ?> <?!= include_('FactDelivery');
     ?> <?!= include_('SourceSheet'); ?> <?!= include_('MatchEngine'); ?> <?!= include_('Search'); ?> <?!=
-    include_('App'); ?>
+    include_('MapAnalytics'); ?> <?!= include_('LiveFeed'); ?> <?!= include_('App'); ?>
   </body>
 </html>

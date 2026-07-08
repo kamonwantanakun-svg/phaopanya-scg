@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.002
+ * VERSION: 6.0.007
  * FILE: 00_App.gs
  * LMDS V5.5 — Application Entry Point & Menu Controller
  * ===================================================
@@ -86,8 +86,15 @@ function onOpen() {
         .addItem('Step 2 — Normalize ชื่อ/ที่อยู่', 'runNormalize')
         .addItem('Step 3 — Match Engine', 'runMatchEngine')
         .addSeparator()
+        .addItem('🛑 [V6] หยุด Pipeline (Emergency Stop)', 'requestPipelineStop_UI')
+        .addItem('🟢 [V6] ยกเลิก Stop Signal', 'clearPipelineStopSignal_UI')
+        .addSeparator()
+        .addItem('🔄 [V6] Backfill Alias Audit Fields', 'backfillAliasAuditFields_UI')
+        .addItem('🧹 [V6] Safe Reset (Clear Transactional Only)', 'safeResetTransactional_UI')
+        .addSeparator()
         .addItem('📋 เปิด Review Queue', 'openReviewQueue')
         .addItem('▶️ รันคำสั่งที่เลือกไว้ทั้งหมด', 'applyAllPendingDecisions')
+        .addItem('🧹 [V6] ล้างแถวที่ Done/Escalated', 'clearDoneReviews_UI')
         .addItem('📊 รายงาน Data Quality', 'buildFullQualityReport')
     )
 
@@ -121,12 +128,23 @@ function onOpen() {
         .addItem('🛡️ ป้องกันข้อมูล Sensitive', 'applySheetProtection_UI')
         .addSeparator()
         .addItem('🛡️ [PH2] Preflight Audit', 'runPreflightAudit')
+        .addItem('🔍 [V6] Pipeline Preflight (Strict)', 'runPipelinePreflightStrict_UI')
         .addItem('🧹 [PH2] Detect Duplicates', 'detectDoubleProcessing')
         .addItem('✅ ตรวจสอบ System Integrity', 'checkSystemIntegrity')
         .addItem('🔍 วินิจฉัย Pipeline (Diagnostic)', 'diagnoseSystemState')
         .addSeparator()
         .addItem('🔄 รีเซ็ตสถานะ SYNC (เพื่อรันใหม่)', 'resetSourceSyncStatus')
         .addItem('🧹 ล้างความจำระบบ (Clear Cache)', 'invalidateAllGlobalCaches')
+        .addSeparator()
+        .addItem('🔍 [V6] Dedup Audit (Person)', 'runDedupAuditPerson_UI')
+        .addItem('🔍 [V6] Dedup Audit (Place)', 'runDedupAuditPlace_UI')
+        .addSeparator()
+        .addItem('👥 [V6] ตั้งค่า Roles (RBAC)', 'setupRoleAssignments_UI')
+        .addSeparator()
+        .addItem('🧹 [V6] ลบ Trigger ค้าง (Cleanup)', 'cleanupStaleTriggers_UI')
+        .addItem('🧹 [V6] Cleanup Auto-Resume Triggers', 'cleanupAutoResumeTriggers_UI')
+        .addSeparator()
+        .addItem('📜 [V6] Prune Audit Trail (90 วัน)', 'cleanupAuditTrail_UI')
         .addItem('📖 ดู Version Info', 'showVersionInfo')
     )
 
@@ -701,5 +719,479 @@ function diagnoseRecentErrors_(ss, lines, fixes) {
       lines.push(`  ❌ [${mod}] ${msg}`);
     });
     fixes.push('ตรวจสอบ Error ใน SYS_LOG — อาจเป็นสาเหตุที่ชีตว่าง');
+  }
+}
+
+// ============================================================
+// SECTION 5: [V6.0.006] Trigger Cleanup
+// ============================================================
+
+/**
+ * cleanupStaleTriggers_UI — [V6.0.006] ลบ trigger ที่ค้างอยู่ (handler function ไม่มีแล้ว)
+ *   ใช้หลังจากลบ Smart Navigation — trigger เก่าที่เรียก handleSelectionChange_
+ *   ยังค้างอยู่ทำให้เกิด error "Script function not found"
+ */
+function cleanupStaleTriggers_UI() {
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    const staleHandlers = [
+      'handleSelectionChange_',
+      'onSelectionChange',
+      'installSmartNavTrigger',
+      'autoInstallSmartNav_'
+    ];
+    let deleted = 0;
+    const details = [];
+
+    for (let i = 0; i < triggers.length; i++) {
+      const handler = triggers[i].getHandlerFunction();
+      if (staleHandlers.indexOf(handler) !== -1) {
+        details.push('  • ' + handler + ' (ID: ' + triggers[i].getUniqueId() + ')');
+        ScriptApp.deleteTrigger(triggers[i]);
+        deleted++;
+      }
+    }
+
+    if (deleted === 0) {
+      safeUiAlert_('✅ ไม่พบ trigger ค้าง — ทุก trigger ใช้งานได้ปกติ');
+    } else {
+      logInfo('App', 'cleanupStaleTriggers_UI: ลบ trigger ค้าง ' + deleted + ' ตัว:\n' + details.join('\n'));
+      safeUiAlert_('✅ ลบ trigger ค้าง ' + deleted + ' ตัว:\n\n' + details.join('\n'));
+    }
+  } catch (e) {
+    logError('App', 'cleanupStaleTriggers_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+/**
+ * cleanupAutoResumeTriggers_UI — [V6.0.007] Menu wrapper to cleanup orphan
+ *   time-based triggers that call runMatchEngine. These orphans accumulate
+ *   when installAutoResume_ fails mid-way (e.g., trigger created but property
+ *   not set, or property cleared but trigger not deleted).
+ *
+ *   Workflow:
+ *     1. Scan all project triggers
+ *     2. Filter to those with handler='runMatchEngine'
+ *     3. Read AUTO_RESUME_TRIGGER_ID property — that's the "current" one (keep)
+ *     4. Everything else is an orphan (delete candidate)
+ *     5. Show detailed report (current vs orphans) + ask for confirmation
+ *     6. On YES → delete orphans + clear stale property if no current trigger remains
+ *     7. On NO → exit without changes
+ *
+ *   Safety:
+ *     - Only deletes time-based triggers with handler='runMatchEngine'
+ *     - Preserves any user-created triggers for other functions
+ *     - Confirmation dialog before any deletion
+ *     - Wrapped in try/catch — non-fatal on any error
+ */
+function cleanupAutoResumeTriggers_UI() {
+  try {
+    const ui = SpreadsheetApp.getUi();
+    const triggers = ScriptApp.getProjectTriggers();
+    const props = PropertiesService.getScriptProperties();
+    const knownTriggerId = props.getProperty('AUTO_RESUME_TRIGGER_ID');
+
+    // Filter to runMatchEngine triggers only
+    const runMatchEngineTriggers = [];
+    for (let i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'runMatchEngine') {
+        runMatchEngineTriggers.push(triggers[i]);
+      }
+    }
+
+    if (runMatchEngineTriggers.length === 0) {
+      safeUiAlert_(
+        '✅ ไม่พบ runMatchEngine triggers',
+        'ไม่มี time-based trigger ใดที่เรียก runMatchEngine\n' + 'ระบบสะอาด — ไม่จำเป็นต้อง cleanup'
+      );
+      return;
+    }
+
+    // Classify each as "current" (matches known ID) or "orphan"
+    const current = [];
+    const orphans = [];
+    runMatchEngineTriggers.forEach(function (t) {
+      const tid = t.getUniqueId();
+      const info = {
+        id: tid,
+        type: t.getEventType(),
+        handler: t.getHandlerFunction(),
+        createdAt: t.getTriggerSourceId() || 'n/a'
+      };
+      if (knownTriggerId && tid === knownTriggerId) {
+        current.push(info);
+      } else {
+        orphans.push(info);
+      }
+    });
+
+    // Build report
+    const lines = [];
+    lines.push('📊 Auto-Resume Trigger Report\n');
+    lines.push('รวม runMatchEngine triggers: ' + runMatchEngineTriggers.length + ' ตัว');
+    lines.push('  • Current (active): ' + current.length);
+    lines.push('  • Orphan (stale): ' + orphans.length + '\n');
+
+    if (current.length > 0) {
+      lines.push('─── ✅ Current (จะ KEPT) ───');
+      current.forEach(function (c) {
+        lines.push('• ID: ' + c.id);
+      });
+    }
+
+    if (orphans.length > 0) {
+      lines.push('\n─── ❌ Orphan (จะ DELETED) ───');
+      orphans.forEach(function (o) {
+        lines.push('• ID: ' + o.id);
+      });
+    }
+
+    if (orphans.length === 0) {
+      safeUiAlert_(
+        '✅ ไม่มี orphan triggers',
+        lines.join('\n') + '\n\nทุก trigger เป็น current — ไม่จำเป็นต้อง cleanup'
+      );
+      return;
+    }
+
+    // Ask for confirmation
+    const confirm = ui.alert(
+      '🧹 Cleanup Auto-Resume Triggers',
+      lines.join('\n') + '\n\nยืนยันการลบ ' + orphans.length + ' orphan trigger(s)?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่มีการลบ trigger');
+      return;
+    }
+
+    // Delete orphans
+    let deletedCount = 0;
+    const deletedIds = [];
+    orphans.forEach(function (o) {
+      // Find the original trigger object by ID (need to re-fetch because we
+      // can't store the trigger object across the forEach above reliably)
+      for (let i = 0; i < triggers.length; i++) {
+        if (triggers[i].getUniqueId() === o.id) {
+          ScriptApp.deleteTrigger(triggers[i]);
+          deletedCount++;
+          deletedIds.push(o.id);
+          break;
+        }
+      }
+    });
+
+    // If no current trigger remains, clear the stale property
+    if (current.length === 0 && deletedCount === runMatchEngineTriggers.length) {
+      props.deleteProperty('AUTO_RESUME_TRIGGER_ID');
+      logInfo(
+        'App',
+        'cleanupAutoResumeTriggers_UI: cleared stale AUTO_RESUME_TRIGGER_ID property (no current trigger remains)'
+      );
+    }
+
+    logInfo('App', 'cleanupAutoResumeTriggers_UI: deleted ' + deletedCount + ' orphan runMatchEngine triggers');
+
+    safeUiAlert_(
+      '✅ ลบ orphan triggers เรียบร้อย',
+      'ลบทั้งหมด ' +
+        deletedCount +
+        ' ตัว:\n\n' +
+        deletedIds
+          .map(function (id) {
+            return '• ' + id;
+          })
+          .join('\n') +
+        '\n\nCurrent triggers ที่เหลือ: ' +
+        current.length +
+        ' ตัว'
+    );
+  } catch (e) {
+    logError('App', 'cleanupAutoResumeTriggers_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+// ============================================================
+// SECTION: [V6.0.007] Emergency Stop Signal UI
+// ============================================================
+
+/**
+ * requestPipelineStop_UI — [V6.0.007] Menu wrapper to request emergency stop
+ *   of the running pipeline. Sets PIPELINE_STOP_REQUESTED='true' in script
+ *   properties. The running pipeline (runMatchEngineLoop_) checks this every
+ *   10 rows and exits gracefully when true.
+ *
+ *   Workflow:
+ *     1. Show confirmation dialog explaining what will happen
+ *     2. On YES → set stop signal + alert user that pipeline will stop within ~10 rows
+ *     3. Pipeline (running in another execution) sees the signal, flushes its
+ *        current batch, removes auto-resume trigger, and exits
+ *     4. Data processed so far is preserved in SOURCE SYNC_STATUS + FACT_DELIVERY
+ *
+ *   Important:
+ *     - This menu returns immediately (doesn't wait for pipeline to stop)
+ *     - User should check SYS_LOG to confirm pipeline stopped
+ *     - Stop typically takes effect within 10-30 seconds (10 rows × ~1-3s per row)
+ *     - If pipeline is NOT running, the signal stays set until cleared —
+ *       next pipeline run would stop immediately at row 0. Use
+ *       "🟢 ยกเลิก Stop Signal" menu to clear before next run.
+ */
+function requestPipelineStop_UI() {
+  try {
+    const ui = SpreadsheetApp.getUi();
+    const confirm = ui.alert(
+      '🛑 หยุด Pipeline (Emergency Stop)',
+      'กำลังจะส่งสัญญาณหยุด pipeline\n\n' +
+        'สิ่งที่จะเกิดขึ้น:\n' +
+        '• Pipeline จะหยุดภายใน ~10-30 วินาที (หลังแถวปัจจุบัน)\n' +
+        '• ข้อมูลที่ประมวลผลแล้วจะถูกบันทึก (flush batch)\n' +
+        '• Auto-Resume trigger จะถูกลบ (pipeline จะไม่รันต่อเอง)\n' +
+        '• Stop signal จะถูก clear อัตโนมัติหลัง pipeline หยุด\n\n' +
+        'หมายเหตุ:\n' +
+        '• ถ้า pipeline ไม่ได้รันอยู่, signal จะค้างจนกว่าจะกด "🟢 ยกเลิก Stop Signal"\n' +
+        '• สามารถรัน pipeline ใหม่ได้หลังจากหยุด (จะเริ่มจากแถวที่ยังไม่ประมวลผล)\n\n' +
+        'ยืนยันการหยุด pipeline?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่ส่ง stop signal');
+      return;
+    }
+
+    // Set the stop signal
+    PropertiesService.getScriptProperties().setProperty('PIPELINE_STOP_REQUESTED', 'true');
+    logInfo('App', 'requestPipelineStop_UI: stop signal SET — pipeline will stop within ~10-30 seconds');
+
+    safeUiAlert_(
+      '🛑 Stop signal ถูกส่งแล้ว',
+      'Pipeline จะหยุดภายใน ~10-30 วินาที\n\n' +
+        'สิ่งที่จะเกิดขึ้น:\n' +
+        '✓ Pipeline จะ flush batch ปัจจุบัน (ข้อมูลไม่หาย)\n' +
+        '✓ Auto-Resume trigger จะถูกลบ\n' +
+        '✓ Stop signal จะถูก clear อัตโนมัติ\n\n' +
+        'ตรวจสอบ SYS_LOG เพื่อดูสถานะการหยุด\n' +
+        'ค้นหา: "🛑 STOP SIGNAL: หยุดที่แถว"'
+    );
+
+    // Try to send Telegram alert (best-effort)
+    if (typeof sendPipelineAlert_ === 'function') {
+      try {
+        sendPipelineAlert_('🛑 User กดหยุด Pipeline (Emergency Stop) — pipeline จะหยุดภายใน ~10-30 วินาที', 'WARN');
+      } catch (e) {
+        // ignore
+      }
+    }
+  } catch (e) {
+    logError('App', 'requestPipelineStop_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+/**
+ * clearPipelineStopSignal_UI — [V6.0.007] Menu wrapper to clear stop signal
+ *   Use this if:
+ *     - User pressed Emergency Stop by mistake (pipeline hasn't seen it yet)
+ *     - Pipeline crashed before clearing the signal
+ *     - Want to start a fresh pipeline run without the lingering stop signal
+ *
+ *   Idempotent — safe to call even if no signal is set.
+ */
+function clearPipelineStopSignal_UI() {
+  try {
+    const ui = SpreadsheetApp.getUi();
+    const confirm = ui.alert(
+      '🟢 ยกเลิก Stop Signal',
+      'กำลังจะ clear stop signal (PIPELINE_STOP_REQUESTED)\n\n' +
+        'ใช้เมนูนี้ถ้า:\n' +
+        '• กด Emergency Stop ไปแล้วแต่ pipeline ยังไม่หยุด (เปลี่ยนใจ)\n' +
+        '• Pipeline crash ก่อนจะ clear signal เอง\n' +
+        '• ต้องการรัน pipeline ใหม่โดยไม่มี signal ค้าง\n\n' +
+        'ยืนยันการ clear?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — signal ยังค้างอยู่');
+      return;
+    }
+
+    if (typeof clearPipelineStopSignal_ === 'function') {
+      clearPipelineStopSignal_();
+    } else {
+      // Defensive — direct fallback if helper not loaded
+      PropertiesService.getScriptProperties().deleteProperty('PIPELINE_STOP_REQUESTED');
+    }
+    logInfo('App', 'clearPipelineStopSignal_UI: stop signal CLEARED');
+
+    safeUiAlert_(
+      '✅ Stop signal cleared',
+      'Pipeline สามารถรันได้ปกติ\n\n' +
+        'ถ้า pipeline กำลังรันอยู่, มันจะไม่หยุดอีกต่อไป\n' +
+        'ถ้ายังไม่ได้รัน, สามารถเริ่มรันใหม่ได้ทันที'
+    );
+  } catch (e) {
+    logError('App', 'clearPipelineStopSignal_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+// ============================================================
+// SECTION: [V6.0.007] Backfill Alias Audit Fields UI
+// ============================================================
+
+/**
+ * backfillAliasAuditFields_UI — [V6.0.007] Menu wrapper to backfill
+ *   verified_at for existing HUMAN aliases that have empty audit fields.
+ *
+ *   Background:
+ *     V6.0.003 added 3 columns to M_ALIAS (verified_by, review_id, verified_at)
+ *     but the code didn't wire review_id through the Q_REVIEW MERGE chain
+ *     until V6.0.007. So HUMAN aliases created between V6.0.003 and V6.0.007
+ *     have empty verified_at.
+ *
+ *   This menu:
+ *     1. Confirms with user before running
+ *     2. Calls backfillAliasAuditFields() in 21_AliasService.gs
+ *     3. Shows detailed report: total scanned / backfilled / skipped / errors
+ *
+ *   Safe to run multiple times — idempotent (skips rows that already have
+ *   verified_at set).
+ */
+function backfillAliasAuditFields_UI() {
+  try {
+    const ui = SpreadsheetApp.getUi();
+    const confirm = ui.alert(
+      '🔄 Backfill Alias Audit Fields',
+      'กำลังจะ backfill verified_at สำหรับ M_ALIAS rows ที่ source=HUMAN แต่ verified_at ว่าง\n\n' +
+        'สาเหตุที่ต้อง backfill:\n' +
+        '• V6.0.003 เพิ่มคอลัมน์ verified_by/review_id/verified_at\n' +
+        '• แต่ code ไม่ได้ wire review_id ผ่าน Q_REVIEW MERGE chain จนถึง V6.0.007\n' +
+        '• ทำให้ HUMAN aliases ที่สร้างก่อน V6.0.007 มี verified_at ว่าง\n\n' +
+        'สิ่งที่จะทำ:\n' +
+        '• Scan M_ALIAS ทุกแถว\n' +
+        '• แถวที่ source=HUMAN + verified_at ว่าง → ตั้ง verified_at = created_at\n' +
+        '• แถวอื่นๆ (AUTO_ENRICH_FACT, HISTORY_ENRICH, MANUAL) → skip\n' +
+        '• review_id ไม่สามารถ backfill ได้ (Q_REVIEW rows อาจถูก clear ไปแล้ว)\n\n' +
+        'Safe: idempotent — รันซ้ำได้ จะ skip แถวที่ verified_at มีค่าแล้ว\n\n' +
+        'ยืนยันการ backfill?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่มีการ backfill');
+      return;
+    }
+
+    if (typeof backfillAliasAuditFields !== 'function') {
+      safeUiAlert_('❌ ไม่พบฟังก์ชัน backfillAliasAuditFields — ตรวจสอบว่า 21_AliasService.gs โหลดแล้ว');
+      return;
+    }
+
+    const result = backfillAliasAuditFields();
+
+    const lines = [];
+    lines.push('📊 Backfill Result\n');
+    lines.push('Total scanned: ' + result.totalScanned + ' rows');
+    lines.push('Backfilled: ' + result.backfilled + ' rows (verified_at set)');
+    lines.push('Skipped: ' + result.skipped + ' rows (non-HUMAN or already set)');
+
+    if (result.errors.length > 0) {
+      lines.push('\n❌ Errors (' + result.errors.length + '):');
+      result.errors.forEach(function (e) {
+        lines.push('• ' + e);
+      });
+    }
+
+    if (result.backfilled === 0 && result.errors.length === 0) {
+      lines.push('\n✅ ไม่มีแถวที่ต้อง backfill — ทุก HUMAN alias มี verified_at แล้ว');
+    } else if (result.backfilled > 0) {
+      lines.push('\n✅ Backfill เสร็จสิ้น — ตรวจสอบ M_ALIAS คอลัมน์ verified_at (K)');
+    }
+
+    safeUiAlert_(lines.join('\n'));
+  } catch (e) {
+    logError('App', 'backfillAliasAuditFields_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+// ============================================================
+// SECTION 6: [V6.0.007] Pipeline Preflight (Strict Mode UI)
+// ============================================================
+
+/**
+ * runPipelinePreflightStrict_UI — [V6.0.007] Menu wrapper to run pipeline preflight
+ *   in non-strict mode (display result) + offer strict-mode option (throw on issue).
+ *   Calls runPipelinePreflight() from 24_PipelineManager.gs which now supports:
+ *     - 6 dependency-aware checks (was 3)
+ *     - Structured report: { ready, issues, warnings, checks }
+ *     - Optional strict mode (throw on any issue)
+ *
+ *   This UI wrapper:
+ *     1. Runs preflight (non-strict) to display the report
+ *     2. Shows pass/fail/warn counts in alert
+ *     3. If issues exist, asks user if they want to abort (don't run pipeline)
+ */
+function runPipelinePreflightStrict_UI() {
+  try {
+    if (typeof runPipelinePreflight !== 'function') {
+      safeUiAlert_('❌ ไม่พบฟังก์ชัน runPipelinePreflight — ตรวจสอบว่า 24_PipelineManager.gs โหลดแล้ว');
+      return;
+    }
+
+    const result = runPipelinePreflight({ strict: false });
+
+    // Build report text
+    const lines = [];
+    lines.push('📊 Pipeline Preflight Report (V6.0.007)\n');
+    lines.push('Overall: ' + (result.ready ? '✅ READY' : '❌ NOT READY') + '\n');
+    lines.push(
+      'Checks: ' +
+        result.checks.length +
+        ' total | ' +
+        result.issues.length +
+        ' fail | ' +
+        result.warnings.length +
+        ' warn\n'
+    );
+
+    // Detail per check
+    lines.push('─── Detail ───');
+    result.checks.forEach(function (c) {
+      let icon = '⏭️'; // SKIP default
+      if (c.status === 'PASS') icon = '✅';
+      else if (c.status === 'FAIL') icon = '❌';
+      else if (c.status === 'WARN') icon = '⚠️';
+      lines.push(icon + ' ' + c.name + ': ' + c.detail);
+    });
+
+    // Issues (blocking)
+    if (result.issues.length > 0) {
+      lines.push('\n─── ❌ Blocking Issues (' + result.issues.length + ') ───');
+      result.issues.forEach(function (i) {
+        lines.push('• ' + i);
+      });
+    }
+
+    // Warnings (advisory)
+    if (result.warnings.length > 0) {
+      lines.push('\n─── ⚠️ Warnings (' + result.warnings.length + ') ───');
+      result.warnings.forEach(function (w) {
+        lines.push('• ' + w);
+      });
+    }
+
+    safeUiAlert_(lines.join('\n'));
+
+    // If not ready, log a warning (don't auto-abort — user may want to investigate)
+    if (!result.ready) {
+      logWarn(
+        'App',
+        'runPipelinePreflightStrict_UI: pipeline NOT READY — ' + result.issues.length + ' blocking issues'
+      );
+    }
+  } catch (e) {
+    logError('App', 'runPipelinePreflightStrict_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
   }
 }

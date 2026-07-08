@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.002
+ * VERSION: 6.0.007
  * FILE: 18_ServiceSCG.gs
  * LMDS V5.5 — SCG API Service (Group 2 Commander)
  * ===================================================
@@ -1015,12 +1015,22 @@ function clearAllSCGSheets_UI() {
 
     let cleared = 0;
 
-    [SHEET.DAILY_JOB, SHEET.OWNER_SUMMARY, SHEET.SHIPMENT_SUM].forEach((name) => {
+    // [FIX V6.0.005] เพิ่ม SHEET.INPUT ในรายการชีตที่ต้องล้าง
+    const sheetsToClear = [SHEET.DAILY_JOB, SHEET.OWNER_SUMMARY, SHEET.SHIPMENT_SUM, SHEET.INPUT];
+    sheetsToClear.forEach((name) => {
       const sheet = ss.getSheetByName(name);
       if (sheet && sheet.getLastRow() > 1) {
         // [FIX v5.5.021 M5] ใช้ clearContent แทน deleteRows เพื่อความรวดเร็วและไม่กระทบโครงสร้างตาราง
         sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getMaxColumns()).clearContent();
         cleared++;
+      } else if (sheet && name === SHEET.INPUT) {
+        // Input sheet อาจมีข้อมูลใน B1 (COOKIE) และ B3 (ShipmentNos) ไม่ได้อยู่ใน row 2+
+        // ล้างเฉพาะข้อมูลในคอลัมน์ B (ไม่ล้าก label ในคอลัมน์ A)
+        const lastRow = sheet.getLastRow();
+        if (lastRow >= 1) {
+          sheet.getRange(1, 2, lastRow, 1).clearContent();
+          cleared++;
+        }
       }
     });
 
@@ -1030,6 +1040,201 @@ function clearAllSCGSheets_UI() {
   } catch (e) {
     logError('ServiceSCG', 'clearAllSCGSheets_UI ล้มเหลว: ' + e.message, e);
     safeUiAlert_('เกิดข้อผิดพลาดในการล้างข้อมูล: ' + e.message);
+  }
+}
+
+/**
+ * safeResetTransactional_UI — [V6.0.007] Clear transactional data ONLY,
+ *   preserve master data so MatchEngine can reuse prior match results
+ *   and Self-Healing Aliases keep learning.
+ *
+ *   TRANSACTIONAL (cleared):
+ *     - SOURCE (SCGนครหลวงJWDภูมิภาค) — raw data per pipeline run
+ *     - FACT_DELIVERY — delivery records per pipeline run
+ *     - Q_REVIEW — review queue (pending + done)
+ *     - DAILY_JOB — daily operations data
+ *     - OWNER_SUMMARY — daily summary
+ *     - SHIPMENT_SUM — daily summary
+ *     - INPUT — SCG API input (shipment numbers)
+ *
+ *   MASTER (preserved — ห้ามลบ):
+ *     - M_PERSON — persons matched so far (grows over time)
+ *     - M_PLACE — places matched so far
+ *     - M_ALIAS — alias names (grows + learns from Q_REVIEW)
+ *     - M_GEO_POINT — geocoded coordinates (saves Google Maps quota)
+ *     - M_DESTINATION — destination nodes (Person+Place+Geo trinity)
+ *     - SYS_TH_GEO — Thai geo dictionary (used every pipeline run)
+ *     - SYS_NOTES — extracted notes from past runs (audit trail)
+ *     - SYS_NEGATIVE_SAMPLES — negative learning samples (IGNORE decisions)
+ *     - SYS_AUDIT_TRAIL — audit log (compliance)
+ *     - SYS_LOG — system log (debugging)
+ *     - SYS_CONFIG — system configuration
+ *
+ *   Workflow:
+ *     1. Show confirmation dialog explaining what will be cleared vs kept
+ *     2. On YES → clear each transactional sheet (preserve headers)
+ *     3. Clear pipeline caches (so next run starts fresh)
+ *     4. Show detailed report: cleared count + preserved count
+ *
+ *   Use case:
+ *     User wants to "reset and re-run" without losing master data
+ *     accumulated from previous pipeline runs. This is the recommended
+ *     way to test schema migrations or re-process corrected source data.
+ */
+function safeResetTransactional_UI() {
+  // [SEC-002] Authorization Guard
+  if (typeof isAuthorizedUser_ === 'function' && !isAuthorizedUser_()) {
+    safeUiAlert_('🔒 คุณไม่มีสิทธิ์ล้างข้อมูล\nกรุณาติดต่อ Admin');
+    return;
+  }
+  try {
+    const ui = SpreadsheetApp.getUi();
+    const confirm = ui.alert(
+      '🧹 Safe Reset (Clear Transactional Only)',
+      'กำลังจะล้าง TRANSACTIONAL data เท่านั้น — MASTER data จะถูกเก็บไว้\n\n' +
+        '🔄 จะ CLEAR (ลบข้อมูล แต่เก็บ header ไว้):\n' +
+        '• SOURCE — ข้อมูลดิบจาก SCG\n' +
+        '• FACT_DELIVERY — ผลการจัดส่ง\n' +
+        '• Q_REVIEW — คิวรอตรวจ (pending + done)\n' +
+        '• DAILY_JOB — ตารางงานประจำวัน\n' +
+        '• OWNER_SUMMARY — สรุปเจ้าของสินค้า\n' +
+        '• SHIPMENT_SUM — สรุป Shipment\n' +
+        '• INPUT — Shipment numbers\n\n' +
+        '✅ จะ KEEP (เก็บไว้ — ห้ามลบ):\n' +
+        '• M_PERSON — บุคคลที่เคย match\n' +
+        '• M_PLACE — สถานที่ที่เคย match\n' +
+        '• M_ALIAS — ชื่อเรียก (เรียนรู้จาก Q_REVIEW)\n' +
+        '• M_GEO_POINT — พิกัดที่เคย geocode\n' +
+        '• M_DESTINATION — จุดหมาย (Person+Place+Geo)\n' +
+        '• SYS_TH_GEO — พจนานุกรมไทย\n' +
+        '• SYS_NOTES, SYS_NEGATIVE_SAMPLES, SYS_AUDIT_TRAIL\n\n' +
+        'หลัง reset: โหลดข้อมูลใหม่ใน SOURCE แล้วรัน pipeline\n' +
+        'Match rate จะดีขึ้นเพราะ master data ยังอยู่\n\n' +
+        'ยืนยันการ Safe Reset?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่มีการล้างข้อมูล');
+      return;
+    }
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    ss.toast('🧹 กำลัง Safe Reset (transactional only)...', APP_NAME, -1);
+
+    // ─── TRANSACTIONAL sheets — clear content (preserve headers) ───
+    const transactionalSheets = [
+      SHEET.SOURCE, // SCGนครหลวงJWDภูมิภาค
+      SHEET.FACT_DELIVERY,
+      SHEET.Q_REVIEW,
+      SHEET.DAILY_JOB, // ตารางงานประจำวัน
+      SHEET.OWNER_SUMMARY, // สรุป_เจ้าของสินค้า
+      SHEET.SHIPMENT_SUM, // สรุป_Shipment
+      SHEET.INPUT
+    ];
+
+    let clearedCount = 0;
+    const clearedNames = [];
+    const errors = [];
+
+    transactionalSheets.forEach(function (sheetName) {
+      try {
+        const sheet = ss.getSheetByName(sheetName);
+        if (!sheet) {
+          errors.push('ไม่พบชีต: ' + sheetName);
+          return;
+        }
+
+        if (sheet.getLastRow() > 1) {
+          // [FIX v5.5.021 M5] clearContent แทน deleteRows — เร็วกว่า + ไม่กระทบโครงสร้าง
+          sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getMaxColumns()).clearContent();
+          clearedCount++;
+          clearedNames.push(sheetName);
+        } else if (sheetName === SHEET.INPUT) {
+          // INPUT sheet อาจมีข้อมูลใน B1 (COOKIE) และ B3 (ShipmentNos) ไม่ได้อยู่ใน row 2+
+          const lastRow = sheet.getLastRow();
+          if (lastRow >= 1) {
+            // ล้างเฉพาะ column B (cookie + shipment numbers) — เก็บ label ใน column A
+            sheet.getRange(1, 2, lastRow, 1).clearContent();
+            clearedCount++;
+            clearedNames.push(sheetName + ' (col B only)');
+          }
+        }
+      } catch (clearErr) {
+        errors.push(sheetName + ': ' + clearErr.message);
+      }
+    });
+
+    // ─── Clear pipeline caches (so next run starts fresh) ───
+    let cacheCleared = 0;
+    try {
+      if (typeof invalidateAllGlobalCaches === 'function') {
+        invalidateAllGlobalCaches();
+        cacheCleared = 1;
+      } else {
+        // Fallback — clear key pipeline caches directly
+        const cache = CacheService.getScriptCache();
+        cache.removeAll([
+          CACHE_KEY.PERSON_ALL,
+          CACHE_KEY.PLACE_ALL,
+          CACHE_KEY.GEO_ALL,
+          CACHE_KEY.DEST_ALL,
+          CACHE_KEY.GLOBAL_ALIAS_ALL,
+          CACHE_KEY.GLOBAL_ALIAS_REVERSE,
+          CACHE_KEY.SOURCE_ROWS,
+          CACHE_KEY.PROCESSED_INVOICES
+        ]);
+        cacheCleared = 1;
+      }
+    } catch (cacheErr) {
+      errors.push('cache clear: ' + cacheErr.message);
+    }
+
+    // ─── Clear stop signal (in case it's lingering from previous Emergency Stop) ───
+    try {
+      if (typeof clearPipelineStopSignal_ === 'function') {
+        clearPipelineStopSignal_();
+      } else {
+        PropertiesService.getScriptProperties().deleteProperty('PIPELINE_STOP_REQUESTED');
+      }
+    } catch (stopErr) {
+      // ignore — non-fatal
+    }
+
+    // ─── Build report ───
+    const lines = [];
+    lines.push('🧹 Safe Reset เสร็จสิ้น\n');
+    lines.push('✅ Cleared (' + clearedCount + ' sheets):');
+    clearedNames.forEach(function (n) {
+      lines.push('  • ' + n);
+    });
+    lines.push('\n💾 Preserved (master data):');
+    lines.push('  • M_PERSON, M_PLACE, M_ALIAS');
+    lines.push('  • M_GEO_POINT, M_DESTINATION');
+    lines.push('  • SYS_TH_GEO, SYS_NOTES, SYS_NEGATIVE_SAMPLES');
+    lines.push('  • SYS_AUDIT_TRAIL, SYS_LOG, SYS_CONFIG');
+    lines.push('\n🔄 Cache cleared: ' + (cacheCleared ? '✓' : '✗'));
+    lines.push('🛑 Stop signal cleared: ✓');
+
+    if (errors.length > 0) {
+      lines.push('\n⚠️ Errors (' + errors.length + '):');
+      errors.forEach(function (e) {
+        lines.push('  • ' + e);
+      });
+    }
+
+    lines.push('\n▶️ ขั้นตอนถัดไป:');
+    lines.push('  1. โหลดข้อมูลใหม่ใน SOURCE sheet');
+    lines.push('  2. รันเมนู ▶️ รัน Full Pipeline');
+    lines.push('  3. Match rate จะดีขึ้นเพราะ master data ยังอยู่');
+
+    logInfo(
+      'ServiceSCG',
+      'safeResetTransactional_UI: cleared ' + clearedCount + ' transactional sheets, master data preserved'
+    );
+    safeUiAlert_(lines.join('\n'));
+  } catch (e) {
+    logError('ServiceSCG', 'safeResetTransactional_UI ล้มเหลว: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
   }
 }
 

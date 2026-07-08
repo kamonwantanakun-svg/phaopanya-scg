@@ -1,0 +1,110 @@
+<!--
+  LMDS_FIX_02_ServiceSCG.gs.patch
+  ============================================================
+  File: src/2_group2_daily_ops/18_ServiceSCG.gs
+  Lines: 1005-1044
+  Issue: BUGHUNT-01 — Missing LockService AND missing YES_NO confirmation
+         on clearAllSCGSheets_UI (one accidental click can wipe 4 sheets)
+
+  Apply with:
+    cd /workspace/audit/phaopanya-scg-main
+    sed -i 's/...OLD.../...NEW.../' src/2_group2_daily_ops/18_ServiceSCG.gs
+  OR use Apps Script editor Find/Replace.
+============================================================
+-->
+
+/* === OLD CODE (18_ServiceSCG.gs:1005-1044) ==================== */
+function clearAllSCGSheets_UI() {
+  // [SEC-002] Authorization Guard
+  if (typeof isAuthorizedUser_ === 'function' && !isAuthorizedUser_()) {
+    safeUiAlert_('🔒 คุณไม่มีสิทธิ์ล้างข้อมูล\nกรุณาติดต่อ Admin');
+    return;
+  }
+  // [FIX B4 v5.5.002] เพิ่ม try-catch — menu entry point ต้องมี error handling
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    ss.toast('🗑️ กำลังล้างข้อมูลชีตที่เลือก...', APP_NAME, -1);
+
+    let cleared = 0;
+
+    // [FIX V6.0.005] เพิ่ม SHEET.INPUT ในรายการชีตที่ต้องล้าง
+    const sheetsToClear = [SHEET.DAILY_JOB, SHEET.OWNER_SUMMARY, SHEET.SHIPMENT_SUM, SHEET.INPUT];
+    sheetsToClear.forEach((name) => {
+      // ... existing clear logic ...
+    });
+    // ... existing alert ...
+  } catch (e) {
+    logError('ServiceSCG', 'clearAllSCGSheets_UI ล้มเหลว: ' + e.message, e);
+    safeUiAlert_('เกิดข้อผิดพลาดในการล้างข้อมูล: ' + e.message);
+  }
+}
+
+/* === NEW CODE (FULL REPLACEMENT) =============================== */
+function clearAllSCGSheets_UI() {
+  // [SEC-002] Authorization Guard
+  if (typeof isAuthorizedUser_ === 'function' && !isAuthorizedUser_()) {
+    safeUiAlert_('🔒 คุณไม่มีสิทธิ์ล้างข้อมูล\nกรุณาติดต่อ Admin');
+    return;
+  }
+
+  // [FIX BUGHUNT-01 from LMDS_PREDEPLOY_AUDIT 2026-07-08] LockService guard
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) {
+    safeUiAlert_('⚠️ มีการล้างข้อมูลอื่นกำลังทำงานอยู่ กรุณารอสักครู่');
+    return;
+  }
+
+  try {
+    // [FIX BUGHUNT-01] Add YES_NO confirmation (parity with safeResetTransactional_UI)
+    const ui = SpreadsheetApp.getUi();
+    const confirm = ui.alert(
+      '🗑️ ล้างข้อมูลชีต SCG',
+      'กำลังจะล้างข้อมูล 4 ชีต:\n' +
+        '• DAILY_JOB\n' +
+        '• OWNER_SUMMARY\n' +
+        '• SHIPMENT_SUM\n' +
+        '• INPUT (Cookie + Shipment Numbers)\n\n' +
+        '⚠️ การล้างไม่สามารถกู้คืนได้\n\n' +
+        'ยืนยันการล้างข้อมูล?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่มีการล้างข้อมูล');
+      return;
+    }
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    ss.toast('🗑️ กำลังล้างข้อมูลชีตที่เลือก...', APP_NAME, -1);
+
+    let cleared = 0;
+    const clearedNames = [];
+
+    // [FIX V6.0.005] เพิ่ม SHEET.INPUT ในรายการชีตที่ต้องล้าง
+    const sheetsToClear = [SHEET.DAILY_JOB, SHEET.OWNER_SUMMARY, SHEET.SHIPMENT_SUM, SHEET.INPUT];
+    sheetsToClear.forEach((name) => {
+      const sheet = ss.getSheetByName(name);
+      if (sheet && sheet.getLastRow() > 1) {
+        sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getMaxColumns()).clearContent();
+        cleared++;
+        clearedNames.push(name);
+      } else if (sheet && name === SHEET.INPUT) {
+        const lastRow = sheet.getLastRow();
+        if (lastRow >= 1) {
+          sheet.getRange(1, 2, lastRow, 1).clearContent();
+          cleared++;
+          clearedNames.push(name + ' (col B only)');
+        }
+      }
+    });
+
+    logInfo('ServiceSCG', 'clearAllSCGSheets_UI: ล้าง ' + cleared + ' ชีต → ' + clearedNames.join(', '));
+    safeUiAlert_('✅ ล้างข้อมูล ' + cleared + ' ชีตเรียบร้อย\n\n' + clearedNames.join('\n'));
+  } catch (e) {
+    logError('ServiceSCG', 'clearAllSCGSheets_UI ล้มเหลว: ' + e.message, e);
+    safeUiAlert_('เกิดข้อผิดพลาดในการล้างข้อมูล: ' + e.message);
+  } finally {
+    if (lock.hasLock()) lock.releaseLock();
+    // [PERF-012] Flush log buffer
+    if (typeof flushLogBuffer_ === 'function') flushLogBuffer_();
+  }
+}

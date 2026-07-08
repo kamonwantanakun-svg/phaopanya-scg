@@ -37,13 +37,13 @@ LMDS V6.0 มุ่งยกระดับระบบจาก **"Master Data 
 
 | ด้าน | Features | Phase | PR | Status |
 |-----|----------|-------|-----|--------|
-| **Data Cleansing** | Semantic Note Parser + Double Metaphone Phonetic | Phase 1 | TBD | ❌ Pending |
-| **Matching Engine** | ~~Contextual Disambiguation~~ + ~~Dynamic Weighting~~ + Geofencing Tie-breaker | Phase 2 | #37, #38 | ✅ 2.1+2.2 Done, ❌ 2.3 Pending |
-| **System Learning** | ~~Self-Healing Alias~~ จาก Q_REVIEW | Phase 3 | #37 | ✅ Core Done, ❌ Schema Pending |
-| **WebApp & Dashboard** | Map Analytics + Live Feed Monitor | Phase 4 | TBD | ❌ Pending |
-| **Pipeline Management** | ~~Telegram Alert~~ + Dependency-aware Pipeline | Phase 5 | #38 | ✅ 5.1 Done, ❌ 5.2 Pending |
-| **Architecture & Data** | Dedup Audit + Audit Trail | Phase 6 | TBD | ❌ Pending |
-| **Security** | RBAC 3 roles (Viewer/Reviewer/Admin) | Phase 7 | TBD | ❌ Pending |
+| **Data Cleansing** | ~~Semantic Note Parser~~ + ~~Double Metaphone Phonetic~~ | Phase 1 | #45 | ✅ Done (V6.0.001) |
+| **Matching Engine** | ~~Contextual Disambiguation~~ + ~~Dynamic Weighting~~ + ~~Geofencing Tie-breaker~~ | Phase 2 | #37, #38, #46 | ✅ Done (V5.5.046-047 + V6.0.002) |
+| **System Learning** | ~~Self-Healing Alias~~ จาก Q_REVIEW + M_ALIAS +3 cols + SYS_NEGATIVE_SAMPLES | Phase 3 | #37, #47 | ✅ Done (V5.5.046 + V6.0.003) |
+| **WebApp & Dashboard** | ~~Map Analytics~~ + ~~Live Feed Monitor~~ | Phase 4 | #48 | ✅ Done (V6.0.004) |
+| **Pipeline Management** | ~~Telegram Alert~~ + ~~Dependency-aware Pipeline~~ | Phase 5 | #38, #48, #50 | ✅ Done (V5.5.047 + V6.0.004 + V6.0.006 + V6.0.007 strict mode) |
+| **Architecture & Data** | ~~Dedup Audit~~ + ~~Audit Trail (Critical Only)~~ | Phase 6 | #48, V6.0.007 | ✅ Done (V6.0.004 dedup + V6.0.007 audit trail critical-only) |
+| **Security** | ~~RBAC 3 roles (Viewer/Reviewer/Admin)~~ | Phase 7 | #48 | ✅ Done (V6.0.004) |
 
 ### 1.2 Business Outcomes
 
@@ -112,7 +112,7 @@ LMDS V6.0 มุ่งยกระดับระบบจาก **"Master Data 
 | **No Dedup Audit** | duplicates สะสม | Levenshtein <2 scanner | Phase 6.1 |
 | **No Audit Trail** | ไม่รู้ใครแก้อะไร | SYS_AUDIT_TRAIL | Phase 6.2 |
 | **Binary Auth** | admin/non-admin | 3 roles RBAC | Phase 7.1 |
-| **detectSameGeoMultiPerson dead code** | BLUEPRINT §6 อ้างว่าทำงานแต่ไม่ได้เสียบ | Wire เข้า Rule 3.5 หรือลบ + แก้ BLUEPRINT | Pre-V6 |
+| **detectSameGeoMultiPerson dead code** | BLUEPRINT §6 อ้างว่าทำงานแต่ไม่ได้เสียบ | ✅ Removed in V6.0.007 (Feature 4: Dead Code Cleanup) — tombstone comment left in 10_MatchEngine.gs | Done |
 | **Single Writer rule violation** | resolveAndPersistMerge_ เรียก createGlobalAlias ตรงๆ | ย้ายไป autoEnrichAliasesFromFactBatch_ หรืออัปเดต doc | Pre-V6 |
 | **appsscript.json access=MYSELF** | restricts WebApp to script owner only | ยืนยัน use case ก่อน RBAC | Phase 7 prereq |
 | **Deep Dive Audit 15 ประเด็น** | C1-C5, H1-H5, M1-M5 ยังไม่แก้ | Re-audit + prioritize | Pre-V6 |

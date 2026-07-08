@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.002
+ * VERSION: 6.0.007
  * FILE: 12_ReviewService.gs
  * LMDS V5.5 — Review Queue Service
  * [FIX BUG-B2] v5.4.003: updateReviewRowStatus_() helper — 1 setValues แทน 5× setValue
@@ -520,6 +520,10 @@ function applyReviewDecision(reviewId, decisionVal, rowData, optTargetRow) {
         break;
       case 'IGNORE':
         updateReviewRowStatus_(sheet, targetRow, 'Done', reviewer, now, decisionVal, '');
+        // [V6.0.003] Mark as negative sample to prevent future wrong alias creation
+        //   เมื่อ Admin IGNORE = "นี่ไม่ใช่ match ที่ถูกต้อง" → เก็บเป็น negative sample
+        //   ป้องกัน autoEnrichAliasesFromFactBatch_ สร้าง alias ผิดในรอบถัดไป
+        markAsNegativeSample_(rowArr);
         break;
       default:
         logWarn('ReviewService', 'applyReviewDecision: Unknown decision ' + decisionVal);
@@ -527,6 +531,32 @@ function applyReviewDecision(reviewId, decisionVal, rowData, optTargetRow) {
     }
 
     logInfo('ReviewService', 'applyReviewDecision: ' + reviewId + ' → ' + decisionVal + ' โดย ' + reviewer);
+
+    // [V6.0.007] Audit Trail — record review decision (Critical-Only scope)
+    //   Map decision → AUDIT_ACTIONS:
+    //     CREATE_NEW          → CREATE
+    //     MERGE_TO_CANDIDATE  → MERGE
+    //     ESCALATE            → UPDATE (status change only)
+    //     IGNORE              → DELETE (effectively discards the review)
+    //   Failsafe: logAuditTrail never throws — wrapped in its own try/catch
+    if (typeof logAuditTrail === 'function' && typeof AUDIT_ENTITY_TYPES !== 'undefined') {
+      const auditActionMap = {
+        CREATE_NEW: 'CREATE',
+        MERGE_TO_CANDIDATE: 'MERGE',
+        ESCALATE: 'UPDATE',
+        IGNORE: 'DELETE'
+      };
+      const auditAction = auditActionMap[decisionVal] || 'UPDATE';
+      logAuditTrail(
+        AUDIT_ENTITY_TYPES.Q_REVIEW,
+        reviewId,
+        auditAction,
+        'review_status',
+        String(rowArr[REVIEW_IDX.STATUS] || 'PENDING'),
+        decisionVal + ' by ' + reviewer,
+        'Q_REVIEW decision'
+      );
+    }
 
     // [FIX v5.5.005] return result เพื่อให้ caller ได้ factRowData
     return result;
@@ -660,8 +690,16 @@ function executeMergeDecision_(ss, sheet, targetRow, rowArr, reviewer, now, deci
   // [REF-004 + REF-013] Build srcObj via helper
   const srcObj = buildSrcObjFromReview_(ss, rowArr);
 
+  // [V6.0.007] Extract review_id from rowArr — wire through to createGlobalAlias
+  //   so M_ALIAS.verified_by/review_id/verified_at are populated for HUMAN aliases.
+  //   Previously: review_id was always '' because executeMergeDecision_ didn't
+  //   pass it down the chain (resolveAndPersist_ → resolveAndPersistMerge_ →
+  //   createGlobalAlias). This caused M_ALIAS cols 8-10 to be empty even for
+  //   human-verified aliases created via Q_REVIEW MERGE.
+  const reviewId = String(rowArr[REVIEW_IDX.REVIEW_ID] || '').trim();
+
   // [REF-001] Delegate to resolveAndPersist_ gateway — no direct Group 1 CRUD calls
-  const result = resolveAndPersist_(srcObj, 'MERGE_TO_CANDIDATE', candidates);
+  const result = resolveAndPersist_(srcObj, 'MERGE_TO_CANDIDATE', candidates, reviewId);
 
   // [PERF-002] สะสม factData ส่งคืนแทนการเขียนทันที — ลดจาก N API calls เหลือ 1 batch write
   if (result && result.factRowData) {
@@ -851,6 +889,77 @@ function maskReviewerEmail_(email) {
 
   if (local.length <= 2) return local[0] + '***@' + domain;
   return local[0] + '***' + local[local.length - 1] + '@' + domain;
+}
+
+// ============================================================
+// SECTION 5b: [V6.0.003] System Learning — Negative Samples
+//   เมื่อ Admin เลือก IGNORE ใน Q_REVIEW → เก็บ raw name/address เป็น
+//   negative sample ใน SYS_NEGATIVE_SAMPLES เพื่อป้องกัน autoEnrich
+//   สร้าง alias ผิดในรอบ Match Engine ถัดไป (negative learning feedback loop)
+// ============================================================
+
+/**
+ * markAsNegativeSample_ — [V6.0.003] Mark a review as negative sample
+ *   Used when Admin selects IGNORE — prevents autoEnrich from creating wrong alias
+ * @param {Array} rowData - Q_REVIEW row data array (REVIEW_IDX order)
+ * @private
+ */
+function markAsNegativeSample_(rowData) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.SYS_NEGATIVE_SAMPLES);
+    if (!sheet) {
+      logWarn('ReviewService', 'markAsNegativeSample_: SYS_NEGATIVE_SAMPLES sheet not found');
+      return;
+    }
+
+    const rawPerson = String(rowData[REVIEW_IDX.RAW_PERSON] || '').trim();
+    const rawPlace = String(rowData[REVIEW_IDX.RAW_PLACE] || '').trim();
+    const candPersonStr = String(rowData[REVIEW_IDX.CAND_PERSONS] || '[]').trim();
+    const candPlaceStr = String(rowData[REVIEW_IDX.CAND_PLACES] || '[]').trim();
+
+    let candPersonId = '';
+    let candPlaceId = '';
+    try {
+      const personIds = JSON.parse(candPersonStr);
+      if (Array.isArray(personIds) && personIds.length > 0) candPersonId = personIds[0];
+    } catch (e) {
+      /* ignore — candidate JSON may be empty/malformed */
+    }
+    try {
+      const placeIds = JSON.parse(candPlaceStr);
+      if (Array.isArray(placeIds) && placeIds.length > 0) candPlaceId = placeIds[0];
+    } catch (e) {
+      /* ignore */
+    }
+
+    let markedBy = 'Admin';
+    try {
+      markedBy = maskReviewerEmail_(
+        Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail() || 'Admin'
+      );
+    } catch (e) {
+      /* ignore — WebApp context may not expose email */
+    }
+
+    // [V6.0.003] Default reason 'WRONG_MATCH' — Admin ปฏิเสธ match ที่ระบบเสนอ
+    //   สามารถขยายภายหลังเป็น 'DIFFERENT_PERSON' / 'DATA_QUALITY' ถ้ามี UI ให้เลือก
+    const newRow = [
+      generateShortId('NS'),
+      rawPerson,
+      rawPlace,
+      candPersonId,
+      candPlaceId,
+      'WRONG_MATCH',
+      markedBy,
+      new Date()
+    ];
+
+    sheet.getRange(sheet.getLastRow() + 1, 1, 1, newRow.length).setValues([newRow]);
+    logInfo('ReviewService', 'markAsNegativeSample_: stored negative sample for rawPerson="' + rawPerson + '"');
+  } catch (e) {
+    logError('ReviewService', 'markAsNegativeSample_ failed: ' + e.message, e);
+  }
 }
 
 // ============================================================
@@ -1653,3 +1762,72 @@ function clearReprocessCheckpoint_() {
 
 // [REMOVED V5.5.044] analyzeReviewPatterns — dead code (mark @deprecated ใน V5.5.043, ไม่มี caller ใน .gs ใด)
 //   หากมี external caller ที่ต้องการ restore → ดู git history ของ commit นี้
+
+// ============================================================
+// SECTION 7: [V6.0.005] Q_REVIEW Cleanup
+// ============================================================
+
+/**
+ * clearDoneReviews_UI — [V6.0.005] ลบแถวที่ status=Done หรือ Escalated ออกจาก Q_REVIEW
+ *   ใช้หลังจาก Admin อนุมัติ/ปฏิเสธครบแล้ว — ลบเพื่อให้เหลือเฉพาะ Pending
+ *   ข้อมูลที่ถูกประมวลผลแล้วจะอยู่ใน FACT_DELIVERY (audit trail ครบ)
+ */
+function clearDoneReviews_UI() {
+  if (typeof isAuthorizedUser_ === 'function' && !isAuthorizedUser_()) {
+    safeUiAlert_('🔒 คุณไม่มีสิทธิ์ล้าง Q_REVIEW\nกรุณาติดต่อ Admin');
+    return;
+  }
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.Q_REVIEW);
+    if (!sheet || sheet.getLastRow() < 2) {
+      safeUiAlert_('Q_REVIEW ว่าง — ไม่มีข้อมูลจัดการ');
+      return;
+    }
+
+    const totalRows = sheet.getLastRow() - 1;
+    const allData = sheet.getRange(2, 1, totalRows, SCHEMA[SHEET.Q_REVIEW].length).getValues();
+
+    // แยกแถวที่จะเก็บ (Pending) กับแถวที่จะลบ (Done/Escalated)
+    const keepRows = [];
+    let removedCount = 0;
+
+    for (let i = 0; i < allData.length; i++) {
+      const status = String(allData[i][REVIEW_IDX.STATUS] || '').trim();
+      if (status === 'Done' || status === 'Escalated') {
+        removedCount++;
+      } else {
+        keepRows.push(allData[i]);
+      }
+    }
+
+    if (removedCount === 0) {
+      safeUiAlert_('ไม่มีแถวที่ Done/Escalated ให้ลบ — ทุกแถวยังเป็น Pending');
+      return;
+    }
+
+    // ล้างข้อมูลเดิมทั้งหมด แล้วเขียนเฉพาะที่จะเก็บ
+    sheet.getRange(2, 1, totalRows, SCHEMA[SHEET.Q_REVIEW].length).clearContent();
+    if (keepRows.length > 0) {
+      sheet.getRange(2, 1, keepRows.length, SCHEMA[SHEET.Q_REVIEW].length).setValues(keepRows);
+    }
+
+    logInfo(
+      'ReviewService',
+      'clearDoneReviews_UI: ลบ ' + removedCount + ' แถว (Done/Escalated), เหลือ ' + keepRows.length + ' แถว (Pending)'
+    );
+    safeUiAlert_(
+      '✅ ล้าง Q_REVIEW เรียบร้อย\n\n' +
+        'ลบ: ' +
+        removedCount +
+        ' แถว (Done/Escalated)\n' +
+        'เหลือ: ' +
+        keepRows.length +
+        ' แถว (Pending)\n\n' +
+        'หมายเหตุ: ข้อมูลที่ประมวลผลแล้วยังอยู่ใน FACT_DELIVERY'
+    );
+  } catch (e) {
+    logError('ReviewService', 'clearDoneReviews_UI ล้มเหลว: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}

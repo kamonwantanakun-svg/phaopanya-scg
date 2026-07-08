@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.002
+ * VERSION: 6.0.007
  * FILE: 22_WebApp.gs
  * LMDS V5.5 — Web App Server (Dashboard)
  * ===================================================
@@ -350,6 +350,18 @@ function getDashboardData() {
   // คำนวณ trend การจัดส่งย้อนหลัง 7 วัน เพื่อแสดงเป็น line chart บน Dashboard
   const deliveryTrend = computeDeliveryTrend7Days_(factSheet);
 
+  // ─── [V6.0.007] Audit Trail Stats ───
+  // แสดง audit activity บน dashboard (เช่น "24 changes today")
+  // Failsafe: ถ้า 26_AuditTrailService.gs ไม่ได้โหลด → return empty stats
+  let auditStats = { totalRows: 0, last24h: 0, last7d: 0, byAction: {}, byEntityType: {} };
+  if (typeof getAuditTrailStats === 'function') {
+    try {
+      auditStats = getAuditTrailStats();
+    } catch (e) {
+      logWarn('WebApp', 'getAuditTrailStats failed (non-fatal): ' + e.message);
+    }
+  }
+
   const elapsedMs = Date.now() - startTime;
   // [FIX] เพิ่ม reviewTotal ใน log เพื่อ debug ปัญหา review=0
   logInfo(
@@ -364,6 +376,8 @@ function getDashboardData() {
       stats.sourceSheetTotal +
       ', trend7d=' +
       deliveryTrend.total +
+      ', audit24h=' +
+      auditStats.last24h +
       ', elapsed=' +
       elapsedMs +
       'ms'
@@ -373,6 +387,7 @@ function getDashboardData() {
     stats: stats,
     topIssues: topIssues,
     deliveryTrend: deliveryTrend,
+    auditStats: auditStats,
     sheetsExist: sheetsExist,
     lastUpdated: new Date().toISOString(),
     appVersion: APP_VERSION,
@@ -933,6 +948,8 @@ function safeParseJsonArray_(val) {
  */
 function submitReviewDecision(reviewId, decision, note) {
   if (!isAuthorizedDashboardUser_()) throw new Error('Unauthorized');
+  // [V6.0.004] RBAC: require reviewer/admin
+  if (typeof requirePermission_ === 'function') requirePermission_('action:approve_review');
 
   if (!reviewId || !decision) {
     return { ok: false, message: 'กรุณาระบุ reviewId และ decision' };
@@ -1863,4 +1880,80 @@ function buildAddressStr_(place) {
   if (place.province) parts.push(place.province);
   if (place.postcode) parts.push(place.postcode);
   return parts.join(' ');
+}
+
+// ============================================================
+// SECTION 11: V6.0.004 — Map Analytics + Live Feed
+// ============================================================
+
+/**
+ * getMapAnalyticsData — [V6.0.004] Get delivery data for map visualization
+ * @param {number} [days=30] - number of days to look back
+ * @param {string} [filterStatus=''] - filter by match status
+ * @return {Array} array of { lat, lng, count, matchStatus, personId, destId }
+ */
+function getMapAnalyticsData(days, filterStatus) {
+  if (!isAuthorizedDashboardUser_()) throw new Error('Unauthorized');
+  const lookbackDays = days || 30;
+  const statusFilter = filterStatus || '';
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  const cols = Math.min(SCHEMA[SHEET.FACT_DELIVERY].length, sheet.getLastColumn());
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, cols).getValues();
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - lookbackDays);
+
+  const points = [];
+  const seen = {};
+
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    const deliveryDate = row[FACT_IDX.DELIVERY_DATE];
+    if (deliveryDate && new Date(deliveryDate) < cutoff) continue;
+
+    const status = String(row[FACT_IDX.MATCH_STATUS] || '');
+    if (statusFilter && status !== statusFilter) continue;
+
+    const lat = Number(row[FACT_IDX.RESOLVED_LAT] || 0);
+    const lng = Number(row[FACT_IDX.RESOLVED_LNG] || 0);
+    if (lat === 0 || lng === 0) continue;
+
+    const key = Math.round(lat * 1000) / 1000 + ',' + Math.round(lng * 1000) / 1000;
+    if (seen[key]) {
+      seen[key].count++;
+    } else {
+      seen[key] = {
+        lat: lat,
+        lng: lng,
+        count: 1,
+        matchStatus: status,
+        personId: String(row[FACT_IDX.PERSON_ID] || ''),
+        destId: String(row[FACT_IDX.DEST_ID] || '')
+      };
+      points.push(seen[key]);
+    }
+  }
+
+  return points.slice(0, 5000);
+}
+
+/**
+ * getMatchEngineLiveStatus — [V6.0.004] Get current MatchEngine progress
+ * @return {Object} { isRunning, currentRow, totalRows, recentMatches, errorCount, startedAt }
+ */
+function getMatchEngineLiveStatus() {
+  if (!isAuthorizedDashboardUser_()) throw new Error('Unauthorized');
+  const props = PropertiesService.getScriptProperties();
+  return {
+    isRunning: props.getProperty('MATCH_ENGINE_RUNNING') === 'true',
+    currentRow: Number(props.getProperty('MATCH_ENGINE_CURRENT_ROW') || 0),
+    totalRows: Number(props.getProperty('MATCH_ENGINE_TOTAL_ROWS') || 0),
+    startedAt: props.getProperty('MATCH_ENGINE_STARTED_AT'),
+    lastMatchAt: props.getProperty('MATCH_ENGINE_LAST_MATCH'),
+    errorCount: Number(props.getProperty('MATCH_ENGINE_ERRORS') || 0),
+    recentMatches: JSON.parse(props.getProperty('MATCH_ENGINE_RECENT') || '[]')
+  };
 }

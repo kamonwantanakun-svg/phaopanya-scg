@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.002
+ * VERSION: 6.0.007
  * FILE: 24_PipelineManager.gs
  * LMDS V5.5 — Pipeline Manager (Standalone Module)
  * ===================================================
@@ -1137,6 +1137,183 @@ function uninstallPipelineTriggers() {
 }
 
 // ============================================================
+// SECTION 7.5: Pre-flight Check (V6.0.004)
+// ============================================================
+
+/**
+ * runPipelinePreflight — [V6.0.004] Pre-flight check before running MatchEngine
+ *   [FIX V6.0.006] ลบ DAILY_JOB check — runFullPipeline ใช้ SOURCE sheet ไม่ใช่ DAILY_JOB
+ *   [V6.0.007] Strict dependency-aware mode:
+ *     - 6 checks (was 3): SOURCE rows + SYS_TH_GEO + GEMINI_API_KEY + M_PERSON + M_PLACE + schema integrity
+ *     - Returns structured report: { ready, issues, warnings, checks }
+ *     - Warnings are non-blocking (advisory); issues are blocking
+ *     - Optional strict mode: throw on any issue (for use in CI/CD-style runs)
+ *
+ * Checks:
+ *   1. (BLOCKING) SOURCE sheet has unprocessed rows (SYNC_STATUS ≠ SUCCESS/REVIEW)
+ *   2. (BLOCKING) SYS_TH_GEO dictionary exists with ≥100 rows
+ *   3. (CONDITIONAL) GEMINI_API_KEY set (only if AI_CONFIG.USE_AI_REASONING = true)
+ *   4. (BLOCKING) M_PERSON sheet exists with header matching PERSON_IDX
+ *   5. (BLOCKING) M_PLACE sheet exists with header matching PLACE_IDX
+ *   6. (WARNING) M_ALIAS has the V6.0.003 +3 columns (variant_norm, phonetic_primary, phonetic_secondary)
+ *
+ * @param {Object} [opts] - optional config
+ * @param {boolean} [opts.strict=false] - if true, throw on any issue instead of returning
+ * @return {{ ready: boolean, issues: string[], warnings: string[], checks: Array<{name,status,detail}> }}
+ */
+function runPipelinePreflight(opts) {
+  const issues = []; // BLOCKING — pipeline will abort if any
+  const warnings = []; // NON-BLOCKING — advisory only
+  const checks = []; // audit trail of each check
+  const strict = !!(opts && opts.strict);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // ───────────────────────────────────────────────────────────
+  // Check 1: SOURCE sheet has unprocessed rows (BLOCKING)
+  // [FIX V6.0.006] SOURCE ไม่ใช่ DAILY_JOB — runFullPipeline = Flow 1 (Source → MatchEngine)
+  // ───────────────────────────────────────────────────────────
+  const sourceSheet = ss.getSheetByName(SHEET.SOURCE);
+  if (!sourceSheet || sourceSheet.getLastRow() < 2) {
+    issues.push('SOURCE sheet (SCGนครหลวงJWDภูมิภาค) ว่าง — กรุณาโหลดข้อมูลดิบก่อน');
+    checks.push({ name: 'SOURCE rows', status: 'FAIL', detail: 'sheet empty or missing' });
+  } else {
+    const syncCol =
+      typeof SRC_IDX !== 'undefined' && typeof SRC_IDX.SYNC_STATUS === 'number' ? SRC_IDX.SYNC_STATUS + 1 : 37;
+    const data = sourceSheet.getRange(2, syncCol, sourceSheet.getLastRow() - 1, 1).getValues();
+    const pending = data.filter(function (r) {
+      return r[0] !== 'SUCCESS' && r[0] !== 'REVIEW';
+    }).length;
+    if (pending === 0) {
+      issues.push('SOURCE sheet ไม่มีแถวที่ต้องประมวลผล (SYNC_STATUS ทั้งหมด = SUCCESS/REVIEW)');
+      checks.push({ name: 'SOURCE rows', status: 'FAIL', detail: '0 pending rows' });
+    } else {
+      checks.push({ name: 'SOURCE rows', status: 'PASS', detail: pending + ' pending rows' });
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Check 2: SYS_TH_GEO dictionary exists with ≥100 rows (BLOCKING)
+  // ───────────────────────────────────────────────────────────
+  const geoSheet = ss.getSheetByName(SHEET.SYS_TH_GEO);
+  const geoRows = geoSheet ? geoSheet.getLastRow() - 1 : 0;
+  if (!geoSheet || geoRows < 100) {
+    issues.push(
+      'SYS_TH_GEO dictionary ไม่ครบ (พบ ' + geoRows + ' rows, ต้องการ ≥100) — กรุณารัน "buildGeoDictionary" ก่อน'
+    );
+    checks.push({ name: 'SYS_TH_GEO', status: 'FAIL', detail: geoRows + ' rows (need ≥100)' });
+  } else {
+    checks.push({ name: 'SYS_TH_GEO', status: 'PASS', detail: geoRows + ' rows' });
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Check 3: GEMINI_API_KEY (CONDITIONAL — only if USE_AI_REASONING)
+  // ───────────────────────────────────────────────────────────
+  if (typeof AI_CONFIG !== 'undefined' && AI_CONFIG.USE_AI_REASONING) {
+    try {
+      if (typeof getGeminiApiKey === 'function') getGeminiApiKey();
+      checks.push({ name: 'GEMINI_API_KEY', status: 'PASS', detail: 'set + valid format' });
+    } catch (e) {
+      issues.push('GEMINI_API_KEY ยังไม่ได้ตั้งค่า — กรุณารัน "ตั้งค่า API Key"');
+      checks.push({ name: 'GEMINI_API_KEY', status: 'FAIL', detail: e.message });
+    }
+  } else {
+    checks.push({ name: 'GEMINI_API_KEY', status: 'SKIP', detail: 'USE_AI_REASONING=false' });
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // [V6.0.007] Check 4: M_PERSON sheet exists + header matches PERSON_IDX (BLOCKING)
+  // ───────────────────────────────────────────────────────────
+  const personSheet = ss.getSheetByName(SHEET.M_PERSON);
+  if (!personSheet || personSheet.getLastColumn() < 12) {
+    issues.push('M_PERSON sheet ไม่พบหรือคอลัมน์ไม่ครบ (ต้องการ ≥12 สำหรับ V6.0.001 phonetic keys)');
+    checks.push({
+      name: 'M_PERSON',
+      status: 'FAIL',
+      detail: 'cols=' + (personSheet ? personSheet.getLastColumn() : 0)
+    });
+  } else {
+    // Spot-check header at PERSON_IDX.PHONETIC_PRIMARY (index 10)
+    const headers = personSheet.getRange(1, 1, 1, personSheet.getLastColumn()).getValues()[0];
+    if (String(headers[10] || '') !== 'phonetic_primary') {
+      issues.push('M_PERSON header ไม่ตรง schema — col[10]="' + headers[10] + '" แต่ต้องเป็น "phonetic_primary"');
+      checks.push({ name: 'M_PERSON', status: 'FAIL', detail: 'header mismatch at col[10]' });
+    } else {
+      checks.push({ name: 'M_PERSON', status: 'PASS', detail: personSheet.getLastColumn() + ' cols, header OK' });
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // [V6.0.007] Check 5: M_PLACE sheet exists + header matches PLACE_IDX (BLOCKING)
+  // ───────────────────────────────────────────────────────────
+  const placeSheet = ss.getSheetByName(SHEET.M_PLACE);
+  if (!placeSheet || placeSheet.getLastColumn() < 16) {
+    issues.push('M_PLACE sheet ไม่พบหรือคอลัมน์ไม่ครบ (ต้องการ ≥16 สำหรับ V6.0.001 phonetic keys)');
+    checks.push({ name: 'M_PLACE', status: 'FAIL', detail: 'cols=' + (placeSheet ? placeSheet.getLastColumn() : 0) });
+  } else {
+    // Spot-check header at PLACE_IDX.PHONETIC_PRIMARY (index 14)
+    const headers = placeSheet.getRange(1, 1, 1, placeSheet.getLastColumn()).getValues()[0];
+    if (String(headers[14] || '') !== 'phonetic_primary') {
+      issues.push('M_PLACE header ไม่ตรง schema — col[14]="' + headers[14] + '" แต่ต้องเป็น "phonetic_primary"');
+      checks.push({ name: 'M_PLACE', status: 'FAIL', detail: 'header mismatch at col[14]' });
+    } else {
+      checks.push({ name: 'M_PLACE', status: 'PASS', detail: placeSheet.getLastColumn() + ' cols, header OK' });
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // [V6.0.007] Check 6: M_ALIAS has V6.0.003 +3 columns (WARNING — non-blocking)
+  //   สาเหตุ: M_ALIAS sheet อาจยังไม่ได้รับการ auto-repair — pipeline ยังทำงานได้แต่
+  //   Self-Healing Alias features จะไม่ทำงานจนกว่าจะรัน setupAllSheets()
+  // ───────────────────────────────────────────────────────────
+  const aliasSheet = ss.getSheetByName(SHEET.M_ALIAS);
+  if (aliasSheet && aliasSheet.getLastColumn() < 11) {
+    warnings.push(
+      'M_ALIAS sheet มี ' +
+        aliasSheet.getLastColumn() +
+        ' cols (V6.0.003 ต้องการ 11) — รัน setupAllSheets() เพื่อ auto-repair'
+    );
+    checks.push({ name: 'M_ALIAS cols', status: 'WARN', detail: aliasSheet.getLastColumn() + ' cols (need 11)' });
+  } else if (aliasSheet) {
+    checks.push({ name: 'M_ALIAS cols', status: 'PASS', detail: aliasSheet.getLastColumn() + ' cols' });
+  }
+
+  // [V6.0.007] Check 4 ถูกรวมเข้า Check 1 แล้ว (V6.0.006) — ลบออกเพื่อไม่ให้ตรวจซ้ำ
+
+  // ───────────────────────────────────────────────────────────
+  // Build result
+  // ───────────────────────────────────────────────────────────
+  const ready = issues.length === 0;
+  const result = {
+    ready: ready,
+    issues: issues,
+    warnings: warnings,
+    checks: checks
+  };
+
+  // Log summary for observability
+  if (typeof logInfo === 'function') {
+    logInfo(
+      'Pipeline',
+      'runPipelinePreflight: ready=' +
+        ready +
+        ', issues=' +
+        issues.length +
+        ', warnings=' +
+        warnings.length +
+        ', checks=' +
+        checks.length
+    );
+  }
+
+  // Strict mode: throw on any issue
+  if (strict && !ready) {
+    throw new Error('Pipeline preflight FAILED (strict mode):\n' + issues.join('\n'));
+  }
+
+  return result;
+}
+
+// ============================================================
 // SECTION 8: Helpers
 // ============================================================
 
@@ -1308,13 +1485,17 @@ function sendPipelineAlert_(message, severity) {
     } else {
       icon = 'ℹ️';
     }
-    const text = icon + ' *LMDS Pipeline Alert*\n' + message;
+    // [FIX V6.0.006] ใช้ HTML tags แทน Markdown (* ไม่ทำงานใน HTML mode)
+    const text = icon + ' <b>LMDS Pipeline Alert</b>\n' + message;
 
     const response = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
       method: 'post',
       contentType: 'application/json',
       muteHttpExceptions: true,
-      payload: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'Markdown' })
+      // [FIX V6.0.006] เปลี่ยนจาก Markdown → HTML เพื่อหลีกเลี่ยง parse error
+      //   สาเหตุ: Markdown ตีความ _ เป็น italic → ถ้าข้อความมี _ จะทำให้ Telegram ตอบ 400
+      //   HTML ปลอดภัยกว่า — ไม่มีปัญหากับ _ หรือ * ในข้อความ
+      payload: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'HTML' })
     });
 
     const respCode = response.getResponseCode();

@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.002
+ * VERSION: 6.0.007
  * FILE: 02_Schema.gs
  * LMDS V5.5 — Sheet Schema Definitions
  * ===================================================
@@ -107,15 +107,22 @@ const SCHEMA = Object.freeze({
     'active_flag' // [5]
   ],
 
+  // [V6.0.003] Self-Healing Alias fields — verified_by / review_id / verified_at
+  //   ใช้สำหรับ audit trail เมื่อ alias ถูกสร้างจาก Human-in-the-loop review
+  //   (resolveAndPersistMerge_ ใน 10_MatchEngine.gs)
   M_ALIAS: [
-    'alias_id',
-    'master_uuid',
-    'variant_name',
-    'entity_type',
-    'confidence',
-    'source',
-    'created_at',
-    'active_flag'
+    'alias_id', // [0]
+    'master_uuid', // [1]
+    'variant_name', // [2]
+    'entity_type', // [3]
+    'confidence', // [4]
+    'source', // [5]
+    'created_at', // [6]
+    'active_flag', // [7]
+    // [V6.0.003] Self-Healing Alias fields
+    'verified_by', // [8] user email (null if source != HUMAN)
+    'review_id', // [9] FK to Q_REVIEW (null if not from review)
+    'verified_at' // [10] timestamp when verified
   ],
 
   M_GEO_POINT: [
@@ -296,6 +303,46 @@ const SCHEMA = Object.freeze({
     'created_at', // [8] timestamp
     'created_by', // [9] 'system' | user email
     'active_flag' // [10] TRUE/FALSE
+  ],
+
+  /**
+   * SYS_NEGATIVE_SAMPLES — [V6.0.003] System Learning storage
+   * เก็บ raw name/address ที่ Admin ปฏิเสธ (IGNORE) เพื่อป้องกัน autoEnrich
+   *   ไม่สร้าง alias ผิดๆ ในรอบถัดไป — ใช้สำหรับ negative learning feedback loop
+   * 8 คอลัมน์ — เขียนโดย markAsNegativeSample_() ใน 12_ReviewService.gs
+   */
+  SYS_NEGATIVE_SAMPLES: [
+    'sample_id', // [0] NS+12 hex
+    'raw_person_name', // [1] raw person name ที่ถูก IGNORE
+    'raw_place_name', // [2] raw place name ที่ถูก IGNORE
+    'candidate_person_id', // [3] candidate person ที่ Admin ปฏิเสธ
+    'candidate_place_id', // [4] candidate place ที่ Admin ปฏิเสธ
+    'reason', // [5] 'WRONG_MATCH' | 'DIFFERENT_PERSON' | 'DATA_QUALITY'
+    'marked_by', // [6] user email (masked)
+    'marked_at' // [7] timestamp
+  ],
+
+  /**
+   * SYS_AUDIT_TRAIL — [V6.0.007] Audit Trail storage (Critical-Only scope)
+   * เก็บ record ของการ CREATE/UPDATE/DELETE/MERGE บน M_ALIAS + Q_REVIEW
+   *   เพื่อ change tracking + compliance + debugging
+   * 11 คอลัมน์ — เขียนโดย logAuditTrail() ใน 26_AuditTrailService.gs
+   *   - ไม่เคยถูกลบโดย operation อื่น (ยกเว้น cleanupAuditTrail_UI retention pruning)
+   *   - append-only pattern: เพิ่ม row ใหม่เท่านั้น ไม่ update row เดิม
+   *   - retention: keep last 90 days (override via AUDIT_RETENTION_DAYS script property)
+   */
+  SYS_AUDIT_TRAIL: [
+    'audit_id', // [0] AU+12 hex (e.g., "AU3F9A2B1C4D5")
+    'entity_type', // [1] 'ALIAS' | 'Q_REVIEW' (V6.0.007 scope; expandable to PERSON/PLACE/...)
+    'entity_id', // [2] FK → M_ALIAS.alias_id / Q_REVIEW.review_id
+    'action', // [3] 'CREATE' | 'UPDATE' | 'DELETE' | 'MERGE'
+    'field_changed', // [4] column name(s) that changed (comma-separated); 'all' for CREATE
+    'old_value', // [5] previous value (JSON string, truncated to 500 chars)
+    'new_value', // [6] new value (JSON string, truncated to 500 chars)
+    'changed_by', // [7] user email (or 'system' for automated processes)
+    'changed_at', // [8] timestamp
+    'change_reason', // [9] optional note (e.g., "Q_REVIEW merge", "stale cleanup")
+    'ip_address' // [10] (best effort — usually empty in GAS)
   ],
 
   // [REMOVE v5.5.013] MAPS_CACHE SCHEMA ถูกลบออก — MAPS_CACHE sheet ไม่ได้ใช้แล้ว
@@ -532,7 +579,15 @@ function validateSchemaConsistency() {
     // [ADD v5.5.011] เพิ่มการตรวจ SCHEMA vs DATA_IDX สำหรับ SHEET.DAILY_JOB
     { sheetName: SHEET.DAILY_JOB, idx: DATA_IDX, label: 'ตารางงานประจำวัน (DAILY_JOB)' },
     // [V6.0.001] เพิ่มการตรวจ SCHEMA vs NOTES_IDX สำหรับ SHEET.SYS_NOTES (Semantic Note Parser)
-    { sheetName: SHEET.SYS_NOTES, idx: NOTES_IDX, label: 'SYS_NOTES (Semantic Note Parser)' }
+    { sheetName: SHEET.SYS_NOTES, idx: NOTES_IDX, label: 'SYS_NOTES (Semantic Note Parser)' },
+    // [V6.0.003] เพิ่มการตรวจ SCHEMA vs NEGATIVE_SAMPLE_IDX สำหรับ SHEET.SYS_NEGATIVE_SAMPLES (System Learning)
+    {
+      sheetName: SHEET.SYS_NEGATIVE_SAMPLES,
+      idx: NEGATIVE_SAMPLE_IDX,
+      label: 'SYS_NEGATIVE_SAMPLES (System Learning)'
+    },
+    // [V6.0.007] เพิ่มการตรวจ SCHEMA vs AUDIT_IDX สำหรับ SHEET.SYS_AUDIT_TRAIL (Audit Trail Critical-Only)
+    { sheetName: SHEET.SYS_AUDIT_TRAIL, idx: AUDIT_IDX, label: 'SYS_AUDIT_TRAIL (Audit Trail)' }
   ];
 
   const errors = [];

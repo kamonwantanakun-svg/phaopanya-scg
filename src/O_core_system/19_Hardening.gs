@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.002
+ * VERSION: 6.0.007
  * FILE: 19_Hardening.gs
  * LMDS V5.5 — System Hardening & Preflight Audit
  * [FIX BUG-A2] v5.4.003: runPreflightAudit() เพิ่ม try-catch
@@ -525,7 +525,23 @@ function hardeningBuildOneAliasRow_(
     const globalKey = 'PERSON::' + masterUuid + '::' + rawNorm;
     if (!existingGlobalAliasSet.has(globalKey)) {
       existingGlobalAliasSet.add(globalKey);
-      gaRow = [generateShortId('A'), masterUuid, rawName, 'PERSON', aliasEnrichScore, 'HISTORY_ENRICH', now, true];
+      // [FIX V6.0.007] Push 11 columns to match SCHEMA.M_ALIAS (V6.0.003 added 3 cols)
+      //   Same fix as matchEnrichEntityAliases_ in 10_MatchEngine.gs
+      //   0-7: alias_id, master_uuid, variant_name, entity_type, confidence, source, created_at, active_flag
+      //   8-10: verified_by, review_id, verified_at (empty for HISTORY_ENRICH — not human-verified)
+      gaRow = [
+        generateShortId('A'), // [0] alias_id
+        masterUuid, // [1] master_uuid
+        rawName, // [2] variant_name
+        'PERSON', // [3] entity_type
+        aliasEnrichScore, // [4] confidence
+        'HISTORY_ENRICH', // [5] source
+        now, // [6] created_at
+        true, // [7] active_flag
+        '', // [8] verified_by (empty — HISTORY_ENRICH is not human-verified)
+        '', // [9] review_id (empty — not from Q_REVIEW)
+        '' // [10] verified_at (empty — not verified)
+      ];
     }
   }
 
@@ -835,4 +851,94 @@ function applyGeoPointProtection_(ss, me, adminEmails) {
     }
   });
   return '✅ M_GEO_POINT: Protected';
+}
+
+// ============================================================
+// SECTION: Dedup Audit (V6.0.004)
+// ============================================================
+
+/**
+ * runDedupAudit — [V6.0.004] Scan M_PERSON/M_PLACE for potential duplicates
+ *   Uses Levenshtein distance + phonetic match
+ * @param {string} entityType - 'PERSON' | 'PLACE'
+ * @return {{ duplicates: Array, scannedCount: number, duration: number }}
+ */
+function runDedupAudit(entityType) {
+  const startTime = Date.now();
+  const all = entityType === 'PERSON' ? loadAllPersons_() : loadAllPlaces_();
+  const duplicates = [];
+
+  for (let i = 0; i < all.length; i++) {
+    for (let j = i + 1; j < all.length; j++) {
+      const a = all[i];
+      const b = all[j];
+      if (a.masterUuid && b.masterUuid && a.masterUuid === b.masterUuid) continue;
+
+      const nameA = a.canonical || a.canonicalName || '';
+      const nameB = b.canonical || b.canonicalName || '';
+      if (!nameA || !nameB) continue;
+
+      let phMatch = { match: false, score: 0 };
+      if (typeof phoneticMatch === 'function') {
+        phMatch = phoneticMatch(nameA, nameB);
+      }
+      if (!phMatch.match && phMatch.score < 80) continue;
+
+      const levDist = levenshteinDistance(nameA, nameB);
+      const similarity = 1 - levDist / Math.max(nameA.length, nameB.length);
+
+      if (similarity >= 0.85 || (phMatch.score >= 90 && similarity >= 0.7)) {
+        duplicates.push({
+          entityA: { id: a.personId || a.placeId, name: nameA, uuid: a.masterUuid },
+          entityB: { id: b.personId || b.placeId, name: nameB, uuid: b.masterUuid },
+          similarity: similarity,
+          phoneticScore: phMatch.score,
+          reason: similarity >= 0.85 ? 'HIGH_LEVENSHTEIN' : 'PHONETIC_MATCH',
+          suggestion: 'MERGE'
+        });
+      }
+    }
+  }
+
+  return { duplicates: duplicates, scannedCount: all.length, duration: Date.now() - startTime };
+}
+
+/**
+ * runDedupAuditPerson_UI — [V6.0.004] Menu wrapper for Person dedup audit
+ */
+function runDedupAuditPerson_UI() {
+  runDedupAuditUI_('PERSON');
+}
+
+/**
+ * runDedupAuditPlace_UI — [V6.0.004] Menu wrapper for Place dedup audit
+ */
+function runDedupAuditPlace_UI() {
+  runDedupAuditUI_('PLACE');
+}
+
+/**
+ * runDedupAuditUI_ — [V6.0.004] UI wrapper for dedup audit
+ * @param {string} entityType - 'PERSON' | 'PLACE'
+ * @private
+ */
+function runDedupAuditUI_(entityType) {
+  try {
+    safeUiAlert_('🔍 เริ่มสแกน Duplicate สำหรับ ' + entityType + '...\nอาจใช้เวลา 1-2 นาที');
+    const result = runDedupAudit(entityType);
+    let msg = '📊 ผลการสแกน ' + entityType + ':\n';
+    msg += 'สแกนทั้งหมด: ' + result.scannedCount + ' รายการ\n';
+    msg += 'พบ Duplicate ที่น่าสงสัย: ' + result.duplicates.length + ' คู่\n';
+    msg += 'ใช้เวลา: ' + Math.round(result.duration / 1000) + ' วินาที\n\n';
+    result.duplicates.slice(0, 10).forEach(function (d, i) {
+      msg += i + 1 + '. "' + d.entityA.name + '" ↔ "' + d.entityB.name + '"\n';
+      msg += '   Similarity: ' + Math.round(d.similarity * 100) + '% | Phonetic: ' + d.phoneticScore + '\n';
+      msg += '   IDs: ' + d.entityA.id + ' ↔ ' + d.entityB.id + '\n\n';
+    });
+    if (result.duplicates.length > 10) msg += '... และอีก ' + (result.duplicates.length - 10) + ' คู่\n';
+    safeUiAlert_(msg);
+  } catch (e) {
+    logError('Hardening', 'runDedupAuditUI_ failed: ' + e.message, e);
+    safeUiAlert_('❌ สแกนล้มเหลว: ' + e.message);
+  }
 }
