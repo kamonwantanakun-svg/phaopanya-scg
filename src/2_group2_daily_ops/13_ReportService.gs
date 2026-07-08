@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.009
+ * VERSION: 6.0.010
  * FILE: 13_ReportService.gs
  * LMDS V5.5 — Data Quality Report Service
  * ===================================================
@@ -67,6 +67,9 @@
  */
 
 function buildFullQualityReport() {
+  // [V6.0.010 P3.7] LockService guard — prevent concurrent report generation
+  const lock = acquireScriptLockOrWarn_(5000, '⚠️ buildFullQualityReport กำลังรันอยู่ กรุณารอให้เสร็จก่อน');
+  if (!lock) return;
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const rptSheet = ss.getSheetByName(SHEET.RPT_QUALITY);
@@ -111,6 +114,8 @@ function buildFullQualityReport() {
   } catch (err) {
     logError('ReportService', 'buildFullQualityReport: ' + err.message, err);
     safeUiAlert_('❌ สร้างรายงานล้มเหลว: ' + err.message);
+  } finally {
+    releaseScriptLock_(lock);
   }
 }
 

@@ -55,26 +55,50 @@
               document.head.appendChild(link);
             }
 
-            // Load Leaflet JS
+            // [V6.0.010 P3.13] Load Leaflet JS with CDN fallback
+            //   Primary: unpkg.com (fast, widely cached)
+            //   Fallback: cdnjs.cloudflare.com (backup CDN)
             if (!window.L) {
-              await new Promise(function (resolve, reject) {
-                const script = document.createElement('script');
-                script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-                script.onload = resolve;
-                script.onerror = reject;
-                document.head.appendChild(script);
-              });
+              try {
+                await new Promise(function (resolve, reject) {
+                  const script = document.createElement('script');
+                  script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+                  script.onload = resolve;
+                  script.onerror = reject;
+                  document.head.appendChild(script);
+                });
+              } catch (primaryErr) {
+                console.warn('[MapAnalytics] unpkg CDN failed, trying cdnjs fallback...', primaryErr);
+                await new Promise(function (resolve, reject) {
+                  const script = document.createElement('script');
+                  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js';
+                  script.onload = resolve;
+                  script.onerror = reject;
+                  document.head.appendChild(script);
+                });
+              }
             }
 
-            // Load heatlayer plugin
+            // [V6.0.010 P3.13] Load heatlayer plugin with CDN fallback
             if (!window.L.heatLayer) {
-              await new Promise(function (resolve, reject) {
-                const script = document.createElement('script');
-                script.src = 'https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js';
-                script.onload = resolve;
-                script.onerror = reject;
-                document.head.appendChild(script);
-              });
+              try {
+                await new Promise(function (resolve, reject) {
+                  const script = document.createElement('script');
+                  script.src = 'https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js';
+                  script.onload = resolve;
+                  script.onerror = reject;
+                  document.head.appendChild(script);
+                });
+              } catch (primaryErr) {
+                console.warn('[MapAnalytics] unpkg heat CDN failed, trying jsdelivr fallback...', primaryErr);
+                await new Promise(function (resolve, reject) {
+                  const script = document.createElement('script');
+                  script.src = 'https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js';
+                  script.onload = resolve;
+                  script.onerror = reject;
+                  document.head.appendChild(script);
+                });
+              }
             }
 
             mapContainer.innerHTML = '';

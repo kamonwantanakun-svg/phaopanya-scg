@@ -166,10 +166,12 @@
     }
 
     /**
-     * navigateTo_ — เปลี่ยนหน้า (in-memory routing ไม่เปลี่ยน URL)
+     * navigateTo_ — เปลี่ยนหน้า (in-memory routing + hash-based URL)
      *   เรียกจาก onclick ของ nav buttons ใน Index.html
      *   [FIX White Screen v2] ไม่ใช้ google.script.history.push() อีกต่อไป
      *   เพราะ trigger OAuth dialog redirect ในบาง session
+     *   [V6.0.010 P3.11] Added window.location.hash support for browser back/forward
+     *   Uses hashchange event — safe in GAS WebApp context (no OAuth redirect issue)
      * @param {string} route — 'dashboard' | 'fact' | 'qreview' | 'source' | 'match' | 'search'
      * @public
      */
@@ -177,6 +179,11 @@
       console.log('[app] navigateTo_:', route);
       try {
         currentRoute = route || 'dashboard';
+        // [V6.0.010 P3.11] Update URL hash for browser back/forward support
+        //   Only update if different (prevents hashchange loop)
+        if (window.location.hash !== '#' + currentRoute) {
+          window.location.hash = currentRoute;
+        }
         updateActiveNav_(currentRoute);
         renderCurrentRoute_(false);
       } catch (err) {
@@ -187,6 +194,23 @@
 
     // เปิดให้เรียกจาก onclick ใน HTML
     globalThis.navigateTo_ = navigateTo_;
+
+    // [V6.0.010 P3.11] hashchange handler — browser back/forward buttons
+    //   When user presses back/forward, the hash changes → we navigate to the route
+    //   Uses a flag to prevent loop when navigateTo_ sets the hash
+    let hashChangeFromNavigate_ = false;
+    window.addEventListener('hashchange', function () {
+      if (hashChangeFromNavigate_) {
+        hashChangeFromNavigate_ = false;
+        return;
+      }
+      const hash = window.location.hash.replace('#', '');
+      if (hash && hash !== currentRoute) {
+        console.log('[app] hashchange → navigateTo_:', hash);
+        hashChangeFromNavigate_ = true;
+        navigateTo_(hash);
+      }
+    });
 
     /**
      * updateActiveNav_ — อัปเดต active class ของ nav links

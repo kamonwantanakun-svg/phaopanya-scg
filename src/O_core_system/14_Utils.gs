@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.009
+ * VERSION: 6.0.010
  * FILE: 14_Utils.gs
  * LMDS V5.5 — Utility Functions
  * ===================================================
@@ -138,6 +138,9 @@ function resetSourceSyncStatus() {
     safeUiAlert_('🔒 คุณไม่มีสิทธิ์รีเซ็ตสถานะ SYNC\nกรุณาติดต่อ Admin');
     return;
   }
+  // [V6.0.010 P3.6] LockService guard — YES_NO confirmation already exists below; no extra confirm
+  const lock = acquireScriptLockOrWarn_(5000, '⚠️ resetSourceSyncStatus กำลังรันอยู่ กรุณารอให้เสร็จก่อน');
+  if (!lock) return;
   // [FIX BUG-04 v5.4.003] หุ้ม try-catch ครอบทั้งฟังก์ชัน — ก่อนหน้านี้ ui.alert() นอก try-catch ทำให้ throw ได้
   try {
     const ui = SpreadsheetApp.getUi();
@@ -179,6 +182,8 @@ function resetSourceSyncStatus() {
   } catch (err) {
     logError('Utils', 'resetSourceSyncStatus ล้มเหลว: ' + err.message, err);
     safeUiAlert_('❌ เกิดข้อผิดพลาด: ' + err.message);
+  } finally {
+    releaseScriptLock_(lock);
   }
 }
 

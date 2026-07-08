@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.009
+ * VERSION: 6.0.010
  * FILE: 19_Hardening.gs
  * LMDS V5.5 — System Hardening & Preflight Audit
  * [FIX BUG-A2] v5.4.003: runPreflightAudit() เพิ่ม try-catch

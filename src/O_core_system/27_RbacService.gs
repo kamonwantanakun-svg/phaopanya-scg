@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.009
+ * VERSION: 6.0.010
  * FILE: 27_RbacService.gs
  * LMDS V6.0 — Role-Based Access Control
  * ===================================================

@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.009
+ * VERSION: 6.0.010
  * FILE: 17_SearchService.gs
  * LMDS V5.5 — Search Service (The Bridger — Group 2)
  * ===================================================

@@ -1,5 +1,5 @@
 /**
- * VERSION: 6.0.009
+ * VERSION: 6.0.010
  * FILE: 99_Legacy.gs
  * LMDS V5.5 — Deprecated/Legacy Functions (Compatibility Layer)
  * ===================================================
