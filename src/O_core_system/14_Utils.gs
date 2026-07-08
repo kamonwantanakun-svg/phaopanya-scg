@@ -574,6 +574,92 @@ function withEntryPointGuard_(moduleName, fnName, fn, options) {
 }
 
 // ============================================================
+// SECTION 5b: [V6.0.008] Lock + Sheet Clear Helpers (SonarCloud dedup)
+//   Extracted from clearAllSCGSheets_UI, safeResetTransactional_UI,
+//   buildGeoDictionary, populateGeoMetadata to reduce duplicated_lines_density.
+// ============================================================
+
+/**
+ * acquireScriptLockOrWarn_ — [V6.0.008] Try to acquire script lock; warn + return null on failure
+ *   Used by menu functions that need LockService guard but don't use withEntryPointGuard_.
+ *   Callers should check the return value and `return` early if null.
+ *
+ * @param {number} timeoutMs — tryLock timeout (e.g., 5000 for UI functions, 30000 for heavy ops)
+ * @param {string} warnMessage — message to show user if lock not acquired
+ * @return {Lock|null} lock object if acquired, null if not
+ * @private
+ */
+function acquireScriptLockOrWarn_(timeoutMs, warnMessage) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(timeoutMs)) {
+    safeUiAlert_(warnMessage);
+    return null;
+  }
+  return lock;
+}
+
+/**
+ * releaseScriptLock_ — [V6.0.008] Safely release lock (null-safe + hasLock check)
+ * @param {Lock|null} lock
+ * @private
+ */
+function releaseScriptLock_(lock) {
+  if (lock && lock.hasLock()) {
+    try {
+      lock.releaseLock();
+    } catch (e) {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * clearSheetsPreserveHeaders_ — [V6.0.008] Clear content of multiple sheets (preserve row 1 headers)
+ *   Extracted from clearAllSCGSheets_UI + safeResetTransactional_UI to eliminate duplication.
+ *   Handles INPUT sheet special case (clears col B only, preserves col A labels).
+ *
+ * @param {Spreadsheet} ss — active spreadsheet
+ * @param {Array<string>} sheetNames — names of sheets to clear
+ * @return {{ clearedCount: number, clearedNames: string[], errors: string[] }}
+ * @private
+ */
+function clearSheetsPreserveHeaders_(ss, sheetNames) {
+  const clearedNames = [];
+  const errors = [];
+  let clearedCount = 0;
+
+  sheetNames.forEach(function (sheetName) {
+    try {
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) {
+        errors.push('ไม่พบชีต: ' + sheetName);
+        return;
+      }
+
+      if (sheet.getLastRow() > 1) {
+        // clearContent แทน deleteRows — เร็วกว่า + ไม่กระทบโครงสร้าง
+        sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getMaxColumns()).clearContent();
+        clearedCount++;
+        clearedNames.push(sheetName);
+      } else if (sheetName === SHEET.INPUT) {
+        // INPUT sheet: ข้อมูลอยู่ใน B1 (COOKIE) และ B3 (ShipmentNos) ไม่ได้อยู่ใน row 2+
+        // ล้างเฉพาะ column B (เก็บ label ใน column A)
+        const lastRow = sheet.getLastRow();
+        if (lastRow >= 1) {
+          sheet.getRange(1, 2, lastRow, 1).clearContent();
+          clearedCount++;
+          clearedNames.push(sheetName + ' (col B only)');
+        }
+      }
+    } catch (clearErr) {
+      errors.push(sheetName + ': ' + clearErr.message);
+    }
+  });
+
+  return { clearedCount: clearedCount, clearedNames: clearedNames, errors: errors };
+}
+
+// ============================================================
 // SECTION 6: Time Guard Utility
 // [FIX CRIT-003] Centralized hasTimePassed_() — LMDS V5.5 Standard
 // ============================================================

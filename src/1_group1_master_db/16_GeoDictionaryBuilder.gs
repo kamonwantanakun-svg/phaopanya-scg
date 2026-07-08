@@ -120,21 +120,14 @@ function buildGeoDictionary() {
     return;
   }
 
-  // [V6.0.008 P1.4 — BUGHUNT #1 fix from LMDS_PREDEPLOY_AUDIT 2026-07-08]
-  //   LockService guard — ป้องกัน double-click ทำให้ checkpoint ปนกัน
-  //   withEntryPointGuard_ ไม่ acquire lock ให้อัตโนมัติ — ต้องส่ง {lock: lock} เข้าไป
-  //   ถ้าไม่ส่ง lock, double-click จะอ่าน checkpoint เดียวกัน + เขียนทับช่วงแถวเดียวกัน
-  //   Pattern เดียวกับ fetchDataFromSCGJWD ใน 18_ServiceSCG.gs:136-141
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(30000)) {
-    safeUiAlert_('⚠️ buildGeoDictionary กำลังรันอยู่อีก instance หนึ่ง กรุณารอให้เสร็จก่อน');
-    return;
-  }
+  // [V6.0.008] LockService guard (refactored to use acquireScriptLockOrWarn_ helper)
+  const lock = acquireScriptLockOrWarn_(
+    30000,
+    '⚠️ buildGeoDictionary กำลังรันอยู่อีก instance หนึ่ง กรุณารอให้เสร็จก่อน'
+  );
+  if (!lock) return;
 
-  // [REF-011 V5.5.020 PILOT] Apply withEntryPointGuard_ for standardized error handling
-  //   - Preserve Behavior 100%: errorPrefix='เกิดข้อผิดพลาด: ' (same as original alert message)
-  //   - finally block (flushLogBuffer_) handled by guard automatically
-  //   - [V6.0.008 P1.4] Pass {lock: lock} ให้ guard release ใน finally block
+  // [REF-011 V5.5.020 PILOT] Apply withEntryPointGuard_ — pass {lock: lock} for release in finally
   withEntryPointGuard_(
     'GeoDictBuilder',
     'buildGeoDictionary',

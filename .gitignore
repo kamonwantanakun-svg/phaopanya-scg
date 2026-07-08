@@ -61,3 +61,8 @@ temp/
 .Trashes
 .Spotlight-V100
 .fseventsd
+# [V6.0.008] AI audit reports — don't track in repo (causes SonarCloud duplication)
+#   These are uploaded by user for analysis, then recommendations are applied to code.
+#   After applying fixes, delete the folder — don't keep AI reports in production codebase.
+Quick file check/
+Quick file check_*/

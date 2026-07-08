@@ -1009,19 +1009,11 @@ function clearAllSCGSheets_UI() {
     return;
   }
 
-  // [V6.0.008 P1.2 — BUGHUNT-01 fix from LMDS_PREDEPLOY_AUDIT 2026-07-08]
-  //   LockService guard — ป้องกัน double-click ทำให้ clearContent ทับซ้อนกัน
-  //   (และป้องกัน race กับ safeResetTransactional_UI ที่ใช้ lock เดียวกัน)
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) {
-    safeUiAlert_('⚠️ มีการล้างข้อมูลอื่นกำลังทำงานอยู่ กรุณารอสักครู่');
-    return;
-  }
+  // [V6.0.008] LockService guard (refactored to use acquireScriptLockOrWarn_ helper)
+  const lock = acquireScriptLockOrWarn_(5000, '⚠️ มีการล้างข้อมูลอื่นกำลังทำงานอยู่ กรุณารอสักครู่');
+  if (!lock) return;
 
   try {
-    // [V6.0.008 P1.2] Add YES_NO confirmation (parity with safeResetTransactional_UI)
-    //   ก่อนหน้านี้คลิกเมนูทีเดียว → clearContent 4 ชีตทันที (ไม่มีทาง undo)
-    //   ตอนนี้ต้องยืนยัน YES_NO ก่อน — ลดความเสี่ยง accidental wipe
     const ui = SpreadsheetApp.getUi();
     const confirm = ui.alert(
       '🗑️ ล้างข้อมูลชีต SCG',
@@ -1042,39 +1034,20 @@ function clearAllSCGSheets_UI() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     ss.toast('🗑️ กำลังล้างข้อมูลชีตที่เลือก...', APP_NAME, -1);
 
-    let cleared = 0;
-    const clearedNames = [];
-
-    // [FIX V6.0.005] เพิ่ม SHEET.INPUT ในรายการชีตที่ต้องล้าง
+    // [V6.0.008] Use shared helper — eliminates duplication with safeResetTransactional_UI
     const sheetsToClear = [SHEET.DAILY_JOB, SHEET.OWNER_SUMMARY, SHEET.SHIPMENT_SUM, SHEET.INPUT];
-    sheetsToClear.forEach((name) => {
-      const sheet = ss.getSheetByName(name);
-      if (sheet && sheet.getLastRow() > 1) {
-        // [FIX v5.5.021 M5] ใช้ clearContent แทน deleteRows เพื่อความรวดเร็วและไม่กระทบโครงสร้างตาราง
-        sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getMaxColumns()).clearContent();
-        cleared++;
-        clearedNames.push(name);
-      } else if (sheet && name === SHEET.INPUT) {
-        // Input sheet อาจมีข้อมูลใน B1 (COOKIE) และ B3 (ShipmentNos) ไม่ได้อยู่ใน row 2+
-        // ล้างเฉพาะข้อมูลในคอลัมน์ B (ไม่ล้าง label ในคอลัมน์ A)
-        const lastRow = sheet.getLastRow();
-        if (lastRow >= 1) {
-          sheet.getRange(1, 2, lastRow, 1).clearContent();
-          cleared++;
-          clearedNames.push(name + ' (col B only)');
-        }
-      }
-    });
+    const result = clearSheetsPreserveHeaders_(ss, sheetsToClear);
 
-    logInfo('ServiceSCG', 'clearAllSCGSheets_UI: ล้าง ' + cleared + ' ชีต → ' + clearedNames.join(', '));
-    // [RF-03] เปลี่ยน ui.alert() → safeUiAlert_() — trigger-safe
-    safeUiAlert_('✅ ล้างข้อมูล ' + cleared + ' ชีตเรียบร้อย\n\n' + clearedNames.join('\n'));
+    logInfo(
+      'ServiceSCG',
+      'clearAllSCGSheets_UI: ล้าง ' + result.clearedCount + ' ชีต → ' + result.clearedNames.join(', ')
+    );
+    safeUiAlert_('✅ ล้างข้อมูล ' + result.clearedCount + ' ชีตเรียบร้อย\n\n' + result.clearedNames.join('\n'));
   } catch (e) {
     logError('ServiceSCG', 'clearAllSCGSheets_UI ล้มเหลว: ' + e.message, e);
     safeUiAlert_('เกิดข้อผิดพลาดในการล้างข้อมูล: ' + e.message);
   } finally {
-    // [V6.0.008 P1.2] Always release lock + flush log buffer
-    if (lock.hasLock()) lock.releaseLock();
+    releaseScriptLock_(lock);
     if (typeof flushLogBuffer_ === 'function') flushLogBuffer_();
   }
 }
@@ -1123,6 +1096,11 @@ function safeResetTransactional_UI() {
     safeUiAlert_('🔒 คุณไม่มีสิทธิ์ล้างข้อมูล\nกรุณาติดต่อ Admin');
     return;
   }
+
+  // [V6.0.008] LockService guard (refactored to use acquireScriptLockOrWarn_ helper)
+  const lock = acquireScriptLockOrWarn_(5000, '⚠️ มีการล้างข้อมูลอื่นกำลังทำงานอยู่ กรุณารอสักครู่');
+  if (!lock) return;
+
   try {
     const ui = SpreadsheetApp.getUi();
     const confirm = ui.alert(
@@ -1157,48 +1135,18 @@ function safeResetTransactional_UI() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     ss.toast('🧹 กำลัง Safe Reset (transactional only)...', APP_NAME, -1);
 
-    // ─── TRANSACTIONAL sheets — clear content (preserve headers) ───
+    // [V6.0.008] Use shared helper — eliminates duplication with clearAllSCGSheets_UI
     const transactionalSheets = [
-      SHEET.SOURCE, // SCGนครหลวงJWDภูมิภาค
+      SHEET.SOURCE,
       SHEET.FACT_DELIVERY,
       SHEET.Q_REVIEW,
-      SHEET.DAILY_JOB, // ตารางงานประจำวัน
-      SHEET.OWNER_SUMMARY, // สรุป_เจ้าของสินค้า
-      SHEET.SHIPMENT_SUM, // สรุป_Shipment
+      SHEET.DAILY_JOB,
+      SHEET.OWNER_SUMMARY,
+      SHEET.SHIPMENT_SUM,
       SHEET.INPUT
     ];
-
-    let clearedCount = 0;
-    const clearedNames = [];
-    const errors = [];
-
-    transactionalSheets.forEach(function (sheetName) {
-      try {
-        const sheet = ss.getSheetByName(sheetName);
-        if (!sheet) {
-          errors.push('ไม่พบชีต: ' + sheetName);
-          return;
-        }
-
-        if (sheet.getLastRow() > 1) {
-          // [FIX v5.5.021 M5] clearContent แทน deleteRows — เร็วกว่า + ไม่กระทบโครงสร้าง
-          sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getMaxColumns()).clearContent();
-          clearedCount++;
-          clearedNames.push(sheetName);
-        } else if (sheetName === SHEET.INPUT) {
-          // INPUT sheet อาจมีข้อมูลใน B1 (COOKIE) และ B3 (ShipmentNos) ไม่ได้อยู่ใน row 2+
-          const lastRow = sheet.getLastRow();
-          if (lastRow >= 1) {
-            // ล้างเฉพาะ column B (cookie + shipment numbers) — เก็บ label ใน column A
-            sheet.getRange(1, 2, lastRow, 1).clearContent();
-            clearedCount++;
-            clearedNames.push(sheetName + ' (col B only)');
-          }
-        }
-      } catch (clearErr) {
-        errors.push(sheetName + ': ' + clearErr.message);
-      }
-    });
+    const result = clearSheetsPreserveHeaders_(ss, transactionalSheets);
+    const errors = result.errors.slice(); // copy for additional errors below
 
     // ─── Clear pipeline caches (so next run starts fresh) ───
     let cacheCleared = 0;
@@ -1207,7 +1155,6 @@ function safeResetTransactional_UI() {
         invalidateAllGlobalCaches();
         cacheCleared = 1;
       } else {
-        // Fallback — clear key pipeline caches directly
         const cache = CacheService.getScriptCache();
         cache.removeAll([
           CACHE_KEY.PERSON_ALL,
@@ -1239,8 +1186,8 @@ function safeResetTransactional_UI() {
     // ─── Build report ───
     const lines = [];
     lines.push('🧹 Safe Reset เสร็จสิ้น\n');
-    lines.push('✅ Cleared (' + clearedCount + ' sheets):');
-    clearedNames.forEach(function (n) {
+    lines.push('✅ Cleared (' + result.clearedCount + ' sheets):');
+    result.clearedNames.forEach(function (n) {
       lines.push('  • ' + n);
     });
     lines.push('\n💾 Preserved (master data):');
@@ -1265,12 +1212,15 @@ function safeResetTransactional_UI() {
 
     logInfo(
       'ServiceSCG',
-      'safeResetTransactional_UI: cleared ' + clearedCount + ' transactional sheets, master data preserved'
+      'safeResetTransactional_UI: cleared ' + result.clearedCount + ' transactional sheets, master data preserved'
     );
     safeUiAlert_(lines.join('\n'));
   } catch (e) {
     logError('ServiceSCG', 'safeResetTransactional_UI ล้มเหลว: ' + e.message, e);
     safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  } finally {
+    releaseScriptLock_(lock);
+    if (typeof flushLogBuffer_ === 'function') flushLogBuffer_();
   }
 }
 
