@@ -1,0 +1,169 @@
+<script>
+  /**
+   * js/components/ViewHelpers.html — Shared view helpers (v6.0.008)
+   * ===================================================
+   * Extracted from FactDelivery.html + SourceSheet.html to eliminate
+   * SonarCloud duplicated_lines (was 42.1% / 32.9% respectively).
+   *
+   * Shared helpers:
+   *   - buildPaginationHtml(offset, total, limit, pageBtnClass) — pagination bar
+   *   - buildPageButton(targetOffset, label, disabled, btnClass) — single page button
+   *   - buildLoadingHtml() — loading spinner
+   *   - buildEmptyState(title, hint) — empty state card
+   *   - buildErrorState(message, retryFnName) — error card with retry button
+   *   - escapeHtml(text) — escape user input for safe HTML insertion
+   *
+   * ใช้งาน:
+   *   const html = ViewHelpers.buildPaginationHtml(offset, total, limit, 'fact-page-btn');
+   *   const loading = ViewHelpers.buildLoadingHtml();
+   * ===================================================
+   */
+
+  globalThis.ViewHelpers = (function () {
+    'use strict';
+
+    /**
+     * buildPaginationHtml — pagination bar with "Showing X-Y of Z" + prev/next buttons
+     * @param {number} offset - 0-based
+     * @param {number} total - total rows
+     * @param {number} limit - rows per page
+     * @param {string} pageBtnClass - CSS class for page buttons (e.g., 'fact-page-btn', 'source-page-btn')
+     * @return {string} HTML string
+     */
+    function buildPaginationHtml(offset, total, limit, pageBtnClass) {
+      limit = limit || 50;
+      const totalPages = Math.ceil(total / limit) || 1;
+      const currentPage = Math.floor(offset / limit) + 1;
+      const startIdx = total === 0 ? 0 : offset + 1;
+      const endIdx = Math.min(offset + limit, total);
+
+      return (
+        '<div class="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between text-xs">' +
+        '<div class="text-gray-500">' +
+        'แสดง <span class="font-medium">' +
+        startIdx +
+        '</span>–<span class="font-medium">' +
+        endIdx +
+        '</span> ' +
+        'จาก <span class="font-medium">' +
+        total.toLocaleString() +
+        '</span> รายการ' +
+        '</div>' +
+        '<div class="flex items-center gap-1">' +
+        buildPageButton(offset - limit, '← ก่อนหน้า', offset <= 0, pageBtnClass) +
+        '<span class="px-3 py-1 text-gray-600">หน้า ' +
+        currentPage +
+        ' / ' +
+        totalPages +
+        '</span>' +
+        buildPageButton(offset + limit, 'ถัดไป →', offset + limit >= total, pageBtnClass) +
+        '</div>' +
+        '</div>'
+      );
+    }
+
+    /**
+     * buildPageButton — single page button (prev/next)
+     * @param {number} targetOffset - 0-based offset to navigate to
+     * @param {string} label - button label (e.g., '← ก่อนหน้า')
+     * @param {boolean} disabled - true if button should be disabled
+     * @param {string} btnClass - CSS class for the button
+     * @return {string} HTML string
+     */
+    function buildPageButton(targetOffset, label, disabled, btnClass) {
+      const stateClass = disabled ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600 hover:bg-white cursor-pointer';
+      return (
+        '<button type="button" data-offset="' +
+        targetOffset +
+        '" ' +
+        (disabled ? 'disabled' : '') +
+        ' class="' +
+        btnClass +
+        ' px-3 py-1.5 rounded border border-gray-200 ' +
+        stateClass +
+        '">' +
+        label +
+        '</button>'
+      );
+    }
+
+    /**
+     * buildLoadingHtml — loading spinner card
+     * @return {string} HTML string
+     */
+    function buildLoadingHtml() {
+      return (
+        '<div class="bg-white border border-gray-200 rounded-lg p-8 text-center">' +
+        '<div class="inline-block w-6 h-6 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>' +
+        '<p class="mt-2 text-sm text-gray-500">กำลังโหลด...</p>' +
+        '</div>'
+      );
+    }
+
+    /**
+     * buildEmptyState — empty state card
+     * @param {string} title - heading text (e.g., 'ไม่มีรายการใน FACT_DELIVERY')
+     * @param {string} hint - subtext hint
+     * @return {string} HTML string
+     */
+    function buildEmptyState(title, hint) {
+      return (
+        '<div class="bg-white border border-gray-200 rounded-lg p-12 text-center">' +
+        '<div class="text-4xl mb-3">📭</div>' +
+        '<h3 class="text-lg font-semibold text-gray-700 mb-1">' +
+        escapeHtml(title || 'ไม่มีรายการ') +
+        '</h3>' +
+        '<p class="text-sm text-gray-500">' +
+        escapeHtml(hint || '') +
+        '</p>' +
+        '</div>'
+      );
+    }
+
+    /**
+     * buildErrorState — error card with retry button
+     * @param {string} message - error message to display
+     * @param {string} retryFnName - global function name to call on retry (e.g., 'globalThis.FactDeliveryView.retry()')
+     * @return {string} HTML string
+     */
+    function buildErrorState(message, retryFnName) {
+      return (
+        '<div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">' +
+        '<div class="text-2xl mb-2">❌</div>' +
+        '<p class="text-sm text-red-700">' +
+        escapeHtml(message || 'Unknown error') +
+        '</p>' +
+        '<button type="button" onclick="' +
+        escapeHtml(retryFnName || '') +
+        '" class="mt-3 px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700">ลองใหม่</button>' +
+        '</div>'
+      );
+    }
+
+    /**
+     * escapeHtml — escape user input for safe HTML insertion
+     * @param {string} text
+     * @return {string} escaped text
+     */
+    function escapeHtml(text) {
+      if (text === null || text === undefined) return '';
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    return {
+      buildPaginationHtml: buildPaginationHtml,
+      buildPageButton: buildPageButton,
+      buildLoadingHtml: buildLoadingHtml,
+      buildEmptyState: buildEmptyState,
+      buildErrorState: buildErrorState,
+      escapeHtml: escapeHtml
+    };
+  })();
+
+  console.log('[ViewHelpers] loaded —', Object.keys(globalThis.ViewHelpers).length, 'methods');
+</script>
