@@ -1,0 +1,579 @@
+<script>
+  /**
+   * views/SourceSheet.html — Source Sheet view (Phase 2.4)
+   * ===================================================
+   * ตารางข้อมูลดิบจาก SCG API (SCGนครหลวงJWDภูมิภาค sheet)
+   *   - Server pagination (50 rows/page)
+   *   - Filter tabs: All / SUCCESS / PENDING / ERROR / EMPTY
+   *   - ดูได้ว่าอันไหนยังไม่ processed (SYNC_STATUS ≠ SUCCESS)
+   *   - คลิก row → expand detail panel (เหมือน Q_REVIEW / FACT_DELIVERY)
+   *
+   * Backend functions (ใน 22_WebApp.gs):
+   *   - getSourcePage(offset, limit, filter) → { rows, total, syncStatusCounts, ... }
+   * ===================================================
+   */
+  globalThis.SourceSheetView = (function () {
+    'use strict';
+
+    // ────────────────────────────────────────────────────────────
+    // State
+    // ────────────────────────────────────────────────────────────
+    const PAGE_SIZE = 50;
+    let currentOffset = 0;
+    let currentSyncFilter = 'all';
+    let isLoading = false;
+
+    // ────────────────────────────────────────────────────────────
+    // Constants
+    // ────────────────────────────────────────────────────────────
+    const SYNC_TABS = [
+      { key: 'all', label: 'ทั้งหมด', color: 'blue' },
+      { key: 'SUCCESS', label: 'ประมวลผลแล้ว', color: 'green' },
+      { key: 'PENDING', label: 'รอประมวลผล', color: 'yellow' },
+      { key: 'ERROR', label: 'ผิดพลาด', color: 'red' },
+      { key: 'EMPTY', label: 'ยังไม่ได้ตั้ง', color: 'gray' }
+    ];
+
+    const SYNC_STYLES = {
+      SUCCESS: { bg: 'bg-green-100', text: 'text-green-700', icon: '✓' },
+      PENDING: { bg: 'bg-yellow-100', text: 'text-yellow-700', icon: '⏳' },
+      ERROR: { bg: 'bg-red-100', text: 'text-red-700', icon: '✗' },
+      EMPTY: { bg: 'bg-gray-100', text: 'text-gray-600', icon: '∅' }
+    };
+
+    // ────────────────────────────────────────────────────────────
+    // Public: render(container)
+    // ────────────────────────────────────────────────────────────
+    function render(data, container) {
+      if (container === null) return;
+
+      let html = '';
+      html += buildHeaderHtml_();
+      html += buildFilterTabsHtml_();
+      html += '<div id="sourceTableContainer">กำลังโหลด...</div>';
+      container.innerHTML = html;
+
+      bindFilterTabs_(container);
+      loadPage_(0);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Builders
+    // ────────────────────────────────────────────────────────────
+    function buildHeaderHtml_() {
+      return (
+        '<div class="mb-6">' +
+        '<h2 class="text-2xl font-bold text-gray-900">📥 Source Sheet (ข้อมูลดิบ)</h2>' +
+        '<p class="text-sm text-gray-500 mt-1">ข้อมูลดิบจาก SCG API — เช็ค <code class="bg-gray-100 px-1 rounded text-xs">SYNC_STATUS</code> ว่าอันไหประมวลผลแล้ว (SUCCESS) หรือยัง (PENDING/ERROR)</p>' +
+        '</div>'
+      );
+    }
+
+    function buildFilterTabsHtml_() {
+      let html = '<div class="mb-4 flex flex-wrap gap-2" id="sourceFilterTabs">';
+      SYNC_TABS.forEach(function (tab) {
+        const isActive = tab.key === currentSyncFilter;
+        const activeClass = isActive
+          ? 'bg-blue-600 text-white border-blue-600'
+          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50';
+        html +=
+          '<button type="button" data-status="' +
+          tab.key +
+          '" ' +
+          'class="filter-tab px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ' +
+          activeClass +
+          '">' +
+          escapeHtml_(tab.label) +
+          ' <span class="ml-1 text-xs opacity-75" data-count="' +
+          tab.key +
+          '">0</span>' +
+          '</button>';
+      });
+      html += '</div>';
+      return html;
+    }
+
+    // [V6.0.008] Pagination helpers — delegate to shared ViewHelpers component
+    function buildPaginationHtml_(offset, total, limit) {
+      return ViewHelpers.buildPaginationHtml(offset, total, limit || PAGE_SIZE, 'source-page-btn');
+    }
+
+    function buildTableHtml_(rows) {
+      if (!rows || rows.length === 0) {
+        return buildEmptyState_();
+      }
+
+      let html = '<div class="bg-white border border-gray-200 rounded-lg overflow-hidden">';
+      html += '<div class="overflow-x-auto">';
+      html += '<table class="w-full text-sm">';
+      html += buildTableHeader_();
+      html += buildTableBody_(rows);
+      html += '</table>';
+      html += '</div>';
+      html += '</div>';
+      return html;
+    }
+
+    function buildTableHeader_() {
+      return (
+        '<thead class="bg-gray-50 border-b border-gray-200">' +
+        '<tr>' +
+        '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">#</th>' +
+        '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">วันที่ส่ง</th>' +
+        '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Invoice</th>' +
+        '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">คนขับ</th>' +
+        '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">ชื่อปลายทาง (ดิบ)</th>' +
+        '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">พิกัด</th>' +
+        '<th class="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">SYNC</th>' +
+        '</tr>' +
+        '</thead>'
+      );
+    }
+
+    function buildTableBody_(rows) {
+      let html = '<tbody class="divide-y divide-gray-100">';
+      rows.forEach(function (row) {
+        html += buildRowHtml_(row);
+        html += buildDetailRowHtml_(row);
+      });
+      html += '</tbody>';
+      return html;
+    }
+
+    function buildRowHtml_(row) {
+      const syncBucket = row.syncStatusBucket || 'EMPTY';
+      const syncStyle = SYNC_STYLES[syncBucket] || SYNC_STYLES['EMPTY'];
+      const dateStr = formatDateShort_(row.deliveryDate);
+      const timeStr = row.deliveryTime
+        ? ' <span class="text-gray-400 text-xs">' + escapeHtml_(row.deliveryTime) + '</span>'
+        : '';
+      const latLngStr =
+        row.lat && row.lng
+          ? '<span class="font-mono text-xs text-gray-600">' +
+            row.lat.toFixed(4) +
+            ', ' +
+            row.lng.toFixed(4) +
+            '</span>'
+          : '<span class="text-gray-300">—</span>';
+
+      return (
+        '<tr class="hover:bg-gray-50 cursor-pointer source-row" data-source-id="' +
+        escapeHtml_(row.sourceId || String(row._sheetRow)) +
+        '">' +
+        '<td class="px-3 py-2 text-xs text-gray-400">' +
+        (row.rowId || row._sheetRow - 1) +
+        '</td>' +
+        '<td class="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">' +
+        escapeHtml_(dateStr) +
+        timeStr +
+        '</td>' +
+        '<td class="px-3 py-2 font-mono text-xs text-gray-700">' +
+        escapeHtml_(row.invoiceNo || '—') +
+        '</td>' +
+        '<td class="px-3 py-2 text-xs text-gray-700">' +
+        '<div>' +
+        escapeHtml_(row.driverName || '—') +
+        '</div>' +
+        (row.truckLicense ? '<div class="text-gray-400 text-xs">' + escapeHtml_(row.truckLicense) + '</div>' : '') +
+        '</td>' +
+        '<td class="px-3 py-2 text-xs text-gray-900 font-medium">' +
+        escapeHtml_(row.rawPersonName || '—') +
+        '</td>' +
+        '<td class="px-3 py-2">' +
+        latLngStr +
+        '</td>' +
+        '<td class="px-3 py-2 text-center">' +
+        '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ' +
+        syncStyle.bg +
+        ' ' +
+        syncStyle.text +
+        '" title="' +
+        escapeHtml_(row.syncStatus || '') +
+        '">' +
+        syncStyle.icon +
+        ' ' +
+        escapeHtml_(syncBucket) +
+        '</span>' +
+        '</td>' +
+        '</tr>'
+      );
+    }
+
+    function buildDetailRowHtml_(row) {
+      return (
+        '<tr class="detail-row hidden" data-detail-for="' +
+        escapeHtml_(row.sourceId || String(row._sheetRow)) +
+        '">' +
+        '<td colspan="7" class="px-3 py-0 bg-gray-50">' +
+        '<div class="detail-container py-4">' +
+        buildDetailContentHtml_(row) +
+        '</div>' +
+        '</td>' +
+        '</tr>'
+      );
+    }
+
+    function buildDetailContentHtml_(row) {
+      let html = '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">';
+
+      // ─── Column 1: ข้อมูลการจัดส่ง ───
+      html += buildDeliverySectionHtml_(row);
+
+      // ─── Column 2: พิกัด + SYNC status + QC ───
+      html += buildSyncStatusSectionHtml_(row);
+
+      html += '</div>'; // close grid
+      return html;
+    }
+
+    /**
+     * buildDeliverySectionHtml_ — Section 1: ข้อมูลการจัดส่ง (ดิบ)
+     *   [SonarCloud S3776] แยกออกจาก buildDetailContentHtml_ เพื่อลด Cognitive Complexity
+     * @param {Object} row
+     * @return {string} HTML
+     * @private
+     */
+    function buildDeliverySectionHtml_(row) {
+      let html = '<div class="bg-white border border-gray-200 rounded-lg p-4">';
+      html += '<h4 class="text-sm font-semibold text-gray-800 mb-3">🚚 ข้อมูลการจัดส่ง (ดิบ)</h4>';
+      const deliveryRows = [
+        ['Source ID', row.sourceId],
+        ['Row #', row.rowId || row._sheetRow - 1],
+        ['Sheet Row', row._sheetRow],
+        ['วันที่ส่ง', formatDateFull_(row.deliveryDate) + (row.deliveryTime ? ' ' + row.deliveryTime : '')],
+        ['Invoice', row.invoiceNo],
+        ['Shipment', row.shipmentNo],
+        ['คนขับ', row.driverName + (row.truckLicense ? ' (' + row.truckLicense + ')' : '')],
+        ['รหัสลูกค้า', row.customerCode],
+        ['ชื่อเจ้าของสินค้า (Sold To)', row.soldToName],
+        ['ชื่อปลายทาง (ดิบ)', row.rawPersonName],
+        ['ชื่อที่คนขับยืนยัน', row.driverVerifiedName],
+        ['ที่อยู่ปลายทาง (ดิบ)', row.rawAddress],
+        ['ที่อยู่ที่คนขับยืนยัน', row.driverVerifiedAddr],
+        ['ที่อยู่จาก GoogleMap', row.resolvedAddr],
+        ['คลังสินค้า', row.warehouse],
+        ['ระยะจากคลัง', row.distFromWh ? row.distFromWh + ' km' : '—'],
+        ['เดือน', row.month],
+        ['หมายเหตุ', row.remark]
+      ];
+      html += buildDefListHtml_(deliveryRows);
+      html += '</div>';
+      return html;
+    }
+
+    /**
+     * buildSyncStatusSectionHtml_ — Section 2: พิกัด + SYNC status + QC
+     *   [SonarCloud S3776 + S3358] แยกออกจาก buildDetailContentHtml_ และแยก nested ternary
+     * @param {Object} row
+     * @return {string} HTML
+     * @private
+     */
+    function buildSyncStatusSectionHtml_(row) {
+      let html = '<div class="bg-white border border-gray-200 rounded-lg p-4">';
+      html += '<h4 class="text-sm font-semibold text-gray-800 mb-3">📡 พิกัด + SYNC Status + QC</h4>';
+
+      const syncBucket = row.syncStatusBucket || 'EMPTY';
+      const syncStyle = SYNC_STYLES[syncBucket] || SYNC_STYLES['EMPTY'];
+      const statusRows = [
+        [
+          'SYNC Status',
+          '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ' +
+            syncStyle.bg +
+            ' ' +
+            syncStyle.text +
+            '">' +
+            syncStyle.icon +
+            ' ' +
+            escapeHtml_(syncBucket) +
+            '</span>'
+        ],
+        [
+          'SYNC Status (raw)',
+          row.syncStatus
+            ? '<span class="font-mono text-xs">' + escapeHtml_(row.syncStatus) + '</span>'
+            : '<span class="text-gray-400 italic">(ว่าง)</span>'
+        ],
+        ['QC Result', row.qcResult],
+        ['QC Issue', row.qcIssue]
+      ];
+      html += buildDefListHtml_(statusRows);
+
+      // พิกัด + ปุ่ม Google Maps
+      html += buildMapsLinkHtml_(row);
+
+      // Hint ถ้ายังไม่ SUCCESS
+      if (syncBucket !== 'SUCCESS') {
+        const hint = buildSyncHintHtml_(syncBucket);
+        if (hint) {
+          html +=
+            '<div class="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800">' +
+            escapeHtml_(hint) +
+            '</div>';
+        }
+      }
+
+      html += '</div>';
+      return html;
+    }
+
+    /**
+     * buildMapsLinkHtml_ — พิกัด + ปุ่มดูใน Google Maps
+     * @param {Object} row
+     * @return {string} HTML
+     * @private
+     */
+    function buildMapsLinkHtml_(row) {
+      if (!(row.lat && row.lng)) {
+        return '<p class="mt-3 text-xs text-gray-400 italic">ไม่มีพิกัด (LAT/LONG ว่าง)</p>';
+      }
+      const mapsUrl = ViewHelpers.getGoogleMapsUrl(row.lat, row.lng);
+      return (
+        '<div class="mt-3">' +
+        '<p class="text-xs text-gray-500 mb-1">พิกัด (LAT/LONG จาก SCG API):</p>' +
+        '<div class="flex items-center gap-2">' +
+        '<span class="font-mono text-xs text-gray-700">' +
+        row.lat.toFixed(6) +
+        ', ' +
+        row.lng.toFixed(6) +
+        '</span>' +
+        '<a href="' +
+        mapsUrl +
+        '" target="_blank" rel="noopener" ' +
+        'class="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">🗺️ ดูใน Maps</a>' +
+        '</div>' +
+        '</div>'
+      );
+    }
+
+    /**
+     * buildSyncHintHtml_ — สร้าง hint message ตาม sync bucket
+     *   [SonarCloud S3358] แยก nested ternary เป็น if/else chain
+     * @param {string} syncBucket - 'PENDING' | 'ERROR' | 'EMPTY' | other
+     * @return {string} hint message หรือ '' ถ้าไม่มี
+     * @private
+     */
+    function buildSyncHintHtml_(syncBucket) {
+      if (syncBucket === 'PENDING') return '💡 รายการนี้ยังไม่ถูกประมวลผล — รอ Daily Job ทำงาน';
+      if (syncBucket === 'ERROR') return '⚠️ รายการนี้ประมวลผลผิดพลาด — ตรวจสอบ log ใน SYS_LOG';
+      if (syncBucket === 'EMPTY') return '∅ SYNC_STATUS ว่าง — รอ Daily Job ตั้งค่า';
+      return '';
+    }
+
+    function buildDefListHtml_(rows) {
+      let html = '<dl class="text-xs space-y-1.5">';
+      rows.forEach(function (r) {
+        if (!r[1] && r[1] !== 0 && typeof r[1] !== 'string') return;
+        if (typeof r[1] === 'string' && r[1] === '') return;
+        html +=
+          '<div class="flex gap-2">' +
+          '<dt class="text-gray-500 w-44 flex-shrink-0">' +
+          escapeHtml_(r[0]) +
+          '</dt>' +
+          '<dd class="text-gray-800 flex-1">' +
+          r[1] +
+          '</dd>' +
+          '</div>';
+      });
+      html += '</dl>';
+      return html;
+    }
+
+    // [V6.0.008] State helpers — delegate to shared ViewHelpers component
+    function buildEmptyState_() {
+      return ViewHelpers.buildEmptyState(
+        'ไม่มีรายการใน Source Sheet',
+        'ลองเปลี่ยน filter หรือรอให้มีข้อมูลใหม่จาก SCG API'
+      );
+    }
+
+    function buildLoadingHtml_() {
+      return ViewHelpers.buildLoadingHtml();
+    }
+
+    function buildErrorHtml_(message) {
+      return ViewHelpers.buildErrorState(message, 'globalThis.SourceSheetView && globalThis.SourceSheetView.retry()');
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Event binding
+    // ────────────────────────────────────────────────────────────
+    function bindFilterTabs_(container) {
+      const tabs = container.querySelectorAll('.filter-tab');
+      tabs.forEach(function (btn) {
+        btn.addEventListener('click', handleFilterTabClick_.bind(null, btn, tabs));
+      });
+    }
+
+    /**
+     * handleFilterTabClick_ — จัดการ click บน filter tab
+     *   [SonarCloud S2004] แยก handler ออกจาก forEach เพื่อลด nesting level
+     * @param {HTMLElement} btn - ปุ่มที่ถูก click
+     * @param {NodeList} tabs - ทุก tab (สำหรับ toggle active class)
+     * @private
+     */
+    function handleFilterTabClick_(btn, tabs) {
+      const newStatus = btn.dataset.status;
+      if (newStatus === currentSyncFilter || isLoading) return;
+      currentSyncFilter = newStatus;
+      currentOffset = 0;
+      tabs.forEach(function (t) {
+        t.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
+        t.classList.add('bg-white', 'text-gray-700', 'border-gray-300', 'hover:bg-gray-50');
+      });
+      btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+      btn.classList.remove('bg-white', 'text-gray-700', 'border-gray-300', 'hover:bg-gray-50');
+      loadPage_(0);
+    }
+
+    function bindRowClicksAndPagination_(container) {
+      container.querySelectorAll('.source-row').forEach(function (tr) {
+        tr.addEventListener('click', function () {
+          toggleDetailRow_(tr.dataset.sourceId);
+        });
+      });
+
+      container.querySelectorAll('.source-page-btn').forEach(function (btn) {
+        if (btn.disabled) return;
+        btn.addEventListener('click', function () {
+          const offset = Number.parseInt(btn.dataset.offset, 10) || 0;
+          if (offset < 0) return;
+          loadPage_(offset);
+        });
+      });
+    }
+
+    function toggleDetailRow_(sourceId) {
+      const detailRow = document.querySelector('.detail-row[data-detail-for="' + CSS.escape(sourceId) + '"]');
+      if (!detailRow) return;
+
+      const isHidden = detailRow.classList.contains('hidden');
+
+      // ปิด detail row อื่น (เปิดทีละอัน)
+      document.querySelectorAll('.detail-row:not(.hidden)').forEach(function (r) {
+        if (r !== detailRow) r.classList.add('hidden');
+      });
+
+      if (isHidden) {
+        detailRow.classList.remove('hidden');
+      } else {
+        detailRow.classList.add('hidden');
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Actions
+    // ────────────────────────────────────────────────────────────
+    async function loadPage_(offset) {
+      if (isLoading) return;
+      if (!globalThis.api || typeof globalThis.api.getSourcePage !== 'function') {
+        const c = document.getElementById('sourceTableContainer');
+        if (c) c.innerHTML = buildErrorHtml_('API ไม่พร้อมใช้งาน');
+        return;
+      }
+
+      isLoading = true;
+      currentOffset = offset;
+      const container = document.getElementById('sourceTableContainer');
+      if (container) container.innerHTML = buildLoadingHtml_();
+
+      try {
+        const filter = { syncStatus: currentSyncFilter };
+        const data = await globalThis.api.getSourcePage(offset, PAGE_SIZE, filter);
+        renderData_(data);
+      } catch (err) {
+        console.error('[SourceSheetView] loadPage_ failed:', err);
+        if (container) container.innerHTML = buildErrorHtml_(err.message);
+        showToast_('โหลดรายการล้มเหลว', err.message, 'error', 5000);
+      } finally {
+        isLoading = false;
+      }
+    }
+
+    function renderData_(data) {
+      const container = document.getElementById('sourceTableContainer');
+      if (!container) return;
+
+      // Update filter tab counts
+      if (data.syncStatusCounts) {
+        let total = 0;
+        Object.keys(data.syncStatusCounts).forEach(function (k) {
+          total += data.syncStatusCounts[k];
+        });
+        const allEl = document.querySelector('[data-count="all"]');
+        if (allEl) allEl.textContent = total;
+
+        Object.keys(data.syncStatusCounts).forEach(function (key) {
+          const el = document.querySelector('[data-count="' + key + '"]');
+          if (el) el.textContent = data.syncStatusCounts[key];
+        });
+      }
+
+      container.innerHTML = buildTableHtml_(data.rows);
+
+      if (data.rows && data.rows.length > 0) {
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = buildPaginationHtml_(data.offset, data.total, data.limit);
+        const newPagination = wrapper.firstElementChild;
+        if (newPagination) {
+          container.appendChild(newPagination);
+        }
+      }
+
+      bindRowClicksAndPagination_(container);
+
+      if (globalThis.lucide && typeof globalThis.lucide.createIcons === 'function') {
+        globalThis.lucide.createIcons();
+      }
+    }
+
+    function retry() {
+      loadPage_(currentOffset || 0);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Helpers
+    // ────────────────────────────────────────────────────────────
+    function formatDateShort_(isoString) {
+      if (!isoString) return '—';
+      try {
+        const d = new Date(isoString);
+        if (Number.isNaN(d.getTime())) return String(isoString);
+        return d.toLocaleDateString('th-TH', { dateStyle: 'short' });
+      } catch (e) {
+        // [SonarCloud S2486] log warning เพื่อ debug ถ้ามี exception จริง
+        console.warn('[SourceSheetView] formatDateShort_ failed:', e.message);
+        return String(isoString);
+      }
+    }
+
+    function formatDateFull_(isoString) {
+      if (!isoString) return '—';
+      try {
+        const d = new Date(isoString);
+        if (Number.isNaN(d.getTime())) return String(isoString);
+        return d.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+      } catch (e) {
+        // [SonarCloud S2486] log warning เพื่อ debug ถ้ามี exception จริง
+        console.warn('[SourceSheetView] formatDateFull_ failed:', e.message);
+        return String(isoString);
+      }
+    }
+
+    // [V6.0.024] escapeHtml_ — alias to shared ViewHelpers.escapeHtml (DRY)
+    //   Was: duplicated 7 times across views — now centralized in ViewHelpers.html
+    const escapeHtml_ = globalThis.ViewHelpers.escapeHtml;
+
+    function showToast_(title, message, type, duration) {
+      if (globalThis.LMDSApp && typeof globalThis.LMDSApp.showToast === 'function') {
+        globalThis.LMDSApp.showToast(title, message, type, duration);
+      }
+    }
+
+    return {
+      render: render,
+      retry: retry
+    };
+  })();
+
+  console.log('[SourceSheetView] view loaded');
+</script>

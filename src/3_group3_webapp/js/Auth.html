@@ -1,0 +1,157 @@
+<script>
+  /**
+   * js/Auth.html — Authentication & Session Management
+   * ===================================================
+   * จัดการ session ผู้ใช้ + ตรวจ auth ฝั่ง frontend
+   * (defense-in-depth: server ตรวจในทุก call อยู่แล้วใน 22_WebApp.gs)
+   *
+   * ฟีเจอร์:
+   * - บันทึก session ใน localStorage (เก็บ lastActive timestamp)
+   * - ตรวจ session หมดอายุ หลัง 30 นาทีไม่ active
+   * - ส่ง event 'auth:session-expired' เมื่อหมดอายุ
+   * - รีเฟรช session ทุกครั้งที่มี user interaction
+   * ===================================================
+   */
+
+  globalThis.auth = (function () {
+    'use strict';
+
+    const STORAGE_KEY = 'lmds_session';
+    const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 นาที
+    const CHECK_INTERVAL_MS = 60 * 1000; // ตรวจทุก 1 นาที
+
+    let checkTimer = null;
+    let currentUser = null;
+
+    /**
+     * init — เริ่มต้น auth system
+     *   อ่าน user จาก SSR data (globalThis.__CURRENT_USER__)
+     *   เริ่ม session check timer
+     */
+    function init() {
+      currentUser = globalThis.__CURRENT_USER__ || null;
+      refreshSession();
+
+      // ตรวจ session ทุก 1 นาที
+      checkTimer = setInterval(checkSessionExpiry_, CHECK_INTERVAL_MS);
+
+      // ฟัง user activity เพื่อ refresh session
+      ['click', 'keydown', 'scroll', 'touchstart'].forEach((evt) => {
+        document.addEventListener(evt, debounceRefresh_, { passive: true });
+      });
+
+      console.log('[auth] Auth initialized — user:', currentUser ? currentUser.email : 'none');
+    }
+
+    /**
+     * getUser — คืนข้อมูลผู้ใช้ปัจจุบัน
+     * @return {Object|null}
+     */
+    function getUser() {
+      return currentUser;
+    }
+
+    /**
+     * isAuthorized — ตรวจว่า user ผ่าน auth แล้วหรือไม่
+     * @return {boolean}
+     */
+    function isAuthorized() {
+      return currentUser !== null && currentUser !== undefined && currentUser.authorized === true;
+    }
+
+    /**
+     * refreshSession — อัปเดต lastActive timestamp ใน localStorage
+     *   เรียกทุกครั้งที่มี user interaction
+     */
+    function refreshSession() {
+      try {
+        const session = {
+          lastActive: Date.now(),
+          email: currentUser ? currentUser.email : null
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+      } catch (e) {
+        // [FIX SonarCloud S2486] localStorage อาจไม่พร้อมในบาง context (incognito, sandboxed iframe)
+        //   กรณีนี้ไม่สามารถ recover ได้ — บันทึก warning แล้วปล่อยให้ server-side auth เป็น fallback
+        //   (Auth ทุกครั้งยังผ่านการ re-validate ฝั่ง server อยู่แล้ว)
+        console.warn('[auth] Cannot write session to localStorage (likely incognito/sandboxed):', e.message);
+      }
+    }
+
+    /**
+     * checkSessionExpiry_ — ตรวจว่า session หมดอายุหรือยัง
+     *   ถ้าหมดอายุ → ส่ง event 'auth:session-expired' + หยุด polling
+     * @private
+     */
+    function checkSessionExpiry_() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw === null || raw === '') {
+          refreshSession(); // ยังไม่เคยเก็บ → สร้างใหม่
+          return;
+        }
+        const session = JSON.parse(raw);
+        const elapsed = Date.now() - (session.lastActive || 0);
+        if (elapsed > SESSION_TIMEOUT_MS) {
+          console.warn('[auth] Session expired (inactive for ' + Math.round(elapsed / 1000 / 60) + ' min)');
+          document.dispatchEvent(new CustomEvent('auth:session-expired'));
+          destroy();
+        }
+      } catch (e) {
+        console.warn('[auth] Session check failed:', e);
+      }
+    }
+
+    /**
+     * debounceRefresh_ — throttle การ refresh session ไม่ให้เกิดบ่อยเกินไป
+     *   ไม่ refresh ถ้า refresh ครั้งล่าสุดยังไม่ถึง 30 วินาที
+     * @private
+     */
+    let lastRefresh = 0;
+    function debounceRefresh_() {
+      const now = Date.now();
+      if (now - lastRefresh > 30000) {
+        lastRefresh = now;
+        refreshSession();
+      }
+    }
+
+    /**
+     * destroy — ล้าง session + หยุด timer
+     *   เรียกเมื่อ logout หรือ session หมดอายุ
+     */
+    function destroy() {
+      if (checkTimer) {
+        clearInterval(checkTimer);
+        checkTimer = null;
+      }
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch (e) {
+        // localStorage อาจไม่พร้อมในบาง context (incognito, sandboxed iframe)
+        console.warn('[auth] Cannot clear session from localStorage:', e);
+      }
+    }
+
+    /**
+     * logout — ล้าง session + รีโหลดหน้า (redirect ไปหน้า unauthorized)
+     *   ในกรณีนี้ไม่มี login page แยก → รีโหลดหน้าจะทำให้ server ตรวจ auth ใหม่
+     */
+    function logout() {
+      destroy();
+      // Reload หน้า — ถ้า auth หมดอายุ server จะ return Unauthorized page
+      globalThis.location.reload();
+    }
+
+    return {
+      init: init,
+      getUser: getUser,
+      isAuthorized: isAuthorized,
+      refreshSession: refreshSession,
+      logout: logout,
+      destroy: destroy
+    };
+  })();
+
+  console.log('[auth] Auth module loaded');
+</script>

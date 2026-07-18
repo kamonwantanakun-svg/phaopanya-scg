@@ -1,0 +1,1054 @@
+/**
+ * VERSION: 6.0.069
+ * FILE: 19_Hardening.gs
+ * LMDS V6.0 — System Hardening & Preflight Audit
+ * ===================================================
+ * PURPOSE:
+ *   ตรวจสอบความสมบูรณ์ของข้อมูลก่อนประมวลผล (Preflight Audit)
+ *   และตรวจจับปัญหาซ้ำซ้อน เช่น duplicate processing, schema mismatch
+ *
+ * CHANGELOG:
+ *   See /docs/CHANGELOG.md for full history.
+ *
+ * DEPENDENCIES:
+ *   REQUIRES: (Load Order)
+ *     - 01_Config.gs, 02_Schema.gs, 14_Utils.gs, 03_SetupSheets.gs (core)
+ *     - 05_NormalizeService.gs  (normalization checks)
+ *     - 06_PersonService.gs, 07_PlaceService.gs, 08_GeoService.gs, 09_DestinationService.gs (master counts)
+ *     - 11_TransactionService.gs (FACT_DELIVERY stats)
+ *   CALLS: (Invokes)
+ *     - getSheetByNameSafe_()                     → 03_SetupSheets.gs
+ *     - countPersons() / countPlaces() / countGeos() / countDestinations() → 06/07/08/09 services
+ *     - logWarn() / logError()                    → 03_SetupSheets.gs
+ *   EXPORTS TO:
+ *     - 00_App.gs (runPreflightAudit, detectDoubleProcessing, checkSystemIntegrity menus)
+ *   SHEETS ACCESSED:
+ *     - SHEET.SOURCE             (Read — duplicate processing detection)
+ *     - SHEET.FACT_DELIVERY      (Read — invoice duplicate check)
+ *     - SHEET.Q_REVIEW           (Read — stuck review detection)
+ *     - SHEET.M_PERSON / M_PLACE / M_GEO_POINT / M_ALIAS / M_PERSON_ALIAS / EMPLOYEE (Read — counts)
+ *   TRIGGERS: None
+ *
+ * ARCHITECTURE:
+ *   Group 0 — Core infrastructure (config, schema, utils, audit, RBAC, web app gateway)
+ * ===================================================
+ */
+
+// [PERF-007] Checkpoint key for generatePersonAliasesFromHistory Resume mechanism
+const HARDENING_ALIAS_CHECKPOINT_KEY = 'HARDENING_ALIAS_CHECKPOINT';
+
+// ============================================================
+// SECTION 1: runPreflightAudit
+// [FIX BUG-A2] เพิ่ม try-catch outer
+// ============================================================
+
+function runPreflightAudit() {
+  // [FIX BUG-A2] try-catch ครอบ
+  // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_() — trigger-safe
+  try {
+    const logs = [];
+
+    logInfo('Hardening', 'เริ่มรัน Preflight Audit');
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    Object.keys(SHEET).forEach((key) => {
+      const sheetName = SHEET[key];
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) {
+        logs.push('❌ ไม่พบชีต: ' + sheetName);
+      } else {
+        const expectedCols = SCHEMA[sheetName] ? SCHEMA[sheetName].length : 0;
+        if (expectedCols > 0 && sheet.getLastColumn() < expectedCols) {
+          logs.push(
+            '⚠️ ชีต ' + sheetName + ' มีคอลัมน์น้อยกว่า Schema (' + sheet.getLastColumn() + '/' + expectedCols + ')'
+          );
+        }
+      }
+    });
+
+    const props = PropertiesService.getScriptProperties().getProperties();
+    if (!props.GEMINI_API_KEY) {
+      logs.push('⚠️ ยังไม่ได้ตั้งค่า GEMINI_API_KEY');
+    }
+
+    const srcSheet = ss.getSheetByName(SHEET.SOURCE);
+    if (srcSheet) {
+      const lastRow = srcSheet.getLastRow();
+      if (lastRow > 1) {
+        const statusCol = SRC_IDX.SYNC_STATUS + 1;
+        const statusData = srcSheet.getRange(2, statusCol, lastRow - 1, 1).getValues();
+        const emptyCount = statusData.filter((r) => !r[0]).length;
+        if (emptyCount > 0) {
+          logs.push('ℹ️ พบแถวที่ไม่มีสถานะ Sync ใน Source: ' + emptyCount + ' แถว');
+        }
+      }
+    }
+
+    if (logs.length === 0) {
+      safeUiAlert_('✅ Preflight Audit: ระบบพร้อมทำงาน 100%');
+    } else {
+      safeUiAlert_(
+        '📊 ผลการตรวจสอบ Preflight Audit:\n\n' + logs.join('\n') + '\n\nพบจุดที่ควรตรวจสอบ ' + logs.length + ' รายการ'
+      );
+    }
+  } catch (err) {
+    logError('Hardening', 'runPreflightAudit: ' + err.message, err);
+    safeUiAlert_('❌ Preflight Audit ล้มเหลว: ' + err.message);
+  } finally {
+    // [FIX v5.5.008 P2 #11] flush log buffer ก่อน exit — ป้องกัน log entries <50 หาย
+    if (typeof flushLogBuffer_ === 'function') flushLogBuffer_();
+  }
+}
+
+// ============================================================
+// SECTION 2: fixMissingSyncStatus [FIX v5.5.001: เพิ่ม try-catch]
+// ============================================================
+
+function fixMissingSyncStatus() {
+  // [FIX v5.5.001] เพิ่ม try-catch ครอบทั้งฟังก์ชัน — เช่นเดียวกับ entry-point อื่นๆ
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.SOURCE);
+    if (!sheet) return;
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return;
+
+    const statusCol = SRC_IDX.SYNC_STATUS + 1;
+    const range = sheet.getRange(2, statusCol, lastRow - 1, 1);
+    const data = range.getValues();
+    let fixed = 0;
+
+    for (let i = 0; i < data.length; i++) {
+      if (!data[i][0]) {
+        data[i][0] = 'PENDING';
+        fixed++;
+      }
+    }
+    if (fixed > 0) {
+      range.setValues(data);
+      SpreadsheetApp.getActiveSpreadsheet().toast('✅ ซ่อมแซมสถานะ Sync สำเร็จ: ' + fixed + ' แถว', 'Hardening');
+    }
+  } catch (e) {
+    logError('Hardening', 'fixMissingSyncStatus ล้มเหลว: ' + e.message, e);
+    safeUiAlert_('❌ fixMissingSyncStatus ล้มเหลว: ' + e.message);
+  }
+}
+
+// ============================================================
+// SECTION 3: detectDoubleProcessing (ไม่เปลี่ยน)
+// ============================================================
+
+function detectDoubleProcessing() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
+    if (!sheet || sheet.getLastRow() < 2) return;
+
+    const invoiceData = sheet.getRange(2, FACT_IDX.INVOICE_NO + 1, sheet.getLastRow() - 1, 1).getValues();
+    const counts = {};
+    const duplicates = [];
+
+    invoiceData.forEach((r) => {
+      const inv = normalizeInvoiceNo(r[0]);
+      if (!inv) return;
+      counts[inv] = (counts[inv] || 0) + 1;
+    });
+    Object.keys(counts).forEach((inv) => {
+      if (counts[inv] > 1) duplicates.push(inv + ' (' + counts[inv] + ' ครั้ง)');
+    });
+
+    // [FIX BUG-05 v5.5.001] เปลี่ยน getUi().alert() เป็น safeUiAlert_() — trigger-safe
+    if (duplicates.length === 0) {
+      safeUiAlert_('✅ ไม่พบข้อมูลซ้ำใน FACT_DELIVERY');
+    } else {
+      safeUiAlert_(
+        '⚠️ พบ Invoice ซ้ำ ' +
+          duplicates.length +
+          ' รายการ:\n\n' +
+          duplicates.slice(0, 10).join('\n') +
+          (duplicates.length > 10 ? '\n...และอื่นๆ' : '')
+      );
+    }
+  } catch (err) {
+    logError('Hardening', 'detectDoubleProcessing ล้มเหลว: ' + err.message, err);
+    safeUiAlert_('เกิดข้อผิดพลาด: ' + err.message);
+  }
+}
+
+// ============================================================
+// SECTION 4: [REF-012] buildGlobalAliasDedupSet_ MOVED to 14_Utils.gs
+// The function is now centralized in 14_Utils.gs Section 11.
+// All callers (Hardening, AliasService) use the global function.
+// ============================================================
+
+// ============================================================
+// SECTION 5: generatePersonAliasesFromHistory
+// [REFACTOR-05] แยก helper: buildExistingPersonAliasSet_, flushPersonAliasRows_
+// ============================================================
+
+function generatePersonAliasesFromHistory() {
+  // [REF-006] V5.5.019: Refactored into 4 section helpers for Separation of Concerns
+  //   1. acquireAliasHistoryLock_   — SECTION A: AuthZ guard + early validation + LockService
+  //   2. prepareAliasHistoryContext_ — SECTION B: Load FACT_DELIVERY + Person maps + checkpoint
+  //   3. runAliasHistoryLoop_       — SECTION C: Main loop with Time Guard + partial flush
+  //   4. finalizeAliasHistory_      — SECTION D: Final flush + clear checkpoint + report
+  // [V6.0.009 P2.2] acquireAliasHistoryLock_ now actually acquires a real LockService lock
+  //   and returns it in setup.lock so the finally block can release it.
+
+  const setup = acquireAliasHistoryLock_();
+  if (!setup) return;
+
+  try {
+    const ctx = prepareAliasHistoryContext_(setup.ss);
+    if (ctx === null) return; // empty/error path already handled in prepare
+
+    const loopResult = runAliasHistoryLoop_(ctx, setup.ss);
+    finalizeAliasHistory_(ctx, loopResult, setup.ss);
+  } catch (err) {
+    logError('Hardening', 'generatePersonAliasesFromHistory ล้มเหลว: ' + err.message, err);
+    safeUiAlert_('เกิดข้อผิดพลาด: ' + err.message);
+  } finally {
+    // [V6.0.009 P2.2] Release the real LockService lock acquired in setup
+    releaseScriptLock_(setup.lock);
+    // [PERF-007] flushLogBuffer_ ใน finally — กัน log entries สูญหายเมื่อ Timeout
+    if (typeof flushLogBuffer_ === 'function') flushLogBuffer_();
+  }
+}
+
+/**
+ * acquireAliasHistoryLock_ — [REF-006] SECTION A: AuthZ guard + sheet validation + LockService
+ *   [V6.0.009 P2.2] Now actually acquires a real LockService lock (was misleading name —
+ *     the original function only did AuthZ + sheet validation, no actual lock).
+ *   Returns the lock object in setup.lock so caller can release it in finally block.
+ *   รักษา behavior เดิม 100% — same AuthZ message, same sheet existence check
+ * @return {{ss: object, lock: Lock}|null} null ถ้า AuthZ fail, sheet missing, หรือ lock busy
+ * @private
+ */
+function acquireAliasHistoryLock_() {
+  // [SEC-002] Authorization Guard
+  if (typeof isAuthorizedUser_ === 'function' && !isAuthorizedUser_()) {
+    safeUiAlert_('🔒 คุณไม่มีสิทธิ์รัน Hardening\nกรุณาติดต่อ Admin');
+    return null;
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const factSheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
+  const aliasSheet = ss.getSheetByName(SHEET.M_PERSON_ALIAS);
+  if (!factSheet || !aliasSheet) {
+    safeUiAlert_('❌ ไม่พบชีต FACT_DELIVERY หรือ M_PERSON_ALIAS');
+    return null;
+  }
+
+  const factRows = factSheet.getLastRow();
+  if (factRows < 2) {
+    safeUiAlert_('ℹ️ ไม่มีข้อมูลประวัติใน FACT_DELIVERY');
+    return null;
+  }
+
+  // [V6.0.009 P2.2] Acquire real LockService lock — ป้องกัน double-click ทำให้
+  //   checkpoint ปนกัน (same pattern as buildGeoDictionary/populateGeoMetadata)
+  //   ใช้ shared helper acquireScriptLockOrWarn_
+  const lock = acquireScriptLockOrWarn_(30000, '⚠️ generatePersonAliasesFromHistory กำลังรันอยู่ กรุณารอให้เสร็จก่อน');
+  if (!lock) return null;
+
+  ss.toast('กำลังวิเคราะห์ประวัติการจัดส่งเพื่อสร้าง Alias...', 'Processing', 5);
+
+  return { ss: ss, lock: lock };
+}
+
+/**
+ * prepareAliasHistoryContext_ — [REF-006] SECTION B: Load FACT_DELIVERY + Person maps + checkpoint
+ *   รักษา behavior เดิม 100% — same checkpoint load, same Person Map build, same dedup set
+ * @param {object} ss - Active spreadsheet
+ * @return {Object|null} context object หรือ null ถ้า error
+ * @private
+ */
+function prepareAliasHistoryContext_(ss) {
+  const factSheet = ss.getSheetByName(SHEET.FACT_DELIVERY);
+  const aliasSheet = ss.getSheetByName(SHEET.M_PERSON_ALIAS);
+  const factRows = factSheet.getLastRow();
+
+  const factData = factSheet.getRange(2, 1, factRows - 1, SCHEMA[SHEET.FACT_DELIVERY].length).getValues();
+
+  // ─── [PERF-007] โหลด Checkpoint ───
+  //   ถ้ามี checkpoint (จากการ Time Guard หยุดกลางคันรอบก่อน) → เริ่มจาก idx นั้น
+  //   ถ้าไม่มี → เริ่มจาก 0
+  //   Stale protection: checkpoint เก่ากว่า 24 ชม. → auto clear (กัน garbage)
+  const checkpoint = loadHardeningAliasCheckpoint_();
+  const startIdx = checkpoint.startIdx || 0;
+
+  if (startIdx > 0) {
+    ss.toast('🔄 Resume จากแถว ' + (startIdx + 1) + '...', APP_NAME, 5);
+    logInfo('Hardening', 'generatePersonAliasesFromHistory: resume จาก idx ' + startIdx);
+  }
+
+  // โหลด Person Map
+  const allPersons = loadAllPersons_();
+  const personCanonicalMap = new Map();
+  const personUuidMap = new Map();
+  allPersons.forEach(function (p) {
+    if (p.personId && p.canonical) personCanonicalMap.set(p.personId, normalizeForCompare(p.canonical));
+    if (p.personId && p.masterUuid) personUuidMap.set(p.personId, p.masterUuid);
+  });
+
+  // [REFACTOR-05] ใช้ buildExistingPersonAliasSet_() แทน inline code
+  const existingAliasSet = buildExistingPersonAliasSet_();
+
+  // [FIX BUG-B1] buildGlobalAliasDedupSet_ โหลด M_ALIAS ครั้งเดียว
+  const existingGlobalAliasSet = buildGlobalAliasDedupSet_();
+
+  return {
+    ss: ss,
+    aliasSheet: aliasSheet,
+    factData: factData,
+    startIdx: startIdx,
+    personCanonicalMap: personCanonicalMap,
+    personUuidMap: personUuidMap,
+    existingAliasSet: existingAliasSet,
+    existingGlobalAliasSet: existingGlobalAliasSet,
+    newAliasRows: [],
+    newGlobalRows: [],
+    now: new Date(),
+    hardeningStart: new Date(),
+    hardeningLimit: AI_CONFIG.TIME_LIMIT_MS || 300000, // 5 นาที
+    ALIAS_ENRICH_SCORE: 95 // [FIX v5.5.001] Named constant
+  };
+}
+
+/**
+ * runAliasHistoryLoop_ — [REF-006] SECTION C: Main loop with Time Guard + partial flush
+ *   รักษา behavior เดิม 100% — same Time Guard (idx % 100), same partial flush, same checkpoint save
+ * @param {Object} ctx - context from prepareAliasHistoryContext_
+ * @param {object} ss - Active spreadsheet
+ * @return {{timedOut: boolean, lastIdx: number}}
+ * @private
+ */
+function runAliasHistoryLoop_(ctx, ss) {
+  let timedOut = false;
+  let lastIdx = ctx.startIdx;
+
+  // ─── [PERF-007] เริ่มลูปจาก startIdx (จาก checkpoint) แทน 0 ───
+  //   เดิม: ทุกครั้งเริ่มจาก idx 0 → รอบที่ 2 ประมวลผล 1,500 แถวแรกซ้ำ (CPU waste ~30-60s)
+  //   ใหม่: resume จาก checkpoint → ประหยัดเวลา ~50-70% สำหรับการ hardening ครั้งใหญ่
+  for (let idx = ctx.startIdx; idx < ctx.factData.length; idx++) {
+    lastIdx = idx;
+    // [REFACTOR-05] Time Guard: flush แล้ว break + บันทึก checkpoint
+    if (idx % 100 === 0 && new Date() - ctx.hardeningStart > ctx.hardeningLimit - 30000) {
+      if (ctx.newAliasRows.length + ctx.newGlobalRows.length > 0) {
+        const flushedPA = flushPersonAliasRows_(ctx.aliasSheet, ctx.newAliasRows);
+        const flushedGA = flushGlobalAliasRows_(ss, ctx.newGlobalRows);
+        ctx.newAliasRows = [];
+        ctx.newGlobalRows = [];
+        logWarn(
+          'Hardening',
+          `generatePersonAliasesFromHistory: flushed partial at ${idx}/${ctx.factData.length} (PA:${flushedPA}, GA:${flushedGA})`
+        );
+      }
+      // [PERF-007] บันทึก checkpoint ก่อน break → resume รอบถัดไป
+      saveHardeningAliasCheckpoint_(idx);
+      timedOut = true;
+      break;
+    }
+
+    const aliasResult = hardeningBuildOneAliasRow_(
+      ctx.factData[idx],
+      ctx.personCanonicalMap,
+      ctx.personUuidMap,
+      ctx.existingAliasSet,
+      ctx.existingGlobalAliasSet,
+      ctx.ALIAS_ENRICH_SCORE,
+      ctx.now
+    );
+    if (aliasResult.paRow) ctx.newAliasRows.push(aliasResult.paRow);
+    if (aliasResult.gaRow) ctx.newGlobalRows.push(aliasResult.gaRow);
+  }
+
+  return { timedOut: timedOut, lastIdx: lastIdx };
+}
+
+/**
+ * finalizeAliasHistory_ — [REF-006] SECTION D: Final flush + clear checkpoint + report
+ *   รักษา behavior เดิม 100% — same final flush, same clearCheckpoint condition, same alert message
+ * @param {Object} ctx
+ * @param {Object} loopResult - {timedOut, lastIdx}
+ * @param {object} ss
+ * @private
+ */
+function finalizeAliasHistory_(ctx, loopResult, ss) {
+  // Final flush
+  const totalPA = flushPersonAliasRows_(ctx.aliasSheet, ctx.newAliasRows);
+  const totalGA = flushGlobalAliasRows_(ss, ctx.newGlobalRows);
+
+  // [PERF-007] ล้าง checkpoint เมื่อเสร็จสมบูรณ์ (ถ้าไม่ Timeout)
+  if (!loopResult.timedOut) {
+    clearHardeningAliasCheckpoint_();
+  }
+
+  const timeoutMsg = loopResult.timedOut
+    ? '\n\n⚠️ หยุดก่อนเพราะ Timeout — บันทึกตำแหน่งไว้แล้ว กด Run ใหม่จะทำต่อ'
+    : '';
+  safeUiAlert_(
+    totalPA > 0 || totalGA > 0
+      ? '✅ สร้าง Alias สำเร็จ!\n' +
+          '- M_PERSON_ALIAS: ' +
+          totalPA +
+          ' รายการ\n' +
+          '- M_ALIAS: ' +
+          totalGA +
+          ' รายการ' +
+          timeoutMsg
+      : 'ℹ️ ตรวจสอบเรียบร้อย: ข้อมูล Alias อัปเดตถ้วนแล้ว' + timeoutMsg
+  );
+}
+
+// ============================================================
+// SECTION 6b: [PERF-007] generatePersonAliasesFromHistory Checkpoint Helpers
+//   ใช้ PropertiesService เก็บตำแหน่ง idx ปัจจุบัน — เหมือน MIGRATION_HybridAliasSystem pattern
+// ============================================================
+
+/**
+ * saveHardeningAliasCheckpoint_ — [PERF-007] บันทึกตำแหน่ง generatePersonAliasesFromHistory ปัจจุบัน
+ *   เรียกเมื่อ Time Guard หยุดกลางคัน → resume รอบถัดไปเริ่มจาก idx นี้
+ * @param {number} idx - ตำแหน่ง array index ปัจจุบัน (0-based)
+ */
+function saveHardeningAliasCheckpoint_(idx) {
+  PropertiesService.getScriptProperties().setProperty(
+    HARDENING_ALIAS_CHECKPOINT_KEY,
+    JSON.stringify({ startIdx: idx, timestamp: Date.now() })
+  );
+}
+
+/**
+ * loadHardeningAliasCheckpoint_ — [PERF-007] โหลดตำแหน่ง generatePersonAliasesFromHistory ที่บันทึกไว้
+ *   Stale protection: checkpoint เก่ากว่า 24 ชม. → auto clear (กัน garbage)
+ * @return {{ startIdx: number, timestamp: number }}
+ */
+function loadHardeningAliasCheckpoint_() {
+  const raw = PropertiesService.getScriptProperties().getProperty(HARDENING_ALIAS_CHECKPOINT_KEY);
+  if (!raw) return { startIdx: 0 };
+  try {
+    const cp = JSON.parse(raw);
+    // Stale protection: เก่ากว่า 24 ชม. → clear
+    if (cp.timestamp && Date.now() - cp.timestamp > 24 * 60 * 60 * 1000) {
+      clearHardeningAliasCheckpoint_();
+      return { startIdx: 0 };
+    }
+    return cp;
+  } catch (e) {
+    // [FIX BUG-AUDIT-014 V5.5.043] log ก่อน reset checkpoint เพื่อให้วินิจฉัย corruption ได้
+    logWarn(
+      'Hardening',
+      'loadHardeningAliasCheckpoint_: JSON.parse ล้มเหลว — reset to startIdx=0. ' +
+        'raw="' +
+        String(raw).substring(0, 200) +
+        '", error=' +
+        e.message
+    );
+    return { startIdx: 0 };
+  }
+}
+
+/**
+ * clearHardeningAliasCheckpoint_ — [PERF-007] ล้าง checkpoint หลัง generatePersonAliasesFromHistory เสร็จสมบูรณ์
+ */
+function clearHardeningAliasCheckpoint_() {
+  PropertiesService.getScriptProperties().deleteProperty(HARDENING_ALIAS_CHECKPOINT_KEY);
+}
+
+/**
+ * hardeningBuildOneAliasRow_ — processes 1 fact row for generatePersonAliasesFromHistory
+ * Checks personId, rawName, canonical match, dedup sets, and builds PA/GA rows
+ * @param {Array} factRow - single row from FACT_DELIVERY data
+ * @param {Map} personCanonicalMap - personId → normalizedCanonical
+ * @param {Map} personUuidMap - personId → masterUuid
+ * @param {Set} existingAliasSet - dedup set for M_PERSON_ALIAS (mutated in place)
+ * @param {Set} existingGlobalAliasSet - dedup set for M_ALIAS (mutated in place)
+ * @param {number} aliasEnrichScore - confidence score for alias rows
+ * @param {Date} now - timestamp
+ * @return {{ paRow: Array|null, gaRow: Array|null }}
+ */
+function hardeningBuildOneAliasRow_(
+  factRow,
+  personCanonicalMap,
+  personUuidMap,
+  existingAliasSet,
+  existingGlobalAliasSet,
+  aliasEnrichScore,
+  now
+) {
+  const pId = String(factRow[FACT_IDX.PERSON_ID] || '').trim();
+  const rawName = String(factRow[FACT_IDX.SHIP_TO_NAME] || '').trim();
+  if (!pId || !rawName) return { paRow: null, gaRow: null };
+
+  const rawNorm = normalizeForCompare(rawName);
+  if (!rawNorm || rawNorm.length < 2) return { paRow: null, gaRow: null };
+
+  const canonicalNorm = personCanonicalMap.get(pId);
+  if (canonicalNorm && canonicalNorm === rawNorm) return { paRow: null, gaRow: null };
+
+  let paRow = null;
+  let gaRow = null;
+
+  // M_PERSON_ALIAS
+  const paKey = pId + '::' + rawNorm;
+  if (!existingAliasSet.has(paKey)) {
+    existingAliasSet.add(paKey);
+    paRow = [generateShortId('PA'), pId, rawName, aliasEnrichScore, now, true];
+  }
+
+  // M_ALIAS (Batch — ไม่เรียก createGlobalAlias ใน loop)
+  const masterUuid = personUuidMap.get(pId);
+  if (masterUuid) {
+    const globalKey = 'PERSON::' + masterUuid + '::' + rawNorm;
+    if (!existingGlobalAliasSet.has(globalKey)) {
+      existingGlobalAliasSet.add(globalKey);
+      // [FIX V6.0.007] Push 11 columns to match SCHEMA.M_ALIAS (V6.0.003 added 3 cols)
+      //   Same fix as matchEnrichEntityAliases_ in 10_MatchEngine.gs
+      //   0-7: alias_id, master_uuid, variant_name, entity_type, confidence, source, created_at, active_flag
+      //   8-10: verified_by, review_id, verified_at (empty for HISTORY_ENRICH — not human-verified)
+      gaRow = [
+        generateShortId('A'), // [0] alias_id
+        masterUuid, // [1] master_uuid
+        rawName, // [2] variant_name
+        'PERSON', // [3] entity_type
+        aliasEnrichScore, // [4] confidence
+        'HISTORY_ENRICH', // [5] source
+        now, // [6] created_at
+        true, // [7] active_flag
+        '', // [8] verified_by (empty — HISTORY_ENRICH is not human-verified)
+        '', // [9] review_id (empty — not from Q_REVIEW)
+        '' // [10] verified_at (empty — not verified)
+      ];
+    }
+  }
+
+  return { paRow: paRow, gaRow: gaRow };
+}
+
+/**
+ * buildExistingPersonAliasSet_ — [REFACTOR-05] โหลด M_PERSON_ALIAS เป็น dedup Set
+ * Format key: "personId::normalizedAlias"
+ * @return {Set<string>}
+ */
+function buildExistingPersonAliasSet_() {
+  const set = new Set();
+  const existingAliasData = loadAllAliases_();
+  existingAliasData.forEach(function (r) {
+    if (!r[PERSON_ALIAS_IDX.ACTIVE_FLAG]) return;
+    const pId = String(r[PERSON_ALIAS_IDX.PERSON_ID] || '').trim();
+    const aNorm = normalizeForCompare(r[PERSON_ALIAS_IDX.ALIAS_NAME]);
+    if (pId && aNorm) set.add(pId + '::' + aNorm);
+  });
+  return set;
+}
+
+/**
+ * flushPersonAliasRows_ — [REFACTOR-05] Batch write M_PERSON_ALIAS + invalidate cache
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} aliasSheet
+ * @param {Array[]} rows - new alias rows to write
+ * @return {number} number of rows written
+ */
+function flushPersonAliasRows_(aliasSheet, rows) {
+  if (!rows || rows.length === 0) return 0;
+  aliasSheet.getRange(aliasSheet.getLastRow() + 1, 1, rows.length, SCHEMA[SHEET.M_PERSON_ALIAS].length).setValues(rows);
+  invalidateAliasCache_();
+  return rows.length;
+}
+
+/**
+ * flushGlobalAliasRows_ — [PERF-003] Batch write M_ALIAS + Pre-loaded dedup
+ * เปลี่ยนจากการเรียก createGlobalAlias() ทีละแถว (O(N) reads + O(N) writes)
+ * เป็นการโหลด dedup set 1 ครั้ง → ตรวจใน RAM → สะสมแถวใหม่ → batch setValues 1 ครั้ง
+ * ลดจาก ~400-600 API calls (200 aliases) เหลือ ~2-3 API calls
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ * @param {Array[]} rows - new global alias rows: [aliasId, masterUuid, variantName, entityType, confidence, source, createdAt, activeFlag]
+ * @return {number} number of rows written
+ */
+function flushGlobalAliasRows_(ss, rows) {
+  if (!rows || rows.length === 0) return 0;
+
+  // [PERF-003] โหลด dedup set 1 ครั้งก่อนลูป แทนที่จะเรียก createGlobalAlias() ทุกรอบ
+  // [FIX BUG-M02 V5.5.022] var → const/let — Rule 1 (Clean Code)
+  const existingSet = buildGlobalAliasDedupSet_();
+
+  const newRows = [];
+  rows.forEach(function (aliasRow) {
+    const masterUuid = String(aliasRow[ALIAS_IDX.MASTER_UUID] || '');
+    const variantName = String(aliasRow[ALIAS_IDX.VARIANT_NAME] || '');
+    const entityType = String(aliasRow[ALIAS_IDX.ENTITY_TYPE] || '');
+    // [FIX CodeQL js/unused-local-variable V5.5.035] confidence + source ไม่ถูกใช้ใน dedup logic — ลบทิ้ง
+
+    // Dedup check ใน RAM
+    const norm = normalizeForCompare(variantName);
+    const dedupKey = entityType + '::' + masterUuid + '::' + norm;
+    if (!norm || existingSet.has(dedupKey)) return;
+
+    // เพิ่มเข้า set เพื่อป้องกัน duplicate ใน batch เดียวกัน
+    existingSet.add(dedupKey);
+    newRows.push(aliasRow);
+  });
+
+  // Batch write ทั้งหมดครั้งเดียว
+  if (newRows.length > 0) {
+    const mAliasSheet = ss.getSheetByName(SHEET.M_ALIAS);
+    if (mAliasSheet) {
+      mAliasSheet
+        .getRange(mAliasSheet.getLastRow() + 1, 1, newRows.length, SCHEMA[SHEET.M_ALIAS].length)
+        .setValues(newRows);
+
+      // [FIX REV7-001] Invalidate M_ALIAS cache โดยตรง — รูปแบบเดียวกับ 10_MatchEngine.gs
+      CacheService.getScriptCache().removeAll([CACHE_KEY.GLOBAL_ALIAS_ALL, CACHE_KEY.GLOBAL_ALIAS_REVERSE]);
+    }
+  }
+
+  return newRows.length;
+}
+
+// ============================================================
+// SECTION 6: Sheet Protection (SEC-005 Fix)
+// ============================================================
+
+/**
+ * applySheetProtection_UI — [SEC-005] ตั้งค่า Protected Ranges และ Hidden Sheets
+ * สำหรับชีตที่มีข้อมูล Sensitive (PII)
+ * เฉพาะ Script Owner / Admin เท่านั้นที่สามารถแก้ไขชีตเหล่านี้ได้
+ * [SEC-009 FIX] ขยาย protection ครอบ M_PLACE, M_ALIAS, FACT_DELIVERY, Q_REVIEW
+ *               + เพิ่ม LMDS_ADMINS ทั้งหมดเป็น editor
+ *               + Q_REVIEW ใช้ Range Protection (ปกป้อง A1:Q — ปล่อย R-V ให้ reviewer แก้ DECISION/STATUS/NOTE)
+ */
+function applySheetProtection_UI() {
+  // [REF-010] V5.5.019: Refactored into helpers for Separation of Concerns + schema-safe range
+  //   1. applySheetLevelProtection_  — per-sheet protection (PII sheets)
+  //   2. applyReviewRangeProtection_ — Q_REVIEW range protection (uses REVIEW_IDX.* instead of hardcoded 17)
+  //   3. applyGeoPointProtection_    — M_GEO_POINT protection
+  //   4. buildProtectionReport_      — summary report builder
+  // Preserve Behavior 100% — same sheets protected, same editors, same messages
+
+  // [SEC-002] Authorization Guard — เฉพาะ Admin เท่านั้น
+  if (typeof isAuthorizedUser_ === 'function' && !isAuthorizedUser_()) {
+    safeUiAlert_('🔒 คุณไม่มีสิทธิ์ตั้งค่าการป้องกันชีต\nกรุณาติดต่อ Admin');
+    return;
+  }
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const me = Session.getEffectiveUser().getEmail();
+    const results = [];
+
+    // [SEC-009 FIX] ดึงรายชื่อ Admin ทั้งหมดเพื่อเพิ่มเป็น editor
+    const adminsStr = String(PropertiesService.getScriptProperties().getProperty('LMDS_ADMINS') || '').trim();
+    const adminEmails = adminsStr
+      ? adminsStr
+          .split(',')
+          .map(function (e) {
+            return e.trim();
+          })
+          .filter(Boolean)
+      : [];
+
+    // === 1. Protected Ranges: ชีตที่มี PII ===
+    // [SEC-009 FIX] ขยาย protectedSheets ครอบทุกชีตที่มี PII/Single Writer
+    const protectedSheets = [
+      { name: SHEET.EMPLOYEE, reason: 'ข้อมูลพนักงาน (เลขบัตร, เบอร์โทร)', hide: true },
+      { name: SHEET.M_PERSON, reason: 'ข้อมูลบุคคล (เบอร์โทร)', hide: false },
+      { name: SHEET.M_PLACE, reason: 'ที่อยู่ลูกค้า + master_uuid (PII)', hide: false },
+      { name: SHEET.M_ALIAS, reason: 'Global Alias Ledger (Single Writer Pattern)', hide: false },
+      { name: SHEET.FACT_DELIVERY, reason: 'ประวัติการขนส่ง (Invoice + ชื่อ + ที่อยู่ PII)', hide: false },
+      { name: SHEET.SOURCE, reason: 'ข้อมูลต้นทาง (ที่อยู่, Email, ชื่อลูกค้า)', hide: true }
+    ];
+
+    protectedSheets.forEach((config) => {
+      const msg = applySheetLevelProtection_(ss, config, me, adminEmails);
+      results.push(msg);
+    });
+
+    // [SEC-009 FIX] === 1b. Q_REVIEW ใช้ Range Protection ===
+    const reviewMsg = applyReviewRangeProtection_(ss, me, adminEmails);
+    if (reviewMsg) results.push(reviewMsg);
+
+    // === 2. ป้องกันชีต M_GEO_POINT ===
+    const geoMsg = applyGeoPointProtection_(ss, me, adminEmails);
+    if (geoMsg) results.push(geoMsg);
+
+    logInfo(
+      'Hardening',
+      '[SEC-005] ตั้งค่า Sheet Protection สำเร็จ (7 sheets + M_GEO_POINT, Q_REVIEW Range Protection)'
+    );
+    safeUiAlert_('🛡️ ตั้งค่าการป้องกันข้อมูล Sensitive สำเร็จ!\n\n' + results.join('\n'));
+  } catch (err) {
+    logError('Hardening', '[SEC-005] applySheetProtection_UI ล้มเหลว: ' + err.message, err);
+    safeUiAlert_('❌ ตั้งค่าการป้องกันล้มเหลว: ' + err.message);
+  }
+}
+
+/**
+ * applySheetLevelProtection_ — [REF-010] Protect single PII sheet
+ *   รักษา behavior เดิม 100% — same protection.setDescription, same editor management, same hide logic
+ * @param {object} ss - Active spreadsheet
+ * @param {Object} config - {name, reason, hide}
+ * @param {string} me - Script Owner email
+ * @param {Array} adminEmails - LMDS_ADMINS array
+ * @return {string} status message for results array
+ * @private
+ */
+function applySheetLevelProtection_(ss, config, me, adminEmails) {
+  const sheet = ss.getSheetByName(config.name);
+  if (!sheet) {
+    return '⚠️ ไม่พบชีต: ' + config.name;
+  }
+
+  // Protected Range: ทั้งชีต
+  const protection = sheet.protect();
+  protection.setDescription(`[SEC-005] ${config.reason} — เฉพาะ Admin เท่านั้น`);
+
+  // ลบ Editor เดิมทั้งหมด
+  const editors = protection.getEditors();
+  editors.forEach((editor) => {
+    try {
+      protection.removeEditor(editor.getEmail());
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
+  });
+  // [SEC-009 FIX] เพิ่ม Script Owner
+  if (me) {
+    try {
+      protection.addEditor(me);
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
+  }
+  // [SEC-009 FIX] เพิ่ม Admin ทั้งหมดจาก LMDS_ADMINS
+  adminEmails.forEach((email) => {
+    try {
+      protection.addEditor(email);
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
+  });
+
+  // Hidden Sheet (ถ้ากำหนด)
+  if (config.hide) {
+    try {
+      sheet.hideSheet();
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
+  }
+
+  return `✅ ${config.name}: Protected${config.hide ? ' + Hidden' : ''}`;
+}
+
+/**
+ * applyReviewRangeProtection_ — [REF-010] Q_REVIEW range protection using REVIEW_IDX.* (schema-safe)
+ *   แทน hardcoded `getRange(1, 1, reviewMaxRows, 17)` ด้วย REVIEW_IDX.RECOMMEND + 1
+ *   ปกป้อง cols A-Q (REVIEW_ID ถึง RECOMMEND) — ปล่อย cols R-V (STATUS, REVIEWER, REVIEWED_AT, DECISION, NOTE)
+ * @param {object} ss
+ * @param {string} me
+ * @param {Array} adminEmails
+ * @return {string|null} status message หรือ null ถ้า sheet missing
+ * @private
+ */
+function applyReviewRangeProtection_(ss, me, adminEmails) {
+  const reviewSheet = ss.getSheetByName(SHEET.Q_REVIEW);
+  if (!reviewSheet) return null;
+
+  const reviewMaxRows = Math.max(reviewSheet.getMaxRows(), 100);
+  // [REF-010] ใช้ REVIEW_IDX.RECOMMEND + 1 (1-based) แทน magic number 17
+  //   REVIEW_IDX.RECOMMEND = 16 (0-based) → +1 = 17 (1-based, cols A-Q)
+  //   Schema-safe: ถ้าเพิ่ม/ลดคอลัมน์ก่อน RECOMMEND ในอนาคต ค่านี้จะปรับอัตโนมัติ
+  const protectedColCount = (REVIEW_IDX.RECOMMEND || 16) + 1;
+  const protectedRange = reviewSheet.getRange(1, 1, reviewMaxRows, protectedColCount);
+  const rangeProtection = protectedRange.protect();
+  rangeProtection.setDescription(
+    '[SEC-005] Q_REVIEW candidate/system columns — ป้องกันการแก้ไขตรง (reviewer แก้ได้เฉพาะ cols R-V)'
+  );
+
+  const reviewEditors = rangeProtection.getEditors();
+  reviewEditors.forEach((editor) => {
+    try {
+      rangeProtection.removeEditor(editor.getEmail());
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
+  });
+  if (me) {
+    try {
+      rangeProtection.addEditor(me);
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
+  }
+  adminEmails.forEach((email) => {
+    try {
+      rangeProtection.addEditor(email);
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
+  });
+  return '✅ Q_REVIEW: Range Protected (A1:Q — reviewer แก้ R-V ได้)';
+}
+
+/**
+ * applyGeoPointProtection_ — [REF-010] M_GEO_POINT protection (separate from PII sheets)
+ *   รักษา behavior เดิม 100% — same description, same editor management
+ * @param {object} ss
+ * @param {string} me
+ * @param {Array} adminEmails
+ * @return {string|null} status message หรือ null ถ้า sheet missing
+ * @private
+ */
+function applyGeoPointProtection_(ss, me, adminEmails) {
+  const geoSheet = ss.getSheetByName(SHEET.M_GEO_POINT);
+  if (!geoSheet) return null;
+
+  const geoProtection = geoSheet.protect();
+  geoProtection.setDescription('[SEC-005] ข้อมูลพิกัด — เฉพาะ Script เท่านั้นที่เขียน');
+  const geoEditors = geoProtection.getEditors();
+  geoEditors.forEach((editor) => {
+    try {
+      geoProtection.removeEditor(editor.getEmail());
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
+  });
+  if (me) {
+    try {
+      geoProtection.addEditor(me);
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
+  }
+  // [SEC-009 FIX] เพิ่ม admin สำหรับ M_GEO_POINT ด้วย
+  adminEmails.forEach((email) => {
+    try {
+      geoProtection.addEditor(email);
+    } catch (e) {
+      // Ignored error (Trigger context)
+    }
+  });
+  return '✅ M_GEO_POINT: Protected';
+}
+
+// ============================================================
+// SECTION: Dedup Audit (V6.0.004)
+// ============================================================
+
+/**
+ * runDedupAudit — [V6.0.004] Scan M_PERSON/M_PLACE for potential duplicates
+ *   Uses Levenshtein distance + phonetic match
+ * @param {string} entityType - 'PERSON' | 'PLACE'
+ * @return {{ duplicates: Array, scannedCount: number, duration: number }}
+ */
+function runDedupAudit(entityType) {
+  const startTime = Date.now();
+  const all = entityType === 'PERSON' ? loadAllPersons_() : loadAllPlaces_();
+  const duplicates = [];
+
+  for (let i = 0; i < all.length; i++) {
+    for (let j = i + 1; j < all.length; j++) {
+      const a = all[i];
+      const b = all[j];
+      if (a.masterUuid && b.masterUuid && a.masterUuid === b.masterUuid) continue;
+
+      const nameA = a.canonical || a.canonicalName || '';
+      const nameB = b.canonical || b.canonicalName || '';
+      if (!nameA || !nameB) continue;
+
+      let phMatch = { match: false, score: 0 };
+      if (typeof phoneticMatch === 'function') {
+        phMatch = phoneticMatch(nameA, nameB);
+      }
+      if (!phMatch.match && phMatch.score < 80) continue;
+
+      const levDist = levenshteinDistance(nameA, nameB);
+      const similarity = 1 - levDist / Math.max(nameA.length, nameB.length);
+
+      if (similarity >= 0.85 || (phMatch.score >= 90 && similarity >= 0.7)) {
+        duplicates.push({
+          entityA: { id: a.personId || a.placeId, name: nameA, uuid: a.masterUuid },
+          entityB: { id: b.personId || b.placeId, name: nameB, uuid: b.masterUuid },
+          similarity: similarity,
+          phoneticScore: phMatch.score,
+          reason: similarity >= 0.85 ? 'HIGH_LEVENSHTEIN' : 'PHONETIC_MATCH',
+          suggestion: 'MERGE'
+        });
+      }
+    }
+  }
+
+  return { duplicates: duplicates, scannedCount: all.length, duration: Date.now() - startTime };
+}
+
+/**
+ * runDedupAuditPerson_UI — [V6.0.004] Menu wrapper for Person dedup audit
+ */
+function runDedupAuditPerson_UI() {
+  runDedupAuditUI_('PERSON');
+}
+
+/**
+ * runDedupAuditPlace_UI — [V6.0.004] Menu wrapper for Place dedup audit
+ */
+function runDedupAuditPlace_UI() {
+  runDedupAuditUI_('PLACE');
+}
+
+/**
+ * runDedupAuditUI_ — [V6.0.004] UI wrapper for dedup audit
+ * @param {string} entityType - 'PERSON' | 'PLACE'
+ * @private
+ */
+function runDedupAuditUI_(entityType) {
+  try {
+    safeUiAlert_('🔍 เริ่มสแกน Duplicate สำหรับ ' + entityType + '...\nอาจใช้เวลา 1-2 นาที');
+    const result = runDedupAudit(entityType);
+    let msg = '📊 ผลการสแกน ' + entityType + ':\n';
+    msg += 'สแกนทั้งหมด: ' + result.scannedCount + ' รายการ\n';
+    msg += 'พบ Duplicate ที่น่าสงสัย: ' + result.duplicates.length + ' คู่\n';
+    msg += 'ใช้เวลา: ' + Math.round(result.duration / 1000) + ' วินาที\n\n';
+    result.duplicates.slice(0, 10).forEach(function (d, i) {
+      msg += i + 1 + '. "' + d.entityA.name + '" ↔ "' + d.entityB.name + '"\n';
+      msg += '   Similarity: ' + Math.round(d.similarity * 100) + '% | Phonetic: ' + d.phoneticScore + '\n';
+      msg += '   IDs: ' + d.entityA.id + ' ↔ ' + d.entityB.id + '\n\n';
+    });
+    if (result.duplicates.length > 10) msg += '... และอีก ' + (result.duplicates.length - 10) + ' คู่\n';
+    safeUiAlert_(msg);
+  } catch (e) {
+    logError('Hardening', 'runDedupAuditUI_ failed: ' + e.message, e);
+    safeUiAlert_('❌ สแกนล้มเหลว: ' + e.message);
+  }
+}
+
+// ============================================================
+// SECTION: [V6.0.055] Input Validation Helper for WebApp Endpoints
+//   ป้องกัน injection + malformed input จาก WebApp params
+//   ใช้สำหรับ google.script.run endpoints ที่รับ user input
+// ============================================================
+
+/**
+ * validateInput_ — [V6.0.055] Centralized input validation for WebApp endpoints
+ *
+ * ตรวจสอบความถูกต้องของ input ที่รับจาก WebApp (ผ่าน google.script.run)
+ * ป้องกัน:
+ *   - Empty/undefined required fields
+ *   - Type mismatch (เช่น ส่ง string แทน number)
+ *   - ความยาวเกิน limit (ป้องกัน DoS + buffer overflow)
+ *   - อักขระต้องห้าม (control characters, null bytes)
+ *   - ค่าที่ไม่อยู่ใน allowed set (enum validation)
+ *
+ * @param {Object} input - object ที่จะตรวจสอบ
+ * @param {Object} schema - validation schema
+ *   Example: {
+ *     reviewId: { type: 'string', required: true, maxLength: 50 },
+ *     decision: { type: 'string', required: true, enum: ['CREATE_NEW', 'MERGE_TO_CANDIDATE', 'IGNORE', 'ESCALATE'] },
+ *     note: { type: 'string', required: false, maxLength: 500 }
+ *   }
+ * @return {{ valid: boolean, errors: string[], sanitized: Object }}
+ *   - valid: true ถ้าผ่านทุกเงื่อนไข
+ *   - errors: array ของ error messages (empty ถ้า valid)
+ *   - sanitized: object ที่ผ่านการ trim + type coercion แล้ว
+ * @private
+ */
+function validateInput_(input, schema) {
+  const result = { valid: true, errors: [], sanitized: {} };
+
+  if (!input || typeof input !== 'object') {
+    input = {};
+  }
+
+  const CONTROL_CHARS_REGEX = /[\x00-\x1F\x7F]/; // null bytes + control chars (except \t \n \r)
+  const ALLOWED_NEWLINES_REGEX = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/; // stricter — also blocks \n \r in single-line fields
+
+  Object.keys(schema).forEach(function (field) {
+    const rules = schema[field];
+    const value = input[field];
+
+    // 1. Required check
+    if (rules.required && (value === undefined || value === null || value === '')) {
+      result.valid = false;
+      result.errors.push('กรุณาระบุ ' + field);
+      return;
+    }
+
+    // 2. Skip optional empty fields
+    if (value === undefined || value === null || value === '') {
+      if (rules.default !== undefined) {
+        result.sanitized[field] = rules.default;
+      }
+      return;
+    }
+
+    // 3. Type coercion + check
+    let coerced = value;
+    if (rules.type === 'string') {
+      coerced = String(value).trim();
+    } else if (rules.type === 'number') {
+      coerced = Number(value);
+      if (isNaN(coerced)) {
+        result.valid = false;
+        result.errors.push(field + ' ต้องเป็นตัวเลข');
+        return;
+      }
+    } else if (rules.type === 'boolean') {
+      coerced = value === true || value === 'true' || value === 1 || value === '1';
+    }
+
+    // 4. String-specific checks
+    if (rules.type === 'string') {
+      // maxLength check (DoS prevention)
+      if (rules.maxLength && coerced.length > rules.maxLength) {
+        result.valid = false;
+        result.errors.push(field + ' ยาวเกินไป (สูงสุด ' + rules.maxLength + ' ตัวอักษร)');
+        return;
+      }
+
+      // minLength check
+      if (rules.minLength && coerced.length < rules.minLength) {
+        result.valid = false;
+        result.errors.push(field + ' สั้นเกินไป (อย่างน้อย ' + rules.minLength + ' ตัวอักษร)');
+        return;
+      }
+
+      // Control character check (injection prevention)
+      const regex = rules.allowNewlines ? CONTROL_CHARS_REGEX : ALLOWED_NEWLINES_REGEX;
+      if (regex.test(coerced)) {
+        result.valid = false;
+        result.errors.push(field + ' มีอักขระต้องห้าม (control characters)');
+        return;
+      }
+    }
+
+    // 5. Number range check
+    if (rules.type === 'number') {
+      if (rules.min !== undefined && coerced < rules.min) {
+        result.valid = false;
+        result.errors.push(field + ' ต้องไม่น้อยกว่า ' + rules.min);
+        return;
+      }
+      if (rules.max !== undefined && coerced > rules.max) {
+        result.valid = false;
+        result.errors.push(field + ' ต้องไม่มากกว่า ' + rules.max);
+        return;
+      }
+    }
+
+    // 6. Enum check (whitelist)
+    if (rules.enum && rules.enum.indexOf(coerced) === -1) {
+      result.valid = false;
+      result.errors.push(field + ' ไม่ถูกต้อง ต้องเป็น: ' + rules.enum.join(', '));
+      return;
+    }
+
+    // 7. Pattern check (regex)
+    if (rules.pattern && !rules.pattern.test(coerced)) {
+      result.valid = false;
+      result.errors.push(field + ' รูปแบบไม่ถูกต้อง');
+      return;
+    }
+
+    result.sanitized[field] = coerced;
+  });
+
+  return result;
+}

@@ -1,0 +1,1012 @@
+<script>
+  /**
+   * views/QReview.html — Q_REVIEW view (Phase 2)
+   * ===================================================
+   * รายการรอตรวจสอบ + ปุ่ม Approve / Reject
+   *   - Server pagination (50 rows/page)
+   *   - Filter tabs: Pending / Approved / Rejected / Escalated / Done / All
+   *   - ปุ่ม Approve = CREATE_NEW หรือ MERGE_TO_CANDIDATE (ตาม recommended_action)
+   *   - ปุ่ม Reject = IGNORE (ปิดรายการ)
+   *   - ปุ่ม Escalate = ESCALATE (ส่งต่อ admin)
+   *
+   * Backend functions (ใน 22_WebApp.gs):
+   *   - getQReviewPage(offset, limit, statusFilter) → { rows, total, statusCounts, ... }
+   *   - submitReviewDecision(reviewId, decision, note) → { ok, message, ... }
+   * ===================================================
+   */
+  globalThis.QReviewView = (function () {
+    'use strict';
+
+    // ────────────────────────────────────────────────────────────
+    // State (module-scoped)
+    // ────────────────────────────────────────────────────────────
+    const PAGE_SIZE = 50;
+    let currentOffset = 0;
+    let currentStatusFilter = 'Pending';
+    let isLoading = false;
+    // [SonarCloud S1481] ลบ lastData ที่ไม่ได้ถูกอ่านที่ไหน
+
+    // ────────────────────────────────────────────────────────────
+    // Constants
+    // ────────────────────────────────────────────────────────────
+    const STATUS_TABS = [
+      { key: 'Pending', label: 'รอตรวจ', color: 'yellow' },
+      { key: 'Approved', label: 'อนุมัติแล้ว', color: 'green' },
+      { key: 'Rejected', label: 'ปฏิเสธแล้ว', color: 'red' },
+      { key: 'Escalated', label: 'ส่งต่อ', color: 'orange' },
+      { key: 'Done', label: 'เสร็จสิ้น', color: 'gray' },
+      { key: 'all', label: 'ทั้งหมด', color: 'blue' }
+    ];
+
+    const ISSUE_LABELS = {
+      INVALID_LATLNG: { label: 'พิกัดไม่ถูกต้อง', icon: '🗺️', color: 'bg-red-100 text-red-700' },
+      GEO_PROVINCE_CONFLICT: { label: 'จังหวัดไม่ตรง', icon: '📍', color: 'bg-orange-100 text-orange-700' },
+      NAME_TOO_SHORT: { label: 'ชื่อสั้นเกินไป', icon: '✂️', color: 'bg-yellow-100 text-yellow-700' },
+      FUZZY_AMBIGUOUS: { label: 'ชื่อคล้ายหลายร้าน', icon: '🔀', color: 'bg-yellow-100 text-yellow-700' },
+      GEO_NEARBY_YELLOW: { label: 'พิกัดใกล้ (50-80m)', icon: '🎯', color: 'bg-yellow-100 text-yellow-700' },
+      GEO_NEARBY_ORANGE: { label: 'พิกัดใกล้ (80-100m)', icon: '🎯', color: 'bg-orange-100 text-orange-700' },
+      NO_MATCH_NEW_ENTITY: { label: 'ไม่เจอ + มี GPS ดี', icon: '🆕', color: 'bg-blue-100 text-blue-700' }
+    };
+
+    const PRIORITY_LABELS = {
+      HIGH: { label: 'สูง', color: 'bg-red-100 text-red-700' },
+      MEDIUM: { label: 'กลาง', color: 'bg-yellow-100 text-yellow-700' },
+      LOW: { label: 'ต่ำ', color: 'bg-gray-100 text-gray-700' }
+    };
+
+    // ────────────────────────────────────────────────────────────
+    // Public: render(container)
+    // ────────────────────────────────────────────────────────────
+    function render(data, container) {
+      if (container === null) return;
+
+      // Build static HTML shell
+      let html = '';
+      html += buildHeaderHtml_();
+      html += buildFilterTabsHtml_();
+      html += '<div id="qreviewTableContainer">กำลังโหลด...</div>';
+      html += buildPaginationHtml_(0, 0, 0); // placeholder — จะถูก refresh ทับ
+      container.innerHTML = html;
+
+      // Bind filter tab clicks
+      bindFilterTabs_(container);
+
+      // Initial fetch
+      loadPage_(0);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Builders
+    // ────────────────────────────────────────────────────────────
+    function buildHeaderHtml_() {
+      return (
+        '<div class="mb-6">' +
+        '<h2 class="text-2xl font-bold text-gray-900">⚠️ Q_REVIEW — รายการรอตรวจสอบ</h2>' +
+        '<p class="text-sm text-gray-500 mt-1">รายการที่ Match Engine ไม่สามารถตัดสินใจอัตโนมัติได้ — ต้องมีคน Approve หรือ Reject</p>' +
+        '</div>'
+      );
+    }
+
+    function buildFilterTabsHtml_() {
+      let html = '<div class="mb-4 flex flex-wrap gap-2" id="qreviewFilterTabs">';
+      STATUS_TABS.forEach(function (tab) {
+        const isActive = tab.key === currentStatusFilter;
+        const activeClass = isActive
+          ? 'bg-blue-600 text-white border-blue-600'
+          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50';
+        html +=
+          '<button type="button" data-status="' +
+          tab.key +
+          '" ' +
+          'class="filter-tab px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ' +
+          activeClass +
+          '">' +
+          escapeHtml_(tab.label) +
+          ' <span class="ml-1 text-xs opacity-75" data-count="' +
+          tab.key +
+          '">0</span>' +
+          '</button>';
+      });
+      html += '</div>';
+      return html;
+    }
+
+    function buildPaginationHtml_(offset, total, limit) {
+      limit = limit || PAGE_SIZE;
+      const totalPages = Math.ceil(total / limit) || 1;
+      const currentPage = Math.floor(offset / limit) + 1;
+      const startIdx = total === 0 ? 0 : offset + 1;
+      const endIdx = Math.min(offset + limit, total);
+
+      return (
+        '<div class="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between text-xs">' +
+        '<div class="text-gray-500">' +
+        'แสดง <span class="font-medium">' +
+        startIdx +
+        '</span>–<span class="font-medium">' +
+        endIdx +
+        '</span> ' +
+        'จาก <span class="font-medium">' +
+        total.toLocaleString() +
+        '</span> รายการ' +
+        '</div>' +
+        '<div class="flex items-center gap-1">' +
+        buildPageButton_(offset - limit, '← ก่อนหน้า', offset <= 0) +
+        '<span class="px-3 py-1 text-gray-600">หน้า ' +
+        currentPage +
+        ' / ' +
+        totalPages +
+        '</span>' +
+        buildPageButton_(offset + limit, 'ถัดไป →', offset + limit >= total) +
+        '</div>' +
+        '</div>'
+      );
+    }
+
+    function buildPageButton_(targetOffset, label, disabled) {
+      const stateClass = disabled ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600 hover:bg-white cursor-pointer';
+      return (
+        '<button type="button" data-offset="' +
+        targetOffset +
+        '" ' +
+        (disabled ? 'disabled' : '') +
+        ' class="qreview-page-btn px-3 py-1.5 rounded border border-gray-200 ' +
+        stateClass +
+        '">' +
+        label +
+        '</button>'
+      );
+    }
+
+    function buildTableHtml_(rows, statusFilter) {
+      if (!rows || rows.length === 0) {
+        return buildEmptyState_(statusFilter);
+      }
+
+      let html = '<div class="bg-white border border-gray-200 rounded-lg overflow-hidden">';
+      html += '<div class="overflow-x-auto">';
+      html += '<table class="w-full text-sm">';
+      html += buildTableHeader_();
+      html += buildTableBody_(rows);
+      html += '</table>';
+      html += '</div>';
+      html += '</div>';
+      return html;
+    }
+
+    function buildTableHeader_() {
+      return (
+        '<thead class="bg-gray-50 border-b border-gray-200">' +
+        '<tr>' +
+        '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Issue</th>' +
+        '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Invoice</th>' +
+        '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">ชื่อ/สถานที่</th>' +
+        '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">ที่อยู่</th>' +
+        '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">พิกัด</th>' +
+        '<th class="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Score</th>' +
+        '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">แนะนำ</th>' +
+        '<th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">การจัดการ</th>' +
+        '</tr>' +
+        '</thead>'
+      );
+    }
+
+    function buildTableBody_(rows) {
+      let html = '<tbody class="divide-y divide-gray-100">';
+      rows.forEach(function (row) {
+        html += buildRowHtml_(row);
+        // [Phase 2.2] Expandable detail row — ซ่อนไว้ แสดงเมื่อคลิก row หลัก
+        html += buildDetailRowHtml_(row);
+      });
+      html += '</tbody>';
+      return html;
+    }
+
+    /**
+     * buildDetailRowHtml_ — row ที่ซ่อนอยู่ จะแสดงเมื่อ user คลิก row หลัก
+     *   ภายในมี container สำหรับใส่ detail content (จะ fetch เมื่อ expand)
+     * @private
+     */
+    function buildDetailRowHtml_(row) {
+      return (
+        '<tr class="detail-row hidden" data-detail-for="' +
+        escapeHtml_(row.reviewId) +
+        '">' +
+        '<td colspan="8" class="px-3 py-0 bg-gray-50">' +
+        '<div class="detail-container py-4" data-review-id="' +
+        escapeHtml_(row.reviewId) +
+        '">' +
+        '<div class="text-center text-sm text-gray-400 py-4">กำลังโหลดรายละเอียด...</div>' +
+        '</div>' +
+        '</td>' +
+        '</tr>'
+      );
+    }
+
+    function buildRowHtml_(row) {
+      const issue = ISSUE_LABELS[row.issueType] || {
+        label: row.issueType || '—',
+        icon: '❓',
+        color: 'bg-gray-100 text-gray-700'
+      };
+      const priority = PRIORITY_LABELS[row.priority] || PRIORITY_LABELS['LOW'];
+      const isPending = !row.status || row.status === '' || row.status.toLowerCase() === 'pending';
+
+      // ปุ่ม Approve — เลือกตาม recommended_action
+      let approveDecision = 'CREATE_NEW';
+      let approveLabel = '✓ Approve (สร้างใหม่)';
+      if (
+        row.recommend === 'MERGE_TO_CANDIDATE' ||
+        (row.candPersonIds && row.candPersonIds.length > 0) ||
+        (row.candPlaceIds && row.candPlaceIds.length > 0)
+      ) {
+        approveDecision = 'MERGE_TO_CANDIDATE';
+        approveLabel = '✓ Approve (Merge)';
+      }
+
+      const actionButtons = isPending
+        ? '<div class="flex gap-1 justify-end">' +
+          '<button type="button" data-review-id="' +
+          escapeHtml_(row.reviewId) +
+          '" data-decision="' +
+          approveDecision +
+          '" ' +
+          'class="qreview-action-btn px-2.5 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors">' +
+          escapeHtml_(approveLabel) +
+          '</button>' +
+          '<button type="button" data-review-id="' +
+          escapeHtml_(row.reviewId) +
+          '" data-decision="IGNORE" ' +
+          'class="qreview-action-btn px-2.5 py-1 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300 transition-colors">' +
+          '✕ Reject' +
+          '</button>' +
+          '<button type="button" data-review-id="' +
+          escapeHtml_(row.reviewId) +
+          '" data-decision="ESCALATE" ' +
+          'class="qreview-action-btn px-2.5 py-1 bg-orange-100 text-orange-700 text-xs rounded hover:bg-orange-200 transition-colors" ' +
+          'title="ส่งต่อ admin ตรวจสอบ">' +
+          '⇪' +
+          '</button>' +
+          '</div>'
+        : '<div class="text-right text-xs text-gray-400 italic">ตัดสินใจแล้ว<br><span class="text-gray-500">' +
+          escapeHtml_(row.decision || row.status) +
+          '</span></div>';
+
+      const latLngStr =
+        row.rawLat && row.rawLng
+          ? '<span class="font-mono text-xs text-gray-600">' +
+            row.rawLat.toFixed(4) +
+            ', ' +
+            row.rawLng.toFixed(4) +
+            '</span>'
+          : '<span class="text-gray-300">—</span>';
+
+      const recommendBadge = row.recommend
+        ? '<span class="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">' +
+          escapeHtml_(row.recommend) +
+          '</span>'
+        : '<span class="text-gray-300 text-xs">—</span>';
+
+      const scoreBadge = buildScoreBadge_(row.matchScore);
+
+      return (
+        '<tr class="hover:bg-gray-50 cursor-pointer qreview-row" data-review-id="' +
+        escapeHtml_(row.reviewId) +
+        '">' +
+        '<td class="px-3 py-2">' +
+        '<div class="flex items-center gap-1.5">' +
+        '<span class="text-base">' +
+        issue.icon +
+        '</span>' +
+        '<div>' +
+        '<div class="text-xs font-medium text-gray-700">' +
+        escapeHtml_(issue.label) +
+        '</div>' +
+        '<span class="text-xs px-1.5 py-0.5 rounded ' +
+        priority.color +
+        '">' +
+        escapeHtml_(row.priority || '—') +
+        '</span>' +
+        '</div>' +
+        '</div>' +
+        '</td>' +
+        '<td class="px-3 py-2 font-mono text-xs text-gray-700">' +
+        escapeHtml_(row.invoiceNo || '—') +
+        '</td>' +
+        '<td class="px-3 py-2">' +
+        '<div class="text-xs text-gray-900 font-medium">' +
+        escapeHtml_(row.rawPerson || '—') +
+        '</div>' +
+        '<div class="text-xs text-gray-500">' +
+        escapeHtml_(row.rawPlace || '—') +
+        '</div>' +
+        '</td>' +
+        '<td class="px-3 py-2 text-xs text-gray-600 max-w-xs truncate" title="' +
+        escapeHtml_(row.rawAddress || '') +
+        '">' +
+        escapeHtml_(row.rawAddress || '—') +
+        '</td>' +
+        '<td class="px-3 py-2">' +
+        latLngStr +
+        '</td>' +
+        '<td class="px-3 py-2 text-center">' +
+        scoreBadge +
+        '</td>' +
+        '<td class="px-3 py-2">' +
+        recommendBadge +
+        '</td>' +
+        '<td class="px-3 py-2">' +
+        actionButtons +
+        '</td>' +
+        '</tr>'
+      );
+    }
+
+    function buildScoreBadge_(score) {
+      if (!score || score === 0) return '<span class="text-gray-300">—</span>';
+      // [SonarCloud S1854] แยก logic เลือกสีออกเป็น helper แทน reassign
+      const color = chooseScoreColor_(score);
+      return (
+        '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ' + color + '">' + score + '</span>'
+      );
+    }
+
+    /**
+     * chooseScoreColor_ — เลือกสี badge ตาม score
+     *   [SonarCloud S1854] แยกออกจาก buildScoreBadge_
+     * @param {number} score
+     * @return {string} CSS class string
+     * @private
+     */
+    function chooseScoreColor_(score) {
+      if (score >= 80) return 'bg-green-100 text-green-700';
+      if (score >= 50) return 'bg-yellow-100 text-yellow-700';
+      return 'bg-red-100 text-red-700';
+    }
+
+    function buildEmptyState_(statusFilter) {
+      const messages = {
+        Pending: 'ไม่มีรายการรอตรวจ 🎉',
+        Approved: 'ยังไม่มีรายการที่อนุมัติ',
+        Rejected: 'ยังไม่มีรายการที่ปฏิเสธ',
+        Escalated: 'ยังไม่มีรายการที่ส่งต่อ',
+        Done: 'ยังไม่มีรายการที่เสร็จสิ้น',
+        all: 'ไม่มีรายการใน Q_REVIEW'
+      };
+      return (
+        '<div class="bg-white border border-gray-200 rounded-lg p-12 text-center">' +
+        '<div class="text-4xl mb-3">📭</div>' +
+        '<h3 class="text-lg font-semibold text-gray-700 mb-1">' +
+        escapeHtml_(messages[statusFilter] || 'ไม่มีข้อมูล') +
+        '</h3>' +
+        '<p class="text-sm text-gray-500">ลองเปลี่ยน filter หรือรอให้ Daily Job ประมวลผลรายการใหม่</p>' +
+        '</div>'
+      );
+    }
+
+    function buildLoadingHtml_() {
+      return (
+        '<div class="bg-white border border-gray-200 rounded-lg p-8 text-center">' +
+        '<div class="inline-block w-6 h-6 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>' +
+        '<p class="mt-2 text-sm text-gray-500">กำลังโหลด...</p>' +
+        '</div>'
+      );
+    }
+
+    function buildErrorHtml_(message) {
+      return (
+        '<div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">' +
+        '<div class="text-2xl mb-2">❌</div>' +
+        '<p class="text-sm text-red-700">' +
+        escapeHtml_(message || 'Unknown error') +
+        '</p>' +
+        '<button type="button" onclick="globalThis.QReviewView && globalThis.QReviewView.retry()" class="mt-3 px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700">ลองใหม่</button>' +
+        '</div>'
+      );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Event binding
+    // ────────────────────────────────────────────────────────────
+    function bindFilterTabs_(container) {
+      const tabs = container.querySelectorAll('.filter-tab');
+      tabs.forEach(function (btn) {
+        btn.addEventListener('click', handleFilterTabClick_.bind(null, btn, tabs));
+      });
+    }
+
+    /**
+     * handleFilterTabClick_ — จัดการ click บน filter tab
+     *   [SonarCloud S2004] แยก handler ออกจาก forEach
+     * @param {HTMLElement} btn
+     * @param {NodeList} tabs
+     * @private
+     */
+    function handleFilterTabClick_(btn, tabs) {
+      const newStatus = btn.dataset.status;
+      if (newStatus === currentStatusFilter || isLoading) return;
+      currentStatusFilter = newStatus;
+      currentOffset = 0;
+      tabs.forEach(function (t) {
+        t.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
+        t.classList.add('bg-white', 'text-gray-700', 'border-gray-300', 'hover:bg-gray-50');
+      });
+      btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+      btn.classList.remove('bg-white', 'text-gray-700', 'border-gray-300', 'hover:bg-gray-50');
+      loadPage_(0);
+    }
+
+    function bindActionButtons_(container) {
+      const btns = container.querySelectorAll('.qreview-action-btn');
+      btns.forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          const reviewId = btn.dataset.reviewId;
+          const decision = btn.dataset.decision;
+          handleDecision_(reviewId, decision, btn);
+        });
+      });
+
+      const pageBtns = container.querySelectorAll('.qreview-page-btn');
+      pageBtns.forEach(function (btn) {
+        if (btn.disabled) return;
+        btn.addEventListener('click', function () {
+          const offset = Number.parseInt(btn.dataset.offset, 10) || 0;
+          if (offset < 0) return;
+          loadPage_(offset);
+        });
+      });
+
+      // [Phase 2.2] Click row to expand detail panel
+      const rows = container.querySelectorAll('.qreview-row');
+      rows.forEach(function (tr) {
+        tr.addEventListener('click', function (e) {
+          // ถ้าคลิกที่ปุ่ม action หรือลูกของปุ่ม action ให้ข้าม (ปุ่มจัดการ stopPropagation แล้ว)
+          if (e.target.closest('.qreview-action-btn')) return;
+          const reviewId = tr.dataset.reviewId;
+          toggleDetailRow_(reviewId);
+        });
+      });
+    }
+
+    /**
+     * toggleDetailRow_ — แสดง/ซ่อน detail row
+     *   ถ้ายังไม่เคยโหลด content → fetch getReviewDetail แล้ว render
+     *   ถ้าโหลดแล้ว → แค่ toggle visibility
+     * @private
+     */
+    async function toggleDetailRow_(reviewId) {
+      const detailRow = document.querySelector('.detail-row[data-detail-for="' + CSS.escape(reviewId) + '"]');
+      if (!detailRow) return;
+
+      const isHidden = detailRow.classList.contains('hidden');
+
+      // ปิด detail row อื่นที่เปิดอยู่ (เปิดทีละอัน)
+      document.querySelectorAll('.detail-row:not(.hidden)').forEach(function (r) {
+        if (r !== detailRow) r.classList.add('hidden');
+      });
+
+      if (isHidden) {
+        detailRow.classList.remove('hidden');
+        // ถ้ายังไม่เคยโหลด (มี placeholder text)
+        const container = detailRow.querySelector('.detail-container');
+        if (container && container.dataset.loaded !== 'true') {
+          await loadDetail_(reviewId, container);
+        }
+      } else {
+        detailRow.classList.add('hidden');
+      }
+    }
+
+    /**
+     * loadDetail_ — fetch getReviewDetail แล้ว render ลงใน container
+     * @private
+     */
+    async function loadDetail_(reviewId, container) {
+      if (!globalThis.api || typeof globalThis.api.getReviewDetail !== 'function') {
+        container.innerHTML = '<p class="text-sm text-red-600">API ไม่พร้อมใช้งาน</p>';
+        return;
+      }
+
+      container.innerHTML =
+        '<div class="text-center py-4">' +
+        '<div class="inline-block w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>' +
+        '<p class="mt-2 text-sm text-gray-500">กำลังโหลดรายละเอียด...</p>' +
+        '</div>';
+
+      try {
+        const data = await globalThis.api.getReviewDetail(reviewId);
+        if (!data || !data.ok) {
+          container.innerHTML =
+            '<p class="text-sm text-red-600">เกิดข้อผิดพลาด: ' +
+            escapeHtml_(data && data.message ? data.message : 'Unknown') +
+            '</p>';
+          return;
+        }
+        container.innerHTML = buildDetailContentHtml_(data);
+        container.dataset.loaded = 'true';
+
+        // Bind action buttons ใน detail panel ด้วย (ถ้ามี)
+        container.querySelectorAll('.qreview-action-btn').forEach(function (btn) {
+          btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            handleDecision_(btn.dataset.reviewId, btn.dataset.decision, btn);
+          });
+        });
+      } catch (err) {
+        console.error('[QReviewView] loadDetail_ failed:', err);
+        container.innerHTML =
+          '<p class="text-sm text-red-600">โหลดรายละเอียดล้มเหลว: ' + escapeHtml_(err.message) + '</p>';
+      }
+    }
+
+    /**
+     * buildDetailContentHtml_ — สร้าง HTML สำหรับ detail panel
+     *   แสดง 3 ส่วน: ข้อมูลดิบ (source) | ข้อมูลระบบ (review) | Candidate เปรียบเทียบ
+     * @private
+     */
+    function buildDetailContentHtml_(data) {
+      const review = data.review || {};
+      const source = data.source || null;
+      const candidates = data.candidates || { persons: [], places: [], destinations: [] };
+
+      let html = '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">';
+
+      // ─── Column 1: ข้อมูลดิบจาก Source ───
+      html += '<div class="bg-white border border-gray-200 rounded-lg p-4">';
+      html += '<h4 class="text-sm font-semibold text-gray-800 mb-3">📋 ข้อมูลดิบ (Source)</h4>';
+      if (source) {
+        html += buildSourceDetailHtml_(source);
+      } else {
+        html += '<p class="text-sm text-gray-400 italic">ไม่พบข้อมูล source row</p>';
+      }
+      html += '</div>';
+
+      // ─── Column 2: ข้อมูล review + คำแนะนำ ───
+      html += '<div class="bg-white border border-gray-200 rounded-lg p-4">';
+      html += '<h4 class="text-sm font-semibold text-gray-800 mb-3">🔍 ข้อมูลที่ระบบวิเคราะห์</h4>';
+      html += buildReviewAnalysisHtml_(review);
+      html += '</div>';
+
+      html += '</div>'; // close grid
+
+      // ─── Candidate comparison ───
+      html += '<div class="mt-4 bg-white border border-gray-200 rounded-lg p-4">';
+      html += '<h4 class="text-sm font-semibold text-gray-800 mb-3">🎯 Candidate ที่ระบบเจอ (เปรียบเทียบ)</h4>';
+      html += buildCandidatesHtml_(candidates, review);
+      html += '</div>';
+
+      return html;
+    }
+
+    /**
+     * buildSourceDetailHtml_ — แสดงข้อมูลดิบจาก SOURCE sheet
+     * @private
+     */
+    function buildSourceDetailHtml_(source) {
+      const rows = [
+        ['Source ID', source.sourceId],
+        ['วันที่ส่ง', formatDate_(source.deliveryDate) + (source.deliveryTime ? ' ' + source.deliveryTime : '')],
+        ['คนขับ', source.driverName + (source.truckLicense ? ' (' + source.truckLicense + ')' : '')],
+        ['Shipment', source.shipmentNo],
+        ['Invoice', source.invoiceNo],
+        ['รหัสลูกค้า', source.customerCode],
+        ['บริษัทผู้ขาย', source.soldToName],
+        ['ชื่อปลายทาง (ดิบ)', source.rawPersonName],
+        ['พิกัด (ดิบ)', source.lat && source.lng ? source.lat.toFixed(6) + ', ' + source.lng.toFixed(6) : '—'],
+        ['คลัง', source.warehouse],
+        ['ที่อยู่ (ดิบ)', source.rawAddress],
+        ['ที่อยู่จาก GoogleMap', source.resolvedAddr],
+        ['ระยะจากคลัง', source.distFromWh ? source.distFromWh + ' km' : '—'],
+        ['หมายเหตุ', source.remark],
+        ['ชื่อที่คนขับยืนยัน', source.driverVerifiedName],
+        ['ที่อยู่ที่คนขับยืนยัน', source.driverVerifiedAddr]
+      ];
+
+      let html = '<dl class="text-xs space-y-1.5">';
+      rows.forEach(function (r) {
+        if (!r[1] && r[1] !== 0) return; // skip empty
+        html +=
+          '<div class="flex gap-2">' +
+          '<dt class="text-gray-500 w-40 flex-shrink-0">' +
+          escapeHtml_(r[0]) +
+          '</dt>' +
+          '<dd class="text-gray-800 flex-1">' +
+          escapeHtml_(String(r[1])) +
+          '</dd>' +
+          '</div>';
+      });
+      html += '</dl>';
+      return html;
+    }
+
+    /**
+     * buildReviewAnalysisHtml_ — แสดงผลการวิเคราะห์ของระบบ
+     * @private
+     */
+    function buildReviewAnalysisHtml_(review) {
+      const issue = ISSUE_LABELS[review.issueType] || { label: review.issueType, icon: '❓' };
+      const mapsUrl =
+        review.rawLat && review.rawLng ? ViewHelpers.getGoogleMapsUrl(review.rawLat, review.rawLng) : null;
+
+      const rows = [
+        ['Issue Type', issue.icon + ' ' + issue.label],
+        ['Priority', review.priority || '—'],
+        ['Invoice', review.invoiceNo || '—'],
+        ['ชื่อปลายทาง (normalized)', review.rawPerson || '—'],
+        ['สถานที่ (normalized)', review.rawPlace || '—'],
+        ['ที่อยู่ (normalized)', review.rawAddress || '—'],
+        ['พิกัด', review.rawLat && review.rawLng ? review.rawLat.toFixed(6) + ', ' + review.rawLng.toFixed(6) : '—'],
+        ['Match Score', review.matchScore ? review.matchScore + '/100' : '—'],
+        ['ระบบแนะนำ', review.recommend || '—'],
+        ['Status', review.status || 'Pending']
+      ];
+
+      let html = '<dl class="text-xs space-y-1.5">';
+      rows.forEach(function (r) {
+        html +=
+          '<div class="flex gap-2">' +
+          '<dt class="text-gray-500 w-40 flex-shrink-0">' +
+          escapeHtml_(r[0]) +
+          '</dt>' +
+          '<dd class="text-gray-800 flex-1">' +
+          escapeHtml_(r[1]) +
+          '</dd>' +
+          '</div>';
+      });
+      html += '</dl>';
+
+      // ปุ่มเปิด Google Maps ดูพิกัดจริง
+      if (mapsUrl) {
+        html +=
+          '<div class="mt-3 flex gap-2">' +
+          '<a href="' +
+          mapsUrl +
+          '" target="_blank" rel="noopener" ' +
+          'class="inline-block px-3 py-1.5 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors">🗺️ ดูพิกัดใน Google Maps</a>' +
+          '</div>';
+      }
+
+      return html;
+    }
+
+    /**
+     * buildCandidatesHtml_ — แสดง candidate persons/places/destinations เปรียบเทียบ
+     * @private
+     */
+    function buildCandidatesHtml_(candidates, review) {
+      const hasAny =
+        (candidates.persons && candidates.persons.length > 0) ||
+        (candidates.places && candidates.places.length > 0) ||
+        (candidates.destinations && candidates.destinations.length > 0);
+
+      if (!hasAny) {
+        return '<p class="text-sm text-gray-400 italic">ไม่มี candidate — ระบบไม่เจอ entity ที่คล้ายกัน</p>';
+      }
+
+      let html = '';
+
+      // Destinations (สำคัญที่สุดเพราะมี lat/lng จริง)
+      if (candidates.destinations && candidates.destinations.length > 0) {
+        html += '<div class="mb-4">';
+        html +=
+          '<h5 class="text-xs font-semibold text-gray-700 mb-2">📍 Destination ที่มีอยู่ (' +
+          candidates.destinations.length +
+          ')</h5>';
+        html += '<div class="space-y-2">';
+        candidates.destinations.forEach(function (d) {
+          // [SonarCloud S3358] แยก nested ternary เป็น helper function
+          const distanceColor = chooseDistanceColor_(d.distanceFromRawMeters);
+          const mapsUrl = ViewHelpers.getGoogleMapsUrl(d.lat, d.lng);
+          html +=
+            '<div class="bg-blue-50 border border-blue-200 rounded p-3">' +
+            '<div class="flex justify-between items-start gap-2">' +
+            '<div class="text-xs space-y-0.5">' +
+            '<div><span class="text-gray-500">Dest ID:</span> <span class="font-mono">' +
+            escapeHtml_(d.destId) +
+            '</span></div>' +
+            '<div><span class="text-gray-500">พิกัด:</span> <span class="font-mono">' +
+            d.lat.toFixed(6) +
+            ', ' +
+            d.lng.toFixed(6) +
+            '</span></div>' +
+            (d.routeLabel
+              ? '<div><span class="text-gray-500">Route:</span> ' + escapeHtml_(d.routeLabel) + '</div>'
+              : '') +
+            '<div><span class="text-gray-500">Usage count:</span> ' +
+            d.usageCount +
+            ' ครั้ง</div>' +
+            (d.personId
+              ? '<div><span class="text-gray-500">Person ID:</span> <span class="font-mono">' +
+                escapeHtml_(d.personId) +
+                '</span></div>'
+              : '') +
+            (d.placeId
+              ? '<div><span class="text-gray-500">Place ID:</span> <span class="font-mono">' +
+                escapeHtml_(d.placeId) +
+                '</span></div>'
+              : '') +
+            (d.lastSeen
+              ? '<div><span class="text-gray-500">Last seen:</span> ' + formatDate_(d.lastSeen) + '</div>'
+              : '') +
+            '<div class="mt-1"><span class="text-gray-500">ระยะห่างจากพิกัดดิบ:</span> ' +
+            '<span class="' +
+            distanceColor +
+            '">' +
+            (d.distanceFromRawMeters === null ? 'ไม่มีพิกัดดิบ' : d.distanceFromRawMeters + ' เมตร') +
+            '</span>' +
+            '</div>' +
+            '</div>' +
+            '<a href="' +
+            mapsUrl +
+            '" target="_blank" rel="noopener" ' +
+            'class="flex-shrink-0 px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">🗺️</a>' +
+            '</div>' +
+            '</div>';
+        });
+        html += '</div>';
+        html += '</div>';
+      }
+
+      // Persons
+      if (candidates.persons && candidates.persons.length > 0) {
+        html += '<div class="mb-4">';
+        html +=
+          '<h5 class="text-xs font-semibold text-gray-700 mb-2">👤 Person ที่มีอยู่ (' +
+          candidates.persons.length +
+          ')</h5>';
+        html += '<div class="space-y-2">';
+        candidates.persons.forEach(function (p) {
+          html +=
+            '<div class="bg-yellow-50 border border-yellow-200 rounded p-3 text-xs space-y-0.5">' +
+            '<div><span class="text-gray-500">Person ID:</span> <span class="font-mono">' +
+            escapeHtml_(p.personId) +
+            '</span></div>' +
+            '<div><span class="text-gray-500">ชื่อ:</span> ' +
+            escapeHtml_(p.canonicalName) +
+            '</div>' +
+            (p.phone ? '<div><span class="text-gray-500">เบอร์:</span> ' + escapeHtml_(p.phone) + '</div>' : '') +
+            '<div><span class="text-gray-500">Usage count:</span> ' +
+            p.usageCount +
+            ' ครั้ง</div>' +
+            '<div><span class="text-gray-500">Status:</span> ' +
+            escapeHtml_(p.status || '—') +
+            '</div>' +
+            (p.lastSeen
+              ? '<div><span class="text-gray-500">Last seen:</span> ' + formatDate_(p.lastSeen) + '</div>'
+              : '') +
+            '</div>';
+        });
+        html += '</div>';
+        html += '</div>';
+      }
+
+      // Places
+      if (candidates.places && candidates.places.length > 0) {
+        html += '<div>';
+        html +=
+          '<h5 class="text-xs font-semibold text-gray-700 mb-2">🏢 Place ที่มีอยู่ (' +
+          candidates.places.length +
+          ')</h5>';
+        html += '<div class="space-y-2">';
+        candidates.places.forEach(function (pl) {
+          const addr = [pl.subDistrict, pl.district, pl.province, pl.postcode].filter(Boolean).join(' ');
+          html +=
+            '<div class="bg-purple-50 border border-purple-200 rounded p-3 text-xs space-y-0.5">' +
+            '<div><span class="text-gray-500">Place ID:</span> <span class="font-mono">' +
+            escapeHtml_(pl.placeId) +
+            '</span></div>' +
+            '<div><span class="text-gray-500">ชื่อ:</span> ' +
+            escapeHtml_(pl.canonicalName) +
+            '</div>' +
+            (pl.placeType
+              ? '<div><span class="text-gray-500">ประเภท:</span> ' + escapeHtml_(pl.placeType) + '</div>'
+              : '') +
+            (addr ? '<div><span class="text-gray-500">ที่อยู่:</span> ' + escapeHtml_(addr) + '</div>' : '') +
+            '<div><span class="text-gray-500">Usage count:</span> ' +
+            pl.usageCount +
+            ' ครั้ง</div>' +
+            '<div><span class="text-gray-500">Status:</span> ' +
+            escapeHtml_(pl.status || '—') +
+            '</div>' +
+            '</div>';
+        });
+        html += '</div>';
+        html += '</div>';
+      }
+
+      return html;
+    }
+
+    /**
+     * formatDate_ — format ISO date เป็น readable Thai date
+     * @private
+     */
+    function formatDate_(isoString) {
+      if (!isoString) return '—';
+      try {
+        const d = new Date(isoString);
+        if (Number.isNaN(d.getTime())) return String(isoString);
+        return d.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+      } catch (e) {
+        // [SonarCloud S2486] log warning เพื่อ debug
+        console.warn('[QReviewView] formatDate_ failed:', e.message);
+        return String(isoString);
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Actions
+    // ────────────────────────────────────────────────────────────
+    async function loadPage_(offset) {
+      if (isLoading) return;
+      if (!globalThis.api || typeof globalThis.api.getQReviewPage !== 'function') {
+        const c = document.getElementById('qreviewTableContainer');
+        if (c) c.innerHTML = buildErrorHtml_('API ไม่พร้อมใช้งาน');
+        return;
+      }
+
+      isLoading = true;
+      currentOffset = offset;
+      const container = document.getElementById('qreviewTableContainer');
+      if (container) container.innerHTML = buildLoadingHtml_();
+
+      try {
+        const data = await globalThis.api.getQReviewPage(offset, PAGE_SIZE, currentStatusFilter);
+        // [SonarCloud S1854] ลบการ assign lastData ที่ไม่ได้ถูกอ่านที่ไหน
+        renderData_(data);
+      } catch (err) {
+        console.error('[QReviewView] loadPage_ failed:', err);
+        if (container) container.innerHTML = buildErrorHtml_(err.message);
+        showToast_('โหลดรายการล้มเหลว', err.message, 'error', 5000);
+      } finally {
+        isLoading = false;
+      }
+    }
+
+    function renderData_(data) {
+      const container = document.getElementById('qreviewTableContainer');
+      if (!container) return;
+
+      // Update filter tab counts
+      if (data.statusCounts) {
+        Object.keys(data.statusCounts).forEach(function (key) {
+          const el = document.querySelector('[data-count="' + key + '"]');
+          if (el) el.textContent = data.statusCounts[key] || 0;
+        });
+      }
+
+      container.innerHTML = buildTableHtml_(data.rows, currentStatusFilter);
+
+      // [SonarCloud S1481 + S1854] ลบ paginationContainer ที่ไม่ได้ใช้
+      //   (เดิม assign แล้วไม่ได้ใช้ มี duplicate query อยู่)
+      // Add pagination below table
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = buildPaginationHtml_(data.offset, data.total, data.limit);
+      const newPagination = wrapper.firstElementChild;
+      if (newPagination) {
+        // Find existing pagination and replace, or append
+        const oldPagination = container.parentElement.querySelector('.bg-gray-50.border-t');
+        if (oldPagination) {
+          oldPagination.parentElement.replaceChild(newPagination, oldPagination);
+        } else {
+          container.parentElement.appendChild(newPagination);
+        }
+      }
+
+      // Bind action buttons + pagination
+      bindActionButtons_(container.parentElement);
+
+      // Render lucide icons
+      if (globalThis.lucide && typeof globalThis.lucide.createIcons === 'function') {
+        globalThis.lucide.createIcons();
+      }
+    }
+
+    async function handleDecision_(reviewId, decision, btn) {
+      if (!reviewId || !decision) return;
+
+      // [SonarCloud S3358] แยก nested ternary เป็น helper function
+      const confirmMsg = buildConfirmMessage_(decision);
+      if (!globalThis.confirm(confirmMsg)) return;
+
+      // Disable button
+      const originalText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '...';
+
+      // [V6.0.010 P3.14] Global modal overlay — prevent navigation during pending
+      //   Creates a full-screen overlay that blocks clicks on nav/buttons
+      const overlay = document.createElement('div');
+      overlay.id = 'qreview-pending-overlay';
+      overlay.style.cssText =
+        'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:9999;' +
+        'display:flex;align-items:center;justify-content:center;cursor:wait;';
+      overlay.innerHTML =
+        '<div style="background:white;padding:24px 48px;border-radius:8px;box-shadow:0 4px 6px rgba(0,0,0,0.1);">' +
+        '<div style="display:inline-block;width:24px;height:24px;border:3px solid #3b82f6;border-top:transparent;border-radius:50%;animation:spin 1s linear infinite;vertical-align:middle;margin-right:12px;"></div>' +
+        '<span style="font-size:14px;color:#374151;">กำลังบันทึกการตัดสินใจ...</span>' +
+        '</div>';
+      document.body.appendChild(overlay);
+
+      try {
+        const result = await globalThis.api.submitReviewDecision(reviewId, decision, '');
+        if (result && result.ok) {
+          showToast_('✅ สำเร็จ', result.message || 'บันทึกการตัดสินใจแล้ว', 'success', 3000);
+          // Refresh current page
+          loadPage_(currentOffset);
+        } else {
+          const msg = (result && result.message) || 'Unknown error';
+          showToast_('ล้มเหลว', msg, 'error', 5000);
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+        }
+      } catch (err) {
+        console.error('[QReviewView] handleDecision_ failed:', err);
+        showToast_('ล้มเหลว', err.message, 'error', 5000);
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+      } finally {
+        // [V6.0.010 P3.14] Remove overlay
+        const ov = document.getElementById('qreview-pending-overlay');
+        if (ov) ov.remove();
+      }
+    }
+
+    function retry() {
+      loadPage_(currentOffset || 0);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Helpers
+    // ────────────────────────────────────────────────────────────
+    // [V6.0.024] escapeHtml_ — alias to shared ViewHelpers.escapeHtml (DRY)
+    //   Was: duplicated 7 times across views — now centralized in ViewHelpers.html
+    const escapeHtml_ = globalThis.ViewHelpers.escapeHtml;
+
+    function showToast_(title, message, type, duration) {
+      if (globalThis.LMDSApp && typeof globalThis.LMDSApp.showToast === 'function') {
+        globalThis.LMDSApp.showToast(title, message, type, duration);
+      }
+    }
+
+    /**
+     * chooseDistanceColor_ — เลือกสี CSS class ตามระยะทางจากพิกัดดิบ
+     *   [SonarCloud S3358] แยก nested ternary เป็น if/else chain
+     * @param {number|null} distanceMeters
+     * @return {string} CSS class string
+     * @private
+     */
+    function chooseDistanceColor_(distanceMeters) {
+      if (distanceMeters === null || distanceMeters === undefined) return 'text-gray-400';
+      if (distanceMeters < 50) return 'text-green-600 font-semibold';
+      if (distanceMeters < 100) return 'text-yellow-600 font-semibold';
+      return 'text-red-600 font-semibold';
+    }
+
+    /**
+     * buildConfirmMessage_ — สร้างข้อความยืนยันตาม decision type
+     *   [SonarCloud S3358] แยก nested ternary เป็น if/else chain
+     * @param {string} decision - 'CREATE_NEW' | 'MERGE_TO_CANDIDATE' | 'IGNORE' | 'ESCALATE'
+     * @return {string} confirm message
+     * @private
+     */
+    function buildConfirmMessage_(decision) {
+      if (decision === 'CREATE_NEW') return 'ยืนยันสร้าง entity ใหม่จากรายการนี้?';
+      if (decision === 'MERGE_TO_CANDIDATE') return 'ยืนยัน merge เข้า candidate?';
+      if (decision === 'IGNORE') return 'ยืนยันปฏิเสธรายการนี้ (ไม่ action)?';
+      if (decision === 'ESCALATE') return 'ยืนยันส่งต่อ admin?';
+      return 'ยืนยัน?';
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Public API
+    // ────────────────────────────────────────────────────────────
+    return {
+      render: render,
+      retry: retry
+    };
+  })();
+
+  console.log('[QReviewView] view loaded');
+</script>

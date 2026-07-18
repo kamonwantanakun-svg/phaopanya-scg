@@ -1,0 +1,1702 @@
+/**
+ * VERSION: 6.0.069
+ * FILE: 00_App.gs
+ * LMDS V6.0 — Application Entry Point & Menu Controller
+ * ===================================================
+ * PURPOSE:
+ *   จุดเริ่มต้นหลักของระบบ LMDS — ควบคุม Custom Menu และ Pipeline Triggers
+ *   ทำหน้าที่เป็น Gateway สำหรับการเรียกใช้งานระบบทั้งหมดผ่าน onOpen()/onEdit()
+ *
+ * CHANGELOG:
+ *   See /docs/CHANGELOG.md for full history.
+ *
+ * DEPENDENCIES:
+ *   REQUIRES: (Load Order)
+ *     - 01_Config.gs            (APP_NAME, APP_VERSION, ENV config constants)
+ *     - 02_Schema.gs            (column schema for menu diagnostics)
+ *     - 03_SetupSheets.gs       (getSheetByNameSafe_, log functions)
+ *     - 14_Utils.gs             (safeUiAlert_, acquireScriptLockOrWarn_)
+ *     - 27_RbacService.gs       (isAuthorizedUser_ menu guard)
+ *     - All pipeline service modules (called via menu items)
+ *   CALLS: (Invokes)
+ *     - validateConfig()                          → 01_Config.gs
+ *     - runFullPipeline()                         → 24_PipelineManager.gs
+ *     - runMatchEngine()                          → 10_MatchEngine.gs
+ *     - setupAllSheets()                          → 03_SetupSheets.gs
+ *     - buildGeoDictionary()                      → 16_GeoDictionaryBuilder.gs
+ *     - populateGeoMetadata()                     → 20_ThGeoService.gs
+ *     - fetchDataFromSCGJWD()                     → 18_ServiceSCG.gs
+ *     - applyMasterCoordinatesToDailyJob()        → 18_ServiceSCG.gs
+ *     - buildFullQualityReport()                  → 13_ReportService.gs
+ *     - openReviewQueue() / applyAllPendingDecisions() → 12_ReviewService.gs / 12b_ReviewReprocessor.gs
+ *     - runTestMatchDryRun_UI()                   → 10d_MatchTestHarness.gs
+ *   EXPORTS TO:
+ *     - Google Apps Script runtime (onOpen/onEdit/onInstall triggers — global)
+ *     - 24_PipelineManager.gs (runFullPipeline wrapper)
+ *   SHEETS ACCESSED:
+ *     - SHEET.SOURCE              (Read — diagnoseSourceData_)
+ *     - SHEET.DAILY_JOB           (Read — diagnostics)
+ *     - SHEET.FACT_DELIVERY       (Read — diagnostics)
+ *     - SHEET.Q_REVIEW            (Read — diagnose + menu)
+ *     - SHEET.M_ALIAS / M_PERSON / M_PLACE / M_GEO_POINT / M_DESTINATION (Read — diagnostics)
+ *     - SHEET.SYS_CONFIG / SYS_LOG / SYS_TH_GEO  (Read — diagnostics)
+ *     - SHEET.RPT_QUALITY / TEST_MATCH_RESULTS / INPUT / EMPLOYEE (Read — diagnostics)
+ *     - SHEET.M_PERSON_ALIAS / M_PLACE_ALIAS     (Read — alias migration menu)
+ *   TRIGGERS: onOpen, onInstall, onEdit
+ *
+ * ARCHITECTURE:
+ *   Group 0 — Core infrastructure (config, schema, utils, audit, RBAC, web app gateway)
+ * ===================================================
+ */
+
+// constants are defined in 01_Config.gs
+
+// ============================================================
+// SECTION 1: onOpen Trigger
+// ============================================================
+
+function onOpen(e) {
+  // [ADD v003] ตรวจ Config ทันทีที่เปิด Spreadsheet
+  // [V6.0.012] Accept optional event parameter `e` (used by onInstall delegation)
+  try {
+    validateConfig();
+  } catch (cfgErr) {
+    // [FIX BUG-04 v5.5.001] เปลี่ยน getUi().alert() เป็น safeUiAlert_() — trigger-safe (onOpen)
+    safeUiAlert_('⚠️ Config Warning:\n' + cfgErr.message + '\n\nระบบยังใช้งานได้ แต่กรุณาตรวจสอบก่อนรัน Pipeline');
+  }
+
+  const ui = SpreadsheetApp.getUi();
+
+  ui.createMenu(`🚚 ${APP_NAME}`)
+    .addItem('🚀 Run Full Pipeline', 'runFullPipeline')
+    .addItem('📍 จับคู่พิกัดวันนี้', 'applyMasterCoordinatesToDailyJob')
+    .addSeparator()
+
+    .addSubMenu(
+      ui
+        .createMenu('🟩 กลุ่ม 1: ล้างข้อมูล & Master')
+        .addItem('▶️ รัน Full Pipeline (ทั้งหมด)', 'runFullPipeline')
+        .addSeparator()
+        .addItem('Step 1 — โหลดข้อมูลดิบจากแหล่ง', 'runLoadSource')
+        .addItem('Step 2 — Normalize (อัตโนมัติใน Step 3)', 'runNormalize')
+        .addItem('Step 3 — Match Engine', 'runMatchEngine')
+        .addSeparator()
+        .addItem('🧪 [V6] Test Match (Dry Run)', 'runTestMatchDryRun_UI')
+        .addItem('🧪 [V6.0.017] Dry Run — Force All Rows', 'runTestMatchDryRunForceAll_UI')
+        .addItem('🔍 [V6.0.016] วิเคราะห์ Rule 5 Place-Only Impact', 'analyzeRule5PlaceOnlyImpact_UI')
+        .addSeparator()
+        .addItem('🛑 [V6] หยุด Pipeline (Emergency Stop)', 'requestPipelineStop_UI')
+        .addItem('🟢 [V6] ยกเลิก Stop Signal', 'clearPipelineStopSignal_UI')
+        .addSeparator()
+        .addItem('🔄 [V6] Backfill Alias Audit Fields', 'backfillAliasAuditFields_UI')
+        .addItem('🧹 [V6] Safe Reset (Clear Transactional Only)', 'safeResetTransactional_UI')
+        .addSeparator()
+        .addItem('📋 เปิด Review Queue', 'openReviewQueue')
+        .addItem('▶️ รันคำสั่งที่เลือกไว้ทั้งหมด', 'applyAllPendingDecisions')
+        .addItem('🧹 [V6] ล้างแถวที่ Done/Escalated', 'clearDoneReviews_UI')
+        .addItem('📊 รายงาน Data Quality', 'buildFullQualityReport')
+    )
+
+    .addSubMenu(
+      ui
+        .createMenu('🟦 กลุ่ม 2: งานประจำวัน (SCG)')
+        .addItem('📥 ดึงข้อมูล SCG API', 'fetchDataFromSCGJWD')
+        .addItem('📍 จับคู่พิกัด', 'applyMasterCoordinatesToDailyJob')
+        .addSeparator()
+        .addItem('🗑️ ล้างข้อมูลทั้งหมด', 'clearAllSCGSheets_UI')
+        .addSeparator()
+        .addItem('🔐 ตั้งค่า SCG Cookie', 'setSCGCookie_UI')
+    )
+
+    .addSeparator()
+
+    .addSubMenu(
+      ui
+        .createMenu('🔧 ระบบ & ตั้งค่า')
+        .addItem('⚙️ ตั้งค่า API Key', 'setupEnvironment')
+        .addItem('🔐 ตั้งค่า SCG Cookie', 'setSCGCookie_UI')
+        .addItem('👥 ตั้งค่ารายชื่อ Admin', 'setupAdminList_UI')
+        .addItem('🏗️ สร้างชีตทั้งหมด', 'setupAllSheets')
+        .addItem('🌍 อัปเดตฐานข้อมูลภูมิศาสตร์ (SYS_TH_GEO)', 'buildGeoDictionary')
+        .addItem('🛠️ เติมข้อมูลภูมิศาสตร์ (16 คอลัมน์)', 'populateGeoMetadata')
+        .addItem('🔗 สร้าง Alias อัตโนมัติจากประวัติ (FACT)', 'generatePersonAliasesFromHistory')
+        .addItem('🔄 Migration: Hybrid Alias System', 'MIGRATION_HybridAliasSystem')
+        .addItem('🔗 ตรวจสอบ Master UUID', 'assignMasterUuidIfMissing')
+        .addItem('📥 ดึงชื่อจาก SCG ดิบ → M_ALIAS', 'populateAliasFromSCGRawData')
+        .addSeparator()
+        .addItem('🛡️ ป้องกันข้อมูล Sensitive', 'applySheetProtection_UI')
+        .addSeparator()
+        .addItem('🛡️ [PH2] Preflight Audit', 'runPreflightAudit')
+        .addItem('🔍 [V6] Pipeline Preflight (Strict)', 'runPipelinePreflightStrict_UI')
+        .addItem('🧹 [PH2] Detect Duplicates', 'detectDoubleProcessing')
+        .addItem('✅ ตรวจสอบ System Integrity', 'checkSystemIntegrity')
+        .addItem('🔍 วินิจฉัย Pipeline (Diagnostic)', 'diagnoseSystemState')
+        .addSeparator()
+        .addItem('🔄 รีเซ็ตสถานะ SYNC (เพื่อรันใหม่)', 'resetSourceSyncStatus')
+        .addItem('🧹 ล้างความจำระบบ (Clear Cache)', 'invalidateAllGlobalCaches')
+        .addSeparator()
+        .addItem('🔍 [V6] Dedup Audit (Person)', 'runDedupAuditPerson_UI')
+        .addItem('🔍 [V6] Dedup Audit (Place)', 'runDedupAuditPlace_UI')
+        .addSeparator()
+        .addItem('👥 [V6] ตั้งค่า Roles (RBAC)', 'setupRoleAssignments_UI')
+        .addSeparator()
+        .addItem('🧹 [V6] ลบ Trigger ค้าง (Cleanup)', 'cleanupStaleTriggers_UI')
+        .addItem('🧹 [V6] Cleanup Auto-Resume Triggers', 'cleanupAutoResumeTriggers_UI')
+        .addSeparator()
+        .addItem('📜 [V6] Prune Audit Trail (90 วัน)', 'cleanupAuditTrail_UI')
+        .addItem('📖 ดู Version Info', 'showVersionInfo')
+        .addSeparator()
+        .addItem('📸 [V6.0.028] Snapshot — Save Baseline', 'snapshotSaveBaseline_UI')
+        .addItem('📸 [V6.0.028] Snapshot — Compare', 'snapshotCompare_UI')
+        .addItem('📸 [V6.0.028] Snapshot — Clear Baseline', 'snapshotClearBaseline_UI')
+    )
+
+    .addToUi();
+}
+
+/**
+ * onInstall — [V6.0.010 P3.10] Triggered when the add-on is installed in Google Sheets
+ *   Google Apps Script calls onInstall(e) automatically when a user installs the add-on.
+ *   Without this function, the menu doesn't appear until the user manually reopens the sheet.
+ *   Simple delegation to onOpen(e) — same menu setup + config validation.
+ * @param {Object} e — install event object
+ */
+function onInstall(e) {
+  onOpen(e);
+}
+
+// ============================================================
+// SECTION 2: onEdit Trigger
+// ============================================================
+
+/**
+ * onEdit — ดักจับการแก้ไขใน Spreadsheet
+ * [ADD v003] รองรับการเลือก Decision ใน Q_REVIEW
+ */
+function onEdit(e) {
+  if (!e || !e.range) return;
+  const sheet = e.range.getSheet();
+  const name = sheet.getName();
+
+  // 1. ตรวจสอบว่าแก้ไขในชีต Q_REVIEW หรือไม่
+  if (name === SHEET.Q_REVIEW) {
+    const col = e.range.getColumn();
+    const row = e.range.getRow();
+
+    // 2. ตรวจสอบว่าแก้ในคอลัมน์ DECISION (V) หรือไม่
+    if (col === REVIEW_IDX.DECISION + 1 && row > 1) {
+      const decision = String(e.value || '').trim();
+      if (!decision) return;
+
+      const reviewId = String(sheet.getRange(row, REVIEW_IDX.REVIEW_ID + 1).getValue()).trim();
+      if (!reviewId) return;
+
+      try {
+        // [V6.0.010 P3.15] LockService guard — ป้องกัน double-edit ใน Q_REVIEW
+        //   (user paste multiple decisions หรือ double-click dropdown)
+        const editLock = LockService.getScriptLock();
+        if (!editLock.tryLock(5000)) {
+          logWarn('App_onEdit', 'onEdit: lock busy — another edit is being processed');
+          return;
+        }
+
+        try {
+          // [FIX v003] ประมวลผลทันทีที่เลือก
+          applyReviewDecision(reviewId, decision);
+
+          // [PERF-006] ส่ง row เข้า highlightHighPriorityReviews → single-row update
+          //   เดิม: เรียกแบบไม่ส่ง row → full-sheet refresh (44,000 cell ops/click)
+          //   ใหม่: ส่ง row → single-row update (22 cell ops/click, ลด ~95%)
+          //   ถ้าเป็น bulk paste (multi-row) → fallback ไป full refresh อัตโนมัติ
+          if (e.range.getNumRows() > 1) {
+            highlightHighPriorityReviews(); // multi-row edit → full refresh
+          } else {
+            highlightHighPriorityReviews(row); // single-row edit → targeted update
+          }
+
+          sheet.getParent().toast('✅ ประมวลผล ' + reviewId + ' สำเร็จ', APP_NAME, 3);
+        } finally {
+          // [V6.0.010 P3.15] Release lock after processing
+          releaseScriptLock_(editLock);
+        }
+      } catch (err) {
+        logError('App_onEdit', 'reviewId ' + reviewId + ' ล้มเหลว: ' + err.message, err);
+        // [FIX BUG-04 v5.5.001] เปลี่ยน getUi().alert() เป็น safeUiAlert_() — trigger-safe (onEdit)
+        safeUiAlert_('❌ ประมวลผลล้มเหลว: ' + err.message);
+      }
+    }
+  }
+}
+
+// ============================================================
+// SECTION 3: safeRun — Global Error Handler
+// ============================================================
+
+function safeRun(funcName, fn) {
+  try {
+    fn();
+  } catch (err) {
+    logError(funcName, err.message || String(err), err);
+    // [FIX BUG-04 v5.5.001] เปลี่ยน getUi().alert() เป็น safeUiAlert_()
+    safeUiAlert_(`❌ ${funcName} ล้มเหลว:\n${err.message}`);
+  }
+}
+
+// ============================================================
+// SECTION 4: Full Pipeline
+// ============================================================
+
+function runFullPipeline() {
+  // [FIX CodeQL js/unused-local-variable V5.5.035] ui ไม่ถูกใช้ — ใช้ safeUiAlert_() แทน
+
+  // [V6.0.010 P3.16] RBAC: require admin to run pipeline
+  if (typeof requirePermission_ === 'function') requirePermission_('action:run_pipeline');
+
+  // [ADD v003] LockService กัน double-click
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) {
+    // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+    safeUiAlert_('⚠️ มี Pipeline กำลังทำงานอยู่\nกรุณารอให้เสร็จก่อน');
+    return;
+  }
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const startTime = new Date();
+
+    logInfo('App', `Full Pipeline เริ่มต้น — v${APP_VERSION}`);
+    ss.toast('🚀 เริ่มต้นรัน Full Pipeline (ทำงานเบื้องหลัง)...', APP_NAME, 5);
+
+    // [FIX v5.4.001] ล้าง Cache ทั้งหมดก่อนเริ่ม Pipeline เพื่อให้อ่านข้อมูลใหม่จากชีต
+    invalidateAllGlobalCaches();
+
+    safeRun('runFullPipeline', () => {
+      ss.toast('Step 1/3: กำลังโหลดข้อมูลดิบ...', APP_NAME, 10);
+      runLoadSource();
+
+      ss.toast('Step 2/3: กำลัง Normalize...', APP_NAME, 10);
+      runNormalize();
+
+      ss.toast('Step 3/3: กำลัง Match Engine...', APP_NAME, 10);
+      runMatchEngine();
+
+      const elapsedSec = Math.round((new Date() - startTime) / 1000);
+      logInfo('App', `Full Pipeline สำเร็จ — ${elapsedSec} วินาที`);
+
+      // [FIX v5.4.001] แสดงสรุปผลลัพธ์แบบละเอียด พร้อมตรวจเตือนถ้ามีปัญหา
+      const diagResult = getPipelineDiagnosticSummary_();
+      let alertMsg = `✅ Full Pipeline สำเร็จ!\nใช้เวลา: ${elapsedSec} วินาที\n\n` + diagResult.summary;
+      if (diagResult.warnings.length > 0) {
+        alertMsg += '\n\n⚠️ คำเตือน:\n' + diagResult.warnings.join('\n');
+      }
+      // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+      safeUiAlert_(alertMsg);
+    });
+    // [FIX V5.5.048] เดิมมีเพียง try/finally ไม่มี catch — ทำให้ error ภายใน safeRun ไม่ถูก log/alert ที่ระดับนี้
+    // (safeRun จับ error ภายในตัวเองแล้ว แต่ outer try ก็ควรมี catch เผื่อกรณี exception เกิดนอก safeRun
+    //  เช่น invalidateAllGlobalCaches(), getPipelineDiagnosticSummary_())
+  } catch (e) {
+    logError('App', 'runFullPipeline failed: ' + e.message, e);
+    safeUiAlert_('❌ Pipeline ล้มเหลว:\n' + e.message);
+    throw e;
+  } finally {
+    // [V6.0.067] Use releaseScriptLock_() instead of bare lock.releaseLock() (Reviewer #2 TD-001 Round 3)
+    //   ป้องกัน double-release: ถ้า runMatchEngine() release ไปแล้ว → bare releaseLock() จะ throw
+    //   releaseScriptLock_() มี hasLock() guard → null-safe
+    releaseScriptLock_(lock);
+    // [PERF-012] Flush log buffer ก่อน execution จบ — ป้องกัน log entries สูญหาย
+    if (typeof flushLogBuffer_ === 'function') flushLogBuffer_();
+  }
+}
+
+/**
+ * getPipelineDiagnosticSummary_ — [NEW v5.4.001] สรุปสถานะหลัง Pipeline รันเสร็จ
+ * ตรวจสอบจำนวนข้อมูลในแต่ละชีต และแจ้งเตือนถ้าชีตว่าง
+ * @return {{ summary: string, warnings: string[] }}
+ */
+function getPipelineDiagnosticSummary_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const checks = [
+    { name: SHEET.M_PERSON, label: 'M_PERSON' },
+    { name: SHEET.M_PERSON_ALIAS, label: 'M_PERSON_ALIAS' },
+    { name: SHEET.M_PLACE, label: 'M_PLACE' },
+    { name: SHEET.M_PLACE_ALIAS, label: 'M_PLACE_ALIAS' },
+    { name: SHEET.M_GEO_POINT, label: 'M_GEO_POINT' },
+    { name: SHEET.M_ALIAS, label: 'M_ALIAS' },
+    { name: SHEET.FACT_DELIVERY, label: 'FACT_DELIVERY' },
+    { name: SHEET.Q_REVIEW, label: 'Q_REVIEW' }
+  ];
+
+  const warnings = [];
+  const lines = [];
+
+  checks.forEach((c) => {
+    const sheet = ss.getSheetByName(c.name);
+    const dataRows = sheet ? Math.max(0, sheet.getLastRow() - 1) : -1;
+    if (dataRows === -1) {
+      lines.push(`  ❌ ${c.label}: ไม่พบชีต`);
+      warnings.push(`ไม่พบชีต ${c.label} — รัน "สร้างชีตทั้งหมด" ก่อน`);
+    } else if (dataRows === 0) {
+      lines.push(`  ⚠️ ${c.label}: 0 แถว (ว่าง)`);
+    } else {
+      lines.push(`  ✅ ${c.label}: ${dataRows} แถว`);
+    }
+  });
+
+  // ตรวจสอบ Source Sheet
+  const srcSheet = ss.getSheetByName(SHEET.SOURCE);
+  if (srcSheet && srcSheet.getLastRow() > 1) {
+    const srcTotal = srcSheet.getLastRow() - 1;
+    // นับแถวที่ SYNC_STATUS = 'SUCCESS'
+    const syncCol = SRC_IDX.SYNC_STATUS + 1;
+    const syncData = srcSheet.getRange(2, syncCol, srcTotal, 1).getValues();
+    const doneCount = syncData.filter((r) => String(r[0]).trim() === SCG_CONFIG.SYNC_DONE_VALUE).length;
+    const pendingCount = srcTotal - doneCount;
+    lines.push(`\n  📊 Source: ${srcTotal} แถว (ประมวลผลแล้ว: ${doneCount}, ค้างอยู่: ${pendingCount})`);
+    if (pendingCount === 0 && srcTotal > 0) {
+      warnings.push(
+        'Source ทั้งหมดถูกประมวลผลแล้ว (SYNC_STATUS=SUCCESS) — ถ้าต้องการรันใหม่ กดเมนู "รีเซ็ตสถานะ SYNC"'
+      );
+    }
+  } else {
+    warnings.push('ไม่พบข้อมูลในชีต Source — ตรวจสอบชื่อชีต: ' + SHEET.SOURCE);
+  }
+
+  // ตรวจสอบ column mismatch
+  [SHEET.M_PERSON, SHEET.M_PLACE].forEach((sn) => {
+    const sheet = ss.getSheetByName(sn);
+    if (sheet) {
+      const actualCols = sheet.getLastColumn();
+      const schemaCols = SCHEMA[sn] ? SCHEMA[sn].length : 0;
+      if (schemaCols > 0 && actualCols < schemaCols) {
+        warnings.push(
+          `${sn}: ชีตมี ${actualCols} คอลัมน์ แต่ SCHEMA ต้องการ ${schemaCols} — รัน "สร้างชีตทั้งหมด" เพื่อเพิ่มคอลัมน์ที่ขาด`
+        );
+      }
+    }
+  });
+
+  return { summary: lines.join('\n'), warnings: warnings };
+}
+
+// ============================================================
+// SECTION 5: Navigation Helpers
+// ============================================================
+
+function openReviewQueue() {
+  // [FIX S1 v5.5.002] เพิ่ม try-catch ครอบทั้งฟังก์ชัน — Rule 12
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.Q_REVIEW);
+    if (sheet) {
+      ss.setActiveSheet(sheet);
+      ss.toast('กำลังแสดง Review Queue', APP_NAME, 3);
+    } else {
+      // [FIX BUG-04 v5.5.001] เปลี่ยน getUi().alert() เป็น safeUiAlert_()
+      safeUiAlert_('❌ ไม่พบชีต Q_REVIEW\nกรุณารัน "สร้างชีตทั้งหมด" ก่อน');
+    }
+  } catch (err) {
+    logError('App', 'openReviewQueue: ' + err.message, err);
+    safeUiAlert_('❌ เปิด Review Queue ล้มเหลว: ' + err.message);
+  }
+}
+
+// ============================================================
+// SECTION 6: System Tools
+// ============================================================
+
+// [FIX BUG-A2] v5.4.003: เพิ่ม try-catch outer
+function checkSystemIntegrity() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const errors = [];
+    const warns = [];
+
+    const requiredSheets = [
+      SHEET.M_PERSON,
+      SHEET.M_PERSON_ALIAS,
+      SHEET.M_PLACE,
+      SHEET.M_PLACE_ALIAS,
+      SHEET.M_ALIAS,
+      SHEET.M_GEO_POINT,
+      SHEET.M_DESTINATION,
+      SHEET.FACT_DELIVERY,
+      SHEET.Q_REVIEW,
+      SHEET.SYS_LOG,
+      SHEET.SYS_CONFIG,
+      SHEET.SYS_TH_GEO,
+      SHEET.RPT_QUALITY,
+      SHEET.DAILY_JOB,
+      SHEET.INPUT,
+      SHEET.EMPLOYEE,
+      SHEET.SOURCE
+    ];
+
+    requiredSheets.forEach((name) => {
+      if (!ss.getSheetByName(name)) errors.push('ไม่พบชีต: ' + name);
+    });
+
+    try {
+      const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+      if (!apiKey) warns.push('GEMINI_API_KEY ยังไม่ได้ตั้งค่า');
+      else if (apiKey.length < 20) warns.push('GEMINI_API_KEY อาจไม่ถูกต้อง');
+    } catch (e) {
+      warns.push('ไม่สามารถอ่าน GEMINI_API_KEY: ' + e.message);
+    }
+
+    if (errors.length === 0 && warns.length === 0) {
+      // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+      safeUiAlert_('✅ System Integrity: ปกติทุกอย่าง!\nVersion: ' + APP_VERSION);
+      return;
+    }
+
+    let msg = '';
+    if (errors.length > 0) {
+      msg += '❌ พบ Error ' + errors.length + ' รายการ:\n';
+      msg += errors.map((e) => '  • ' + e).join('\n') + '\n\n💡 รัน สร้างชีตทั้งหมด\n\n';
+    }
+    if (warns.length > 0) {
+      msg += '⚠️ พบ Warning ' + warns.length + ' รายการ:\n';
+      msg += warns.map((w) => '  • ' + w).join('\n');
+    }
+    // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+    safeUiAlert_(msg);
+  } catch (err) {
+    logError('App', 'checkSystemIntegrity: ' + err.message, err);
+    safeUiAlert_('❌ checkSystemIntegrity ล้มเหลว: ' + err.message);
+  }
+}
+
+function setupEnvironment() {
+  // [SEC-002 FIX] Authorization Guard — เฉพาะ Admin เท่านั้นที่ตั้งค่า API Key ได้
+  if (typeof isAuthorizedUser_ === 'function' && !isAuthorizedUser_()) {
+    safeUiAlert_('🔒 คุณไม่มีสิทธิ์ตั้งค่า API Key\nกรุณาติดต่อ Admin');
+    return;
+  }
+  // [FIX S1 v5.5.002] เพิ่ม try-catch ครอบทั้งฟังก์ชัน — Rule 12
+  try {
+    const ui = SpreadsheetApp.getUi();
+
+    const result = ui.prompt(
+      '⚙️ ตั้งค่า Gemini API Key',
+      'กรุณาใส่ Gemini API Key:\n(ได้จาก https://aistudio.google.com/app/apikey)\n\n' +
+        'รองรับทั้งรูปแบบเก่า (AIza...) และรูปแบบใหม่ (AQ...)',
+      ui.ButtonSet.OK_CANCEL
+    );
+
+    if (result.getSelectedButton() !== ui.Button.OK) return;
+
+    const inputKey = result.getResponseText().trim();
+
+    // [FIX v5.5.006] รองรับ Gemini API Key ทั้ง 2 รูปแบบ:
+    // - Legacy (v1): ขึ้นต้นด้วย "AIza" + 35 ตัวอักษร (รวม 39 ตัว)
+    // - New (v2):    ขึ้นต้นด้วย "AQ."   + Base64URL chars (40-80 ตัว)
+    // Charset ที่อนุญาต: A-Z, a-z, 0-9, -, _ (Base64 URL-safe)
+    const legacyPattern = /^AIza[0-9A-Za-z\-_]{35}$/;
+    const newPattern = /^AQ\.[0-9A-Za-z\-_]{30,80}$/;
+    const isValidKey = legacyPattern.test(inputKey) || newPattern.test(inputKey);
+
+    if (!inputKey || !isValidKey) {
+      // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+      safeUiAlert_(
+        '❌ API Key ไม่ถูกต้อง\n\n' +
+          'รูปแบบที่รองรับ:\n' +
+          '• รูปแบบเก่า: ขึ้นต้นด้วย "AIza" ยาว 39 ตัวอักษร\n' +
+          '• รูปแบบใหม่: ขึ้นต้นด้วย "AQ."   ยาว 33-83 ตัวอักษร\n\n' +
+          'กรุณาตรวจสอบคีย์อีกครั้ง หรือขอคีย์ใหม่จาก\n' +
+          'https://aistudio.google.com/app/apikey'
+      );
+      return;
+    }
+
+    PropertiesService.getScriptProperties().setProperty('GEMINI_API_KEY', inputKey);
+    logInfo('App', 'ตั้งค่า GEMINI_API_KEY สำเร็จ (รูปแบบ: ' + (inputKey.startsWith('AQ.') ? 'v2' : 'v1') + ')');
+    // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+    safeUiAlert_('✅ บันทึก API Key เรียบร้อยแล้วครับ!');
+  } catch (err) {
+    logError('App', 'setupEnvironment: ' + err.message, err);
+    safeUiAlert_('❌ ตั้งค่า API Key ล้มเหลว: ' + err.message);
+  }
+}
+
+/**
+ * populateAliasFromSCGRawData — [FIX-01 v5.4.003] Public wrapper สำหรับเรียกจาก Menu
+ * GAS Menu ไม่สามารถเรียกฟังก์ชัน private (ขึ้นต้นด้วย _) ได้
+ * จึงต้องมี public wrapper เพื่อให้ Menu เรียกได้
+ */
+function populateAliasFromSCGRawData() {
+  // [SEC-002 FIX] Authorization Guard — bulk write M_ALIAS ต้องเป็น Admin เท่านั้น
+  if (typeof isAuthorizedUser_ === 'function' && !isAuthorizedUser_()) {
+    safeUiAlert_('🔒 คุณไม่มีสิทธิ์รัน Alias Enrichment\nกรุณาติดต่อ Admin');
+    return 0;
+  }
+  // [V6.0.010 P3.3] LockService guard — prevent concurrent alias population
+  const lock = acquireScriptLockOrWarn_(5000, '⚠️ populateAliasFromSCGRawData กำลังรันอยู่ กรุณารอให้เสร็จก่อน');
+  if (!lock) return 0;
+  try {
+    return populateAliasFromSCGRawData_();
+  } finally {
+    releaseScriptLock_(lock);
+  }
+}
+
+function showVersionInfo() {
+  const msg =
+    `🚚 ${APP_NAME}\n` +
+    `Version: ${APP_VERSION}\n` +
+    `Schema: v${SCHEMA_VERSION}\n` +
+    'Audit Cycles: 18 (CRITICAL → PERF → SECURITY → REVIEW15 → REFACTOR → SYNC → CACHE-FIX → CACHE-CLEANUP → DOC-SYNC → GOOGLE-MAPS-REFACTOR → DRIVER-VERIFIED → CRITICAL-FIX → PERFORMANCE-FIX → SECURITY-POSTFIX → REVIEW15-CLEAN-CODE-FIX → REFACTOR_CYCLE6 → REFACTOR_CYCLE6_RESIDUAL → DEEP-DIVE-AUDIT → CONSISTENCY-SYNC)\n\n' +
+    '📦 Modules (22 files):\n' +
+    '  00_App.gs                v5.5.022\n' +
+    '  01_Config.gs             v5.5.022\n' +
+    '  02_Schema.gs             v5.5.022\n' +
+    '  03_SetupSheets.gs        v5.5.022\n' +
+    '  04_SourceRepository.gs   v5.5.022\n' +
+    '  05_NormalizeService.gs   v5.5.022\n' +
+    '  06_PersonService.gs      v5.5.022\n' +
+    '  07_PlaceService.gs       v5.5.022\n' +
+    '  08_GeoService.gs         v5.5.022\n' +
+    '  09_DestinationService.gs v5.5.022\n' +
+    '  10_MatchEngine.gs        v5.5.022\n' +
+    '  11_TransactionService.gs v5.5.022\n' +
+    '  12_ReviewService.gs      v5.5.022\n' +
+    '  13_ReportService.gs      v5.5.022\n' +
+    '  14_Utils.gs              v5.5.022\n' +
+    '  15_GoogleMapsAPI.gs      v5.5.022\n' +
+    '  16_GeoDictionaryBuilder.gs     v5.5.022\n' +
+    '  17_SearchService.gs      v5.5.022\n' +
+    '  18_ServiceSCG.gs         v5.5.022\n' +
+    '  19_Hardening.gs          v5.5.022\n' +
+    '  20_ThGeoService.gs       v5.5.022\n' +
+    '  21_AliasService.gs       v5.5.022\n\n' +
+    '⚙️ Core System (Group 0): App, Config, Schema, Setup, Utils, Hardening\n' +
+    '🟩 Group 1 — Master DB: Normalize, Person, Place, Geo, Dest, Match, GeoDict, ThGeo, Alias\n' +
+    '🟦 Group 2 — Daily Ops: SourceRepo, Transaction, Review, Report, Maps, Search, SCG';
+
+  // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+  safeUiAlert_(msg);
+}
+
+// ============================================================
+// SECTION 7: Diagnostic Tool — [NEW v5.4.001]
+// ============================================================
+
+/**
+ * diagnoseSystemState — วินิจฉัยปัญหา Pipeline แบบครบวงจร
+ * [REFACTOR v5.5.001] แยกเป็น 4 sub-functions เพื่อลดความยาว (145→28 บรรทัด) — กฎข้อ 1.1
+ * ตรวจสอบ: ชีตมีอยู่ไหม, คอลัมน์ครบไหม, ข้อมูลว่างไหม, SYNC_STATUS, Cache, ฯลฯ
+ * เรียกจากเมนู: 🔧 ระบบ > 🔍 วินิจฉัย Pipeline (Diagnostic)
+ */
+function diagnoseSystemState() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const lines = [];
+    const fixes = [];
+
+    lines.push('=== 🔍 LMDS Pipeline Diagnostic ===');
+    lines.push(`Version: ${APP_VERSION} | Schema: v${SCHEMA_VERSION}`);
+
+    diagnoseRequiredSheets_(ss, lines, fixes);
+    diagnoseColumnMismatch_(ss, lines, fixes);
+    diagnoseSourceData_(ss, lines, fixes);
+    diagnoseRecentErrors_(ss, lines, fixes);
+
+    if (fixes.length > 0) {
+      lines.push('');
+      lines.push('🔧 วิธีแก้ปัญหา:');
+      fixes.forEach((f, i) => {
+        lines.push(`  ${i + 1}. ${f}`);
+      });
+    } else {
+      lines.push('');
+      lines.push('✅ ไม่พบปัญหาที่ชัดเจน — ระบบน่าจะทำงานปกติ');
+    }
+    safeUiAlert_(lines.join('\n'));
+  } catch (err) {
+    logError('App', 'diagnoseSystemState: ' + err.message, err);
+    safeUiAlert_('❌ Diagnostic ล้มเหลว: ' + err.message);
+  }
+}
+
+/**
+ * diagnoseRequiredSheets_ — [REFACTOR v5.5.001] ตรวจชีตที่จำเป็น
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ * @param {string[]} lines - output lines array
+ * @param {string[]} fixes - output fixes array
+ */
+function diagnoseRequiredSheets_(ss, lines, fixes) {
+  lines.push('');
+  lines.push('📋 ชีตที่จำเป็น:');
+  const requiredSheets = [
+    SHEET.SOURCE,
+    SHEET.M_PERSON,
+    SHEET.M_PERSON_ALIAS,
+    SHEET.M_PLACE,
+    SHEET.M_PLACE_ALIAS,
+    SHEET.M_ALIAS,
+    SHEET.M_GEO_POINT,
+    SHEET.M_DESTINATION,
+    SHEET.FACT_DELIVERY,
+    SHEET.Q_REVIEW,
+    SHEET.SYS_LOG,
+    SHEET.SYS_TH_GEO
+  ];
+  requiredSheets.forEach((name) => {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) {
+      lines.push(`  ❌ ${name}: ไม่พบชีต`);
+      fixes.push(`สร้างชีต ${name} — รัน "สร้างชีตทั้งหมด"`);
+    } else {
+      lines.push(`  ✅ ${name}: ${Math.max(0, sheet.getLastRow() - 1)} แถวข้อมูล`);
+    }
+  });
+}
+
+/**
+ * diagnoseColumnMismatch_ — [REFACTOR v5.5.001] ตรวจ Column Mismatch
+ */
+function diagnoseColumnMismatch_(ss, lines, fixes) {
+  lines.push('');
+  lines.push('📐 ตรวจสอบคอลัมน์ (SCHEMA vs ชีตจริง):');
+  const schemaChecks = [
+    { name: SHEET.M_PERSON, label: 'M_PERSON' },
+    { name: SHEET.M_PLACE, label: 'M_PLACE' },
+    { name: SHEET.M_GEO_POINT, label: 'M_GEO_POINT' },
+    { name: SHEET.M_ALIAS, label: 'M_ALIAS' },
+    { name: SHEET.FACT_DELIVERY, label: 'FACT_DELIVERY' }
+  ];
+  schemaChecks.forEach((c) => {
+    const sheet = ss.getSheetByName(c.name);
+    const schema = SCHEMA[c.name];
+    if (!sheet || !schema) return;
+    const actualCols = sheet.getLastColumn();
+    const schemaCols = schema.length;
+    if (actualCols < schemaCols) {
+      lines.push(`  ❌ ${c.label}: ชีตมี ${actualCols} คอลัมน์ แต่ SCHEMA ต้องการ ${schemaCols}`);
+      fixes.push(`เพิ่มคอลัมน์ใน ${c.label} — รัน "สร้างชีตทั้งหมด" (Auto-Repair)`);
+    } else {
+      lines.push(`  ✅ ${c.label}: ${actualCols}/${schemaCols} คอลัมน์`);
+    }
+  });
+}
+
+/**
+ * diagnoseSourceData_ — [REFACTOR v5.5.001] ตรวจข้อมูลต้นทาง (Source)
+ */
+function diagnoseSourceData_(ss, lines, fixes) {
+  lines.push('');
+  lines.push('📊 ข้อมูลต้นทาง (Source):');
+  const srcSheet = ss.getSheetByName(SHEET.SOURCE);
+  if (!srcSheet || srcSheet.getLastRow() <= 1) {
+    lines.push(`  ❌ ไม่พบข้อมูลในชีต: ${SHEET.SOURCE}`);
+    fixes.push(`ตรวจสอบชื่อชีต Source: "${SHEET.SOURCE}"`);
+    return;
+  }
+  const srcTotal = srcSheet.getLastRow() - 1;
+  const srcCols = srcSheet.getLastColumn();
+  lines.push(`  แถวทั้งหมด: ${srcTotal} | คอลัมน์: ${srcCols}`);
+
+  const sampleMax = Math.min(srcTotal, 500);
+
+  // ตรวจ SYNC_STATUS
+  const syncCol = SRC_IDX.SYNC_STATUS + 1;
+  if (srcCols >= syncCol) {
+    const syncData = srcSheet.getRange(2, syncCol, sampleMax, 1).getValues();
+    const doneCount = syncData.filter((r) => String(r[0]).trim() === SCG_CONFIG.SYNC_DONE_VALUE).length;
+    const pendingCount = srcTotal - doneCount;
+    lines.push(`  SYNC_STATUS: ประมวลผลแล้ว=${doneCount} ค้างอยู่=${pendingCount}`);
+    if (pendingCount === 0) {
+      lines.push('  ⚠️ ทุกแถวถูกประมวลผลแล้ว — Pipeline จะไม่สร้างข้อมูลใหม่');
+      fixes.push('รีเซ็ต SYNC_STATUS — รัน "รีเซ็ตสถานะ SYNC (เพื่อรันใหม่)"');
+    }
+  } else {
+    lines.push(`  ⚠️ ชีต Source ไม่มีคอลัมน์ SYNC_STATUS (col ${syncCol}) แต่มีแค่ ${srcCols} คอลัมน์`);
+  }
+
+  // ตรวจ INVOICE_NO
+  const invCol = SRC_IDX.INVOICE_NO + 1;
+  if (srcCols >= invCol) {
+    const invData = srcSheet.getRange(2, invCol, sampleMax, 1).getValues();
+    const hasInvCount = invData.filter((r) => String(r[0]).trim()).length;
+    lines.push(`  INVOICE_NO: ${hasInvCount}/${sampleMax} แถวมีค่า`);
+    if (hasInvCount === 0) fixes.push('ชีต Source ไม่มี Invoice No — ตรวจสอบโครงสร้างชีต');
+  }
+
+  // ตรวจ LAT/LNG
+  const latCol = SRC_IDX.LAT + 1;
+  const lngCol = SRC_IDX.LNG + 1;
+  if (srcCols >= lngCol) {
+    const latLngData = srcSheet.getRange(2, latCol, sampleMax, 2).getValues();
+    const hasGeoCount = latLngData.filter(
+      (r) => Number(r[0]) !== 0 && Number(r[1]) !== 0 && !isNaN(Number(r[0])) && !isNaN(Number(r[1]))
+    ).length;
+    lines.push(`  LAT/LNG: ${hasGeoCount}/${sampleMax} แถวมีพิกัด`);
+    if (hasGeoCount === 0) {
+      lines.push('  ⚠️ ไม่มีพิกัดเลย — ทุกแถวจะเข้า REVIEW (INVALID_LATLNG)');
+      fixes.push('ข้อมูล Source ไม่มีพิกัด — ตรวจสอบคอลัมน์ LAT/LNG');
+    }
+  }
+}
+
+/**
+ * diagnoseRecentErrors_ — [REFACTOR v5.5.001] ตรวจ Error ล่าสุดใน SYS_LOG
+ */
+function diagnoseRecentErrors_(ss, lines, fixes) {
+  lines.push('');
+  lines.push('⚠️ Error ล่าสุดใน SYS_LOG:');
+  const logSheet = ss.getSheetByName(SHEET.SYS_LOG);
+  if (!logSheet || logSheet.getLastRow() <= 1) return;
+
+  const logRows = Math.min(20, logSheet.getLastRow() - 1);
+  const logData = logSheet.getRange(logSheet.getLastRow() - logRows + 1, 1, logRows, 6).getValues();
+  const errors = logData.filter((r) => String(r[SYS_LOG_IDX.LEVEL]).trim() === 'ERROR').slice(-5);
+  if (errors.length === 0) {
+    lines.push('  ✅ ไม่มี Error ใน 20 แถวล่าสุด');
+  } else {
+    errors.forEach((e) => {
+      const mod = String(e[SYS_LOG_IDX.MODULE] || '').substring(0, 20);
+      const msg = String(e[SYS_LOG_IDX.MESSAGE] || '').substring(0, 80);
+      lines.push(`  ❌ [${mod}] ${msg}`);
+    });
+    fixes.push('ตรวจสอบ Error ใน SYS_LOG — อาจเป็นสาเหตุที่ชีตว่าง');
+  }
+}
+
+// ============================================================
+// SECTION 5: [V6.0.006] Trigger Cleanup
+// ============================================================
+
+/**
+ * cleanupStaleTriggers_UI — [V6.0.006] ลบ trigger ที่ค้างอยู่ (handler function ไม่มีแล้ว)
+ *   ใช้หลังจากลบ Smart Navigation — trigger เก่าที่เรียก handleSelectionChange_
+ *   ยังค้างอยู่ทำให้เกิด error "Script function not found"
+ */
+function cleanupStaleTriggers_UI() {
+  // [V6.0.010 P3.9] LockService guard — prevent concurrent trigger cleanup
+  const lock = acquireScriptLockOrWarn_(5000, '⚠️ cleanupStaleTriggers_UI กำลังรันอยู่ กรุณารอให้เสร็จก่อน');
+  if (!lock) return;
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    const staleHandlers = [
+      'handleSelectionChange_',
+      'onSelectionChange',
+      'installSmartNavTrigger',
+      'autoInstallSmartNav_'
+    ];
+    let deleted = 0;
+    const details = [];
+
+    for (let i = 0; i < triggers.length; i++) {
+      const handler = triggers[i].getHandlerFunction();
+      if (staleHandlers.indexOf(handler) !== -1) {
+        details.push('  • ' + handler + ' (ID: ' + triggers[i].getUniqueId() + ')');
+        ScriptApp.deleteTrigger(triggers[i]);
+        deleted++;
+      }
+    }
+
+    if (deleted === 0) {
+      safeUiAlert_('✅ ไม่พบ trigger ค้าง — ทุก trigger ใช้งานได้ปกติ');
+    } else {
+      logInfo('App', 'cleanupStaleTriggers_UI: ลบ trigger ค้าง ' + deleted + ' ตัว:\n' + details.join('\n'));
+      safeUiAlert_('✅ ลบ trigger ค้าง ' + deleted + ' ตัว:\n\n' + details.join('\n'));
+    }
+  } catch (e) {
+    logError('App', 'cleanupStaleTriggers_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  } finally {
+    releaseScriptLock_(lock);
+  }
+}
+
+/**
+ * cleanupAutoResumeTriggers_UI — [V6.0.007] Menu wrapper to cleanup orphan
+ *   time-based triggers that call runMatchEngine. These orphans accumulate
+ *   when installAutoResume_ fails mid-way (e.g., trigger created but property
+ *   not set, or property cleared but trigger not deleted).
+ *
+ *   Workflow:
+ *     1. Scan all project triggers
+ *     2. Filter to those with handler='runMatchEngine'
+ *     3. Read AUTO_RESUME_TRIGGER_ID property — that's the "current" one (keep)
+ *     4. Everything else is an orphan (delete candidate)
+ *     5. Show detailed report (current vs orphans) + ask for confirmation
+ *     6. On YES → delete orphans + clear stale property if no current trigger remains
+ *     7. On NO → exit without changes
+ *
+ *   Safety:
+ *     - Only deletes time-based triggers with handler='runMatchEngine'
+ *     - Preserves any user-created triggers for other functions
+ *     - Confirmation dialog before any deletion
+ *     - Wrapped in try/catch — non-fatal on any error
+ */
+function cleanupAutoResumeTriggers_UI() {
+  try {
+    const ui = SpreadsheetApp.getUi();
+    const triggers = ScriptApp.getProjectTriggers();
+    const props = PropertiesService.getScriptProperties();
+    const knownTriggerId = props.getProperty('AUTO_RESUME_TRIGGER_ID');
+
+    // Filter to runMatchEngine triggers only
+    const runMatchEngineTriggers = [];
+    for (let i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'runMatchEngine') {
+        runMatchEngineTriggers.push(triggers[i]);
+      }
+    }
+
+    if (runMatchEngineTriggers.length === 0) {
+      safeUiAlert_(
+        '✅ ไม่พบ runMatchEngine triggers',
+        'ไม่มี time-based trigger ใดที่เรียก runMatchEngine\n' + 'ระบบสะอาด — ไม่จำเป็นต้อง cleanup'
+      );
+      return;
+    }
+
+    // Classify each as "current" (matches known ID) or "orphan"
+    const current = [];
+    const orphans = [];
+    runMatchEngineTriggers.forEach(function (t) {
+      const tid = t.getUniqueId();
+      const info = {
+        id: tid,
+        type: t.getEventType(),
+        handler: t.getHandlerFunction(),
+        createdAt: t.getTriggerSourceId() || 'n/a'
+      };
+      if (knownTriggerId && tid === knownTriggerId) {
+        current.push(info);
+      } else {
+        orphans.push(info);
+      }
+    });
+
+    // Build report
+    const lines = [];
+    lines.push('📊 Auto-Resume Trigger Report\n');
+    lines.push('รวม runMatchEngine triggers: ' + runMatchEngineTriggers.length + ' ตัว');
+    lines.push('  • Current (active): ' + current.length);
+    lines.push('  • Orphan (stale): ' + orphans.length + '\n');
+
+    if (current.length > 0) {
+      lines.push('─── ✅ Current (จะ KEPT) ───');
+      current.forEach(function (c) {
+        lines.push('• ID: ' + c.id);
+      });
+    }
+
+    if (orphans.length > 0) {
+      lines.push('\n─── ❌ Orphan (จะ DELETED) ───');
+      orphans.forEach(function (o) {
+        lines.push('• ID: ' + o.id);
+      });
+    }
+
+    if (orphans.length === 0) {
+      safeUiAlert_(
+        '✅ ไม่มี orphan triggers',
+        lines.join('\n') + '\n\nทุก trigger เป็น current — ไม่จำเป็นต้อง cleanup'
+      );
+      return;
+    }
+
+    // Ask for confirmation
+    const confirm = ui.alert(
+      '🧹 Cleanup Auto-Resume Triggers',
+      lines.join('\n') + '\n\nยืนยันการลบ ' + orphans.length + ' orphan trigger(s)?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่มีการลบ trigger');
+      return;
+    }
+
+    // Delete orphans
+    let deletedCount = 0;
+    const deletedIds = [];
+    orphans.forEach(function (o) {
+      // Find the original trigger object by ID (need to re-fetch because we
+      // can't store the trigger object across the forEach above reliably)
+      for (let i = 0; i < triggers.length; i++) {
+        if (triggers[i].getUniqueId() === o.id) {
+          ScriptApp.deleteTrigger(triggers[i]);
+          deletedCount++;
+          deletedIds.push(o.id);
+          break;
+        }
+      }
+    });
+
+    // If no current trigger remains, clear the stale property
+    if (current.length === 0 && deletedCount === runMatchEngineTriggers.length) {
+      props.deleteProperty('AUTO_RESUME_TRIGGER_ID');
+      logInfo(
+        'App',
+        'cleanupAutoResumeTriggers_UI: cleared stale AUTO_RESUME_TRIGGER_ID property (no current trigger remains)'
+      );
+    }
+
+    logInfo('App', 'cleanupAutoResumeTriggers_UI: deleted ' + deletedCount + ' orphan runMatchEngine triggers');
+
+    safeUiAlert_(
+      '✅ ลบ orphan triggers เรียบร้อย',
+      'ลบทั้งหมด ' +
+        deletedCount +
+        ' ตัว:\n\n' +
+        deletedIds
+          .map(function (id) {
+            return '• ' + id;
+          })
+          .join('\n') +
+        '\n\nCurrent triggers ที่เหลือ: ' +
+        current.length +
+        ' ตัว'
+    );
+  } catch (e) {
+    logError('App', 'cleanupAutoResumeTriggers_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+// ============================================================
+// SECTION: [V6.0.007] Emergency Stop Signal UI
+// ============================================================
+
+/**
+ * requestPipelineStop_UI — [V6.0.007] Menu wrapper to request emergency stop
+ *   of the running pipeline. Sets PIPELINE_STOP_REQUESTED='true' in script
+ *   properties. The running pipeline (runMatchEngineLoop_) checks this every
+ *   10 rows and exits gracefully when true.
+ *
+ *   Workflow:
+ *     1. Show confirmation dialog explaining what will happen
+ *     2. On YES → set stop signal + alert user that pipeline will stop within ~10 rows
+ *     3. Pipeline (running in another execution) sees the signal, flushes its
+ *        current batch, removes auto-resume trigger, and exits
+ *     4. Data processed so far is preserved in SOURCE SYNC_STATUS + FACT_DELIVERY
+ *
+ *   Important:
+ *     - This menu returns immediately (doesn't wait for pipeline to stop)
+ *     - User should check SYS_LOG to confirm pipeline stopped
+ *     - Stop typically takes effect within 10-30 seconds (10 rows × ~1-3s per row)
+ *     - If pipeline is NOT running, the signal stays set until cleared —
+ *       next pipeline run would stop immediately at row 0. Use
+ *       "🟢 ยกเลิก Stop Signal" menu to clear before next run.
+ */
+function requestPipelineStop_UI() {
+  try {
+    const ui = SpreadsheetApp.getUi();
+    const confirm = ui.alert(
+      '🛑 หยุด Pipeline (Emergency Stop)',
+      'กำลังจะส่งสัญญาณหยุด pipeline\n\n' +
+        'สิ่งที่จะเกิดขึ้น:\n' +
+        '• Pipeline จะหยุดภายใน ~10-30 วินาที (หลังแถวปัจจุบัน)\n' +
+        '• ข้อมูลที่ประมวลผลแล้วจะถูกบันทึก (flush batch)\n' +
+        '• Auto-Resume trigger จะถูกลบ (pipeline จะไม่รันต่อเอง)\n' +
+        '• Stop signal จะถูก clear อัตโนมัติหลัง pipeline หยุด\n\n' +
+        'หมายเหตุ:\n' +
+        '• ถ้า pipeline ไม่ได้รันอยู่, signal จะค้างจนกว่าจะกด "🟢 ยกเลิก Stop Signal"\n' +
+        '• สามารถรัน pipeline ใหม่ได้หลังจากหยุด (จะเริ่มจากแถวที่ยังไม่ประมวลผล)\n\n' +
+        'ยืนยันการหยุด pipeline?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่ส่ง stop signal');
+      return;
+    }
+
+    // Set the stop signal
+    PropertiesService.getScriptProperties().setProperty('PIPELINE_STOP_REQUESTED', 'true');
+    logInfo('App', 'requestPipelineStop_UI: stop signal SET — pipeline will stop within ~10-30 seconds');
+
+    safeUiAlert_(
+      '🛑 Stop signal ถูกส่งแล้ว',
+      'Pipeline จะหยุดภายใน ~10-30 วินาที\n\n' +
+        'สิ่งที่จะเกิดขึ้น:\n' +
+        '✓ Pipeline จะ flush batch ปัจจุบัน (ข้อมูลไม่หาย)\n' +
+        '✓ Auto-Resume trigger จะถูกลบ\n' +
+        '✓ Stop signal จะถูก clear อัตโนมัติ\n\n' +
+        'ตรวจสอบ SYS_LOG เพื่อดูสถานะการหยุด\n' +
+        'ค้นหา: "🛑 STOP SIGNAL: หยุดที่แถว"'
+    );
+
+    // Try to send Telegram alert (best-effort)
+    if (typeof sendPipelineAlert_ === 'function') {
+      try {
+        sendPipelineAlert_('🛑 User กดหยุด Pipeline (Emergency Stop) — pipeline จะหยุดภายใน ~10-30 วินาที', 'WARN');
+      } catch (e) {
+        // ignore
+      }
+    }
+  } catch (e) {
+    logError('App', 'requestPipelineStop_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+/**
+ * clearPipelineStopSignal_UI — [V6.0.007] Menu wrapper to clear stop signal
+ *   Use this if:
+ *     - User pressed Emergency Stop by mistake (pipeline hasn't seen it yet)
+ *     - Pipeline crashed before clearing the signal
+ *     - Want to start a fresh pipeline run without the lingering stop signal
+ *
+ *   Idempotent — safe to call even if no signal is set.
+ */
+function clearPipelineStopSignal_UI() {
+  try {
+    const ui = SpreadsheetApp.getUi();
+    const confirm = ui.alert(
+      '🟢 ยกเลิก Stop Signal',
+      'กำลังจะ clear stop signal (PIPELINE_STOP_REQUESTED)\n\n' +
+        'ใช้เมนูนี้ถ้า:\n' +
+        '• กด Emergency Stop ไปแล้วแต่ pipeline ยังไม่หยุด (เปลี่ยนใจ)\n' +
+        '• Pipeline crash ก่อนจะ clear signal เอง\n' +
+        '• ต้องการรัน pipeline ใหม่โดยไม่มี signal ค้าง\n\n' +
+        'ยืนยันการ clear?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — signal ยังค้างอยู่');
+      return;
+    }
+
+    if (typeof clearPipelineStopSignal_ === 'function') {
+      clearPipelineStopSignal_();
+    } else {
+      // Defensive — direct fallback if helper not loaded
+      PropertiesService.getScriptProperties().deleteProperty('PIPELINE_STOP_REQUESTED');
+    }
+    logInfo('App', 'clearPipelineStopSignal_UI: stop signal CLEARED');
+
+    safeUiAlert_(
+      '✅ Stop signal cleared',
+      'Pipeline สามารถรันได้ปกติ\n\n' +
+        'ถ้า pipeline กำลังรันอยู่, มันจะไม่หยุดอีกต่อไป\n' +
+        'ถ้ายังไม่ได้รัน, สามารถเริ่มรันใหม่ได้ทันที'
+    );
+  } catch (e) {
+    logError('App', 'clearPipelineStopSignal_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+// ============================================================
+// SECTION: [V6.0.007] Backfill Alias Audit Fields UI
+// ============================================================
+
+/**
+ * backfillAliasAuditFields_UI — [V6.0.007] Menu wrapper to backfill
+ *   verified_at for existing HUMAN aliases that have empty audit fields.
+ *
+ *   Background:
+ *     V6.0.003 added 3 columns to M_ALIAS (verified_by, review_id, verified_at)
+ *     but the code didn't wire review_id through the Q_REVIEW MERGE chain
+ *     until V6.0.007. So HUMAN aliases created between V6.0.003 and V6.0.007
+ *     have empty verified_at.
+ *
+ *   This menu:
+ *     1. Confirms with user before running
+ *     2. Calls backfillAliasAuditFields() in 21_AliasService.gs
+ *     3. Shows detailed report: total scanned / backfilled / skipped / errors
+ *
+ *   Safe to run multiple times — idempotent (skips rows that already have
+ *   verified_at set).
+ */
+function backfillAliasAuditFields_UI() {
+  try {
+    const ui = SpreadsheetApp.getUi();
+    const confirm = ui.alert(
+      '🔄 Backfill Alias Audit Fields',
+      'กำลังจะ backfill verified_at สำหรับ M_ALIAS rows ที่ source=HUMAN แต่ verified_at ว่าง\n\n' +
+        'สาเหตุที่ต้อง backfill:\n' +
+        '• V6.0.003 เพิ่มคอลัมน์ verified_by/review_id/verified_at\n' +
+        '• แต่ code ไม่ได้ wire review_id ผ่าน Q_REVIEW MERGE chain จนถึง V6.0.007\n' +
+        '• ทำให้ HUMAN aliases ที่สร้างก่อน V6.0.007 มี verified_at ว่าง\n\n' +
+        'สิ่งที่จะทำ:\n' +
+        '• Scan M_ALIAS ทุกแถว\n' +
+        '• แถวที่ source=HUMAN + verified_at ว่าง → ตั้ง verified_at = created_at\n' +
+        '• แถวอื่นๆ (AUTO_ENRICH_FACT, HISTORY_ENRICH, MANUAL) → skip\n' +
+        '• review_id ไม่สามารถ backfill ได้ (Q_REVIEW rows อาจถูก clear ไปแล้ว)\n\n' +
+        'Safe: idempotent — รันซ้ำได้ จะ skip แถวที่ verified_at มีค่าแล้ว\n\n' +
+        'ยืนยันการ backfill?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่มีการ backfill');
+      return;
+    }
+
+    if (typeof backfillAliasAuditFields !== 'function') {
+      safeUiAlert_('❌ ไม่พบฟังก์ชัน backfillAliasAuditFields — ตรวจสอบว่า 21_AliasService.gs โหลดแล้ว');
+      return;
+    }
+
+    const result = backfillAliasAuditFields();
+
+    const lines = [];
+    lines.push('📊 Backfill Result\n');
+    lines.push('Total scanned: ' + result.totalScanned + ' rows');
+    lines.push('Backfilled: ' + result.backfilled + ' rows (verified_at set)');
+    lines.push('Skipped: ' + result.skipped + ' rows (non-HUMAN or already set)');
+
+    if (result.errors.length > 0) {
+      lines.push('\n❌ Errors (' + result.errors.length + '):');
+      result.errors.forEach(function (e) {
+        lines.push('• ' + e);
+      });
+    }
+
+    if (result.backfilled === 0 && result.errors.length === 0) {
+      lines.push('\n✅ ไม่มีแถวที่ต้อง backfill — ทุก HUMAN alias มี verified_at แล้ว');
+    } else if (result.backfilled > 0) {
+      lines.push('\n✅ Backfill เสร็จสิ้น — ตรวจสอบ M_ALIAS คอลัมน์ verified_at (K)');
+    }
+
+    safeUiAlert_(lines.join('\n'));
+  } catch (e) {
+    logError('App', 'backfillAliasAuditFields_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+// ============================================================
+// SECTION 6: [V6.0.007] Pipeline Preflight (Strict Mode UI)
+// ============================================================
+
+/**
+ * runPipelinePreflightStrict_UI — [V6.0.007] Menu wrapper to run pipeline preflight
+ *   in non-strict mode (display result) + offer strict-mode option (throw on issue).
+ *   Calls runPipelinePreflight() from 24_PipelineManager.gs which now supports:
+ *     - 6 dependency-aware checks (was 3)
+ *     - Structured report: { ready, issues, warnings, checks }
+ *     - Optional strict mode (throw on any issue)
+ *
+ *   This UI wrapper:
+ *     1. Runs preflight (non-strict) to display the report
+ *     2. Shows pass/fail/warn counts in alert
+ *     3. If issues exist, asks user if they want to abort (don't run pipeline)
+ */
+function runPipelinePreflightStrict_UI() {
+  try {
+    if (typeof runPipelinePreflight !== 'function') {
+      safeUiAlert_('❌ ไม่พบฟังก์ชัน runPipelinePreflight — ตรวจสอบว่า 24_PipelineManager.gs โหลดแล้ว');
+      return;
+    }
+
+    const result = runPipelinePreflight({ strict: false });
+
+    // Build report text
+    const lines = [];
+    lines.push('📊 Pipeline Preflight Report (V6.0.007)\n');
+    lines.push('Overall: ' + (result.ready ? '✅ READY' : '❌ NOT READY') + '\n');
+    lines.push(
+      'Checks: ' +
+        result.checks.length +
+        ' total | ' +
+        result.issues.length +
+        ' fail | ' +
+        result.warnings.length +
+        ' warn\n'
+    );
+
+    // Detail per check
+    lines.push('─── Detail ───');
+    result.checks.forEach(function (c) {
+      let icon = '⏭️'; // SKIP default
+      if (c.status === 'PASS') icon = '✅';
+      else if (c.status === 'FAIL') icon = '❌';
+      else if (c.status === 'WARN') icon = '⚠️';
+      lines.push(icon + ' ' + c.name + ': ' + c.detail);
+    });
+
+    // Issues (blocking)
+    if (result.issues.length > 0) {
+      lines.push('\n─── ❌ Blocking Issues (' + result.issues.length + ') ───');
+      result.issues.forEach(function (i) {
+        lines.push('• ' + i);
+      });
+    }
+
+    // Warnings (advisory)
+    if (result.warnings.length > 0) {
+      lines.push('\n─── ⚠️ Warnings (' + result.warnings.length + ') ───');
+      result.warnings.forEach(function (w) {
+        lines.push('• ' + w);
+      });
+    }
+
+    safeUiAlert_(lines.join('\n'));
+
+    // If not ready, log a warning (don't auto-abort — user may want to investigate)
+    if (!result.ready) {
+      logWarn(
+        'App',
+        'runPipelinePreflightStrict_UI: pipeline NOT READY — ' + result.issues.length + ' blocking issues'
+      );
+    }
+  } catch (e) {
+    logError('App', 'runPipelinePreflightStrict_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+// ============================================================
+// SECTION: [V6.0.012 P1.7] Test Match Dry Run UI
+// ============================================================
+
+/**
+ * runTestMatchDryRun_UI — [V6.0.012 P1.7] Menu wrapper for dry-run matching
+ *   รัน matching algorithm บน SOURCE data โดยไม่บันทึกผลลัพธ์ลง master sheets
+ *   ใช้สำหรับ comparison ก่อน/หลังเปลี่ยน matching algorithm
+ *
+ *   ขั้นตอน:
+ *     1. โหลด unprocessed source rows (limit 100)
+ *     2. สำหรับแต่ละ row: เรียก resolvePerson / resolvePlace / resolveGeo / makeMatchDecision
+ *        ⚠️ ไม่เรียก executeDecision() หรือ flushBatches_() — ไม่เขียน master sheets
+ *     3. เขียนผลลัพธ์ไป TEST_MATCH_RESULTS sheet (clear ก่อนเขียนใหม่)
+ *     4. แสดงสรุป: X rows tested, Y auto-match, Z review, W create-new
+ *
+ *   Safe: ไม่กระทบข้อมูลจริง รันซ้ำได้
+ */
+function runTestMatchDryRun_UI() {
+  try {
+    // RBAC: require admin to run dry-run (consistency with runFullPipeline)
+    if (typeof requirePermission_ === 'function') requirePermission_('action:run_pipeline');
+
+    const ui = SpreadsheetApp.getUi();
+    const confirm = ui.alert(
+      '🧪 Test Match (Dry Run)',
+      'รัน matching algorithm บน SOURCE data โดยไม่บันทึกผลลัพธ์ลง master sheets\n\n' +
+        'สิ่งที่จะทำ:\n' +
+        '• โหลด 100 unprocessed rows แรกจาก SOURCE\n' +
+        '• สำหรับแต่ละ row: resolve + makeMatchDecision (NO executeDecision, NO writes)\n' +
+        '• เขียนผลลัพธ์ไป TEST_MATCH_RESULTS sheet (clear ของเก่าก่อน)\n' +
+        '• แสดงสรุป: X rows, Y auto-match, Z review, W create-new\n\n' +
+        'Safe: ไม่กระทบข้อมูลจริง — รันซ้ำได้\n\n' +
+        'ยืนยันการรัน Dry Run?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่มีการรัน Dry Run');
+      return;
+    }
+
+    if (typeof runTestMatchDryRun_ !== 'function') {
+      safeUiAlert_('❌ ไม่พบฟังก์ชัน runTestMatchDryRun_ — ตรวจสอบว่า 10_MatchEngine.gs โหลดแล้ว');
+      return;
+    }
+
+    const maxRows = 100;
+    const summary = runTestMatchDryRun_(maxRows);
+
+    const lines = [];
+    lines.push('🧪 Test Match (Dry Run) — V6.0.012 P1.7\n');
+    lines.push('Rows tested: ' + summary.tested + ' / ' + summary.totalRows + ' (limit ' + maxRows + ')');
+    lines.push('Errors: ' + summary.errors);
+    lines.push('');
+    lines.push('─── Results ───');
+    lines.push('✅ AUTO_MATCH : ' + summary.autoMatched);
+    lines.push('🆕 CREATE_NEW : ' + summary.createdNew);
+    lines.push('👀 REVIEW     : ' + summary.queuedReview);
+    lines.push('');
+    lines.push('📊 Match rate: ' + summary.matchRate + '% (auto_match / tested)');
+    lines.push('⏱️  Elapsed: ' + summary.elapsedSec + 's');
+    lines.push('');
+    lines.push('ผลลัพธ์อยู่ในชีต "TEST_MATCH_RESULTS" — เปรียบเทียบก่อน/หลังเปลี่ยน algorithm ได้');
+
+    safeUiAlert_(lines.join('\n'));
+  } catch (e) {
+    logError('App', 'runTestMatchDryRun_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+// ============================================================
+// SECTION: [V6.0.017] Dry Run — Force All Rows (skip SYNC_STATUS filter)
+// ============================================================
+
+/**
+ * runTestMatchDryRunForceAll_UI — [V6.0.017] Menu wrapper for "force all rows" dry-run
+ *
+ *   ความแตกต่างจาก runTestMatchDryRun_UI ปกติ:
+ *   - ปกติ: โหลดเฉพาะ "unprocessed" rows (SYNC_STATUS ว่าง หรือไม่ใช่ SUCCESS/REVIEW)
+ *   - Force All: โหลดทุกแถวที่มี INVOICE_NO (ข้าม SYNC_STATUS filter ทั้งหมด)
+ *
+ *   ใช้เมื่อ: ทดสอบ algorithm ใหม่ซ้ำกับข้อมูลที่ processed แล้ว
+ *   โดยไม่ต้องรีเซ็ต SYNC_STATUS ของแถวจริงใน SOURCE sheet
+ *
+ *   Safe: ไม่กระทบข้อมูลจริง เหมือน Dry Run ปกติ — ไม่เขียน master sheets
+ *         ไม่อัปเดต SYNC_STATUS ของแถวที่ทดสอบ
+ *
+ *   ขั้นตอน:
+ *     1. ถามจำนวน rows ที่ต้องการทดสอบ (default 100, max 500)
+ *     2. เรียก runTestMatchDryRun_(maxRows, true) — forceAllRows=true
+ *     3. แสดงสรุปผล
+ */
+function runTestMatchDryRunForceAll_UI() {
+  try {
+    // RBAC: require admin to run dry-run (consistency with runFullPipeline)
+    if (typeof requirePermission_ === 'function') requirePermission_('action:run_pipeline');
+
+    const ui = SpreadsheetApp.getUi();
+
+    // [V6.0.017] ถามจำนวน rows ก่อน — default 100, max 500
+    //   เพราะ Force All อาจโหลดหลักแถว → ใช้เวลานาน (100 rows ≈ 1-2 นาที)
+    const rowsInput = ui.prompt(
+      '🧪 [V6.0.017] Dry Run — Force All Rows',
+      'ทดสอบ matching algorithm บนข้อมูลที่ processed แล้ว โดยข้าม SYNC_STATUS filter\n\n' +
+        '⚠️  ใช้เวลานานกว่า Dry Run ปกติ (~1.5s/row)\n' +
+        '⚠️  Cap สูงสุด 250 rows (GAS 6-min limit)\n\n' +
+        'แนะนำสำหรับ Snapshot Test: ใช้ 200 rows เพื่อเหลือ buffer\n\n' +
+        'กรุณาระบุจำนวนแถวที่ต้องการทดสอบ (1-250):',
+      ui.ButtonSet.OK_CANCEL
+    );
+    if (rowsInput.getSelectedButton() !== ui.Button.OK) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่มีการรัน Dry Run');
+      return;
+    }
+
+    let maxRows = parseInt(rowsInput.getResponseText(), 10);
+    if (isNaN(maxRows) || maxRows < 1) {
+      safeUiAlert_('❌ จำนวนแถวไม่ถูกต้อง — ต้องเป็นเลข 1-250');
+      return;
+    }
+    if (maxRows > 250) {
+      maxRows = 250; // [V6.0.029] cap at 250 (was 500) — 250 rows × 1.5s = 375s, fits in 360s GAS limit
+      //   เหตุผล: 400 rows timeout at 360s (V6.0.028 log) → ลด cap เหลือ 250
+      //   ถ้า user ต้องการมากกว่า 250 → รันหลายครั้ง แต่ TEST_MATCH_RESULTS ถูก clear แต่ละครั้ง
+    }
+
+    const confirm = ui.alert(
+      '🧪 [V6.0.017] Dry Run — Force All Rows',
+      'รัน matching algorithm บนข้อมูลที่ processed แล้ว (ข้าม SYNC_STATUS filter)\n\n' +
+        'สิ่งที่จะทำ:\n' +
+        '• โหลด ' +
+        maxRows +
+        ' rows แรกจาก SOURCE (ทุกแถวที่มี INVOICE_NO)\n' +
+        '• สำหรับแต่ละ row: resolve + makeMatchDecision (NO executeDecision, NO writes)\n' +
+        '• เขียนผลลัพธ์ไป TEST_MATCH_RESULTS sheet (clear ของเก่าก่อน)\n' +
+        '• แสดงสรุป: X rows, Y auto-match, Z review, W create-new\n\n' +
+        '⚠️  ใช้เวลา ~' +
+        Math.ceil(maxRows * 1.5) +
+        's โดยประมาณ\n\n' +
+        'Safe: ไม่กระทบข้อมูลจริง — รันซ้ำได้\n\n' +
+        'ยืนยันการรัน Dry Run (Force All)?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่มีการรัน Dry Run');
+      return;
+    }
+
+    if (typeof runTestMatchDryRun_ !== 'function') {
+      safeUiAlert_('❌ ไม่พบฟังก์ชัน runTestMatchDryRun_ — ตรวจสอบว่า 10_MatchEngine.gs โหลดแล้ว');
+      return;
+    }
+
+    SpreadsheetApp.getActiveSpreadsheet().toast('🧪 กำลังรัน Dry Run (Force All)...', APP_NAME, 60);
+
+    const summary = runTestMatchDryRun_(maxRows, true); // forceAllRows=true
+
+    const lines = [];
+    lines.push('🧪 [V6.0.017] Test Match (Dry Run — Force All Rows)\n');
+    lines.push('Mode: ข้าม SYNC_STATUS filter — ทดสอบทุกแถวที่มี INVOICE_NO');
+    lines.push('Rows tested: ' + summary.tested + ' / ' + summary.totalRows + ' (limit ' + maxRows + ')');
+    lines.push('Errors: ' + summary.errors);
+    if (summary.stoppedByTimeGuard) {
+      lines.push('');
+      lines.push('⚠️  ⚠️  ⚠️  TIME GUARD หยุดกลางทาง ⚠️  ⚠️  ⚠️');
+      lines.push('   หยุดที่ ' + summary.tested + '/' + summary.requestedRows + ' rows เพราะใกล้ 5-min limit');
+      lines.push('   แนะนำ: ลดจำนวน rows ในครั้งต่อไป (200 rows = safe)');
+      lines.push('   สำหรับ Snapshot Test: baseline และ post-refactor ต้องใช้จำนวน rows เท่ากัน');
+    }
+    lines.push('');
+    lines.push('─── Results ───');
+    lines.push('✅ AUTO_MATCH : ' + summary.autoMatched);
+    lines.push('🆕 CREATE_NEW : ' + summary.createdNew);
+    lines.push('👀 REVIEW     : ' + summary.queuedReview);
+    lines.push('');
+    lines.push('📊 Match rate: ' + summary.matchRate + '% (auto_match / tested)');
+    lines.push('⏱️  Elapsed: ' + summary.elapsedSec + 's');
+    lines.push('');
+    lines.push('ผลลัพธ์อยู่ในชีต "TEST_MATCH_RESULTS" — เปรียบเทียบก่อน/หลังเปลี่ยน algorithm ได้');
+    lines.push('');
+    lines.push('💡 เปรียบเทียบกับ Dry Run ปกติ (unprocessed only):');
+    lines.push('   ถ้า match rate เพิ่มขึ้น → algorithm ใหม่ช่วยแถวที่ processed แล้วด้วย');
+    lines.push('   ถ้า match rate เท่าเดิม → algorithm ใหม่ไม่มีผลเพิ่มเติม');
+
+    safeUiAlert_(lines.join('\n'));
+  } catch (e) {
+    logError('App', 'runTestMatchDryRunForceAll_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+// ============================================================
+// SECTION: [V6.0.016] Rule 5 Place-Only Impact Analyzer
+// ============================================================
+
+/**
+ * analyzeRule5PlaceOnlyImpact_UI — [V6.0.016] Menu wrapper
+ *   อ่าน TEST_MATCH_RESULTS sheet ที่เกิดจาก Dry Run ล่าสุด แล้วรายงาน:
+ *     - แถวที่เป็น AUTO_MATCH + GEO_ANCHOR + evidence='place|geo' (V6.0.015 behavior)
+ *       จะถูก downgrade เป็น REVIEW ทั้งหมดเมื่อ merge V6.0.016
+ *     - แถวที่เป็น REVIEW + reason='GEO_ANCHOR_PLACE_ONLY_NO_NAME' (V6.0.016 behavior ใหม่)
+ *
+ *   วิธีใช้:
+ *     1. รัน Dry Run บน V6.0.015 (main branch) → กดเมนูนี้ → ดู count แถวที่จะถูก downgrade
+ *     2. Merge PR V6.0.016 → รัน Dry Run อีกครั้ง → กดเมนูนี้ → ดู count แถวใหม่ใน REVIEW
+ */
+function analyzeRule5PlaceOnlyImpact_UI() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.TEST_MATCH_RESULTS);
+
+    if (!sheet || sheet.getLastRow() < 2) {
+      safeUiAlert_(
+        'ℹ️ ไม่มีข้อมูลใน TEST_MATCH_RESULTS\n\n' + 'กรุณารัน "🧪 [V6] Test Match (Dry Run)" ก่อน แล้วค่อยเรียกเมนูนี้'
+      );
+      return;
+    }
+
+    const lastRow = sheet.getLastRow();
+    const lastCol = Math.max(8, sheet.getLastColumn());
+    const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+
+    // Counters
+    let totalRows = 0;
+    let v6015PlaceOnly = 0; // AUTO_MATCH + GEO_ANCHOR + evidence starts with 'place|geo'
+    let v6016PlaceOnlyReview = 0; // REVIEW + reason='GEO_ANCHOR_PLACE_ONLY_NO_NAME'
+    let v6015GeoPersonAnchor = 0; // AUTO_MATCH + GEO_ANCHOR + evidence starts with 'name|geo' (unchanged)
+    let autoMatchTotal = 0;
+    let reviewTotal = 0;
+    let createNewTotal = 0;
+    let errorTotal = 0;
+
+    // Detail rows (up to 10 for display)
+    const affectedRows = [];
+
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const sourceRow = row[TEST_MATCH_IDX.SOURCE_ROW];
+      if (!sourceRow) continue;
+      totalRows++;
+
+      const action = String(row[TEST_MATCH_IDX.ACTION] || '').trim();
+      const reason = String(row[TEST_MATCH_IDX.REASON] || '').trim();
+      const evidence = String(row[TEST_MATCH_IDX.EVIDENCE] || '').trim();
+      const confidence = row[TEST_MATCH_IDX.CONFIDENCE] || 0;
+      const personName = String(row[TEST_MATCH_IDX.PERSON_NAME] || '').trim();
+      const placeName = String(row[TEST_MATCH_IDX.PLACE_NAME] || '').trim();
+
+      if (action === 'AUTO_MATCH') autoMatchTotal++;
+      else if (action === 'REVIEW') reviewTotal++;
+      else if (action === 'CREATE_NEW') createNewTotal++;
+      else if (action === 'ERROR') errorTotal++;
+
+      // V6.0.015 pattern: AUTO_MATCH + GEO_ANCHOR + evidence starts with 'place|geo'
+      //   (no 'name' in evidence = person didn't match, only place+geo did)
+      if (action === 'AUTO_MATCH' && reason === 'GEO_ANCHOR' && evidence.indexOf('place|geo') === 0) {
+        v6015PlaceOnly++;
+        if (affectedRows.length < 10) {
+          affectedRows.push({
+            sourceRow: sourceRow,
+            person: personName.substring(0, 40),
+            place: placeName.substring(0, 40),
+            confidence: confidence
+          });
+        }
+      }
+
+      // V6.0.015 pattern: AUTO_MATCH + GEO_ANCHOR + evidence starts with 'name|geo'
+      //   (person matched + geo — this is UNCHANGED in V6.0.016)
+      if (action === 'AUTO_MATCH' && reason === 'GEO_ANCHOR' && evidence.indexOf('name|geo') === 0) {
+        v6015GeoPersonAnchor++;
+      }
+
+      // V6.0.016 pattern: REVIEW + GEO_ANCHOR_PLACE_ONLY_NO_NAME
+      //   (this is the new behavior after V6.0.016 is merged)
+      if (action === 'REVIEW' && reason === 'GEO_ANCHOR_PLACE_ONLY_NO_NAME') {
+        v6016PlaceOnlyReview++;
+      }
+    }
+
+    const lines = [];
+    lines.push('🔍 [V6.0.016] Rule 5 Place-Only Impact Analyzer\n');
+    lines.push('อ่านจาก TEST_MATCH_RESULTS: ' + totalRows + ' แถว\n');
+    lines.push('─── สรุปผลรวม ───');
+    lines.push('✅ AUTO_MATCH : ' + autoMatchTotal);
+    lines.push('👀 REVIEW     : ' + reviewTotal);
+    lines.push('🆕 CREATE_NEW : ' + createNewTotal);
+    if (errorTotal > 0) lines.push('❌ ERROR      : ' + errorTotal);
+    lines.push('');
+    lines.push('─── Rule 5 Breakdown ───');
+    lines.push('📌 V6.0.015 AUTO_MATCH (geo+person) [ไม่เปลี่ยน]: ' + v6015GeoPersonAnchor + ' แถว');
+    lines.push('⚠️  V6.0.015 AUTO_MATCH (geo+place only) → V6.0.016 REVIEW: ' + v6015PlaceOnly + ' แถว');
+    lines.push('📌 V6.0.016 REVIEW (GEO_ANCHOR_PLACE_ONLY_NO_NAME): ' + v6016PlaceOnlyReview + ' แถว');
+    lines.push('');
+    if (v6015PlaceOnly > 0) {
+      lines.push('─── ตัวอย่างแถวที่จะถูก downgrade (สูงสุด 10) ───');
+      affectedRows.forEach((r) => {
+        lines.push(
+          '• Row ' + r.sourceRow + ' | conf=' + r.confidence + ' | name="' + r.person + '" | place="' + r.place + '"'
+        );
+      });
+      lines.push('');
+      lines.push('📝 คำอธิบาย: แถวเหล่านี้ใน V6.0.015 match ด้วย geo+place อย่างเดียว (ไม่มี person)');
+      lines.push('   ใน V6.0.016 จะถูก downgrade เป็น REVIEW เพราะ [24] มาจากพิกัด [4]');
+      lines.push('   ทำให้ place+geo เป็นสัญญาณเดียวกัน ไม่ใช่ 2 หลักฐานอิสระ');
+      lines.push('   ต้องมีชื่อ [12] เป็นตัวยืนยัน "ร้านไหน" ด้วยจึงจะ AUTO_MATCH ได้');
+    } else if (v6016PlaceOnlyReview > 0) {
+      lines.push('✅ ตรวจพบแถว V6.0.016 ใหม่ (GEO_ANCHOR_PLACE_ONLY_NO_NAME): ' + v6016PlaceOnlyReview + ' แถว');
+      lines.push('   แสดงว่า V6.0.016 ทำงานแล้ว — แถวเหล่านี้เคยเป็น AUTO_MATCH ใน V6.0.015');
+      lines.push('   แต่ถูก downgrade เป็น REVIEW เพื่อความถูกต้องใน V6.0.016');
+    } else {
+      lines.push('ℹ️ ไม่พบแถวที่เกี่ยวข้อง — อาจจะ:');
+      lines.push('   - ยังไม่ได้รัน Dry Run บน V6.0.015 หรือ V6.0.016');
+      lines.push('   - ข้อมูลใน SOURCE ไม่มีเคส geo+place only');
+    }
+
+    safeUiAlert_(lines.join('\n'));
+  } catch (e) {
+    logError('App', 'analyzeRule5PlaceOnlyImpact_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+// ============================================================
+// SECTION: [V6.0.028] Snapshot Test UI (Phase 2 refactoring safety)
+// ============================================================
+
+/**
+ * snapshotSaveBaseline_UI — [V6.0.028] Menu wrapper — save current TEST_MATCH_RESULTS as baseline
+ *   ใช้ก่อน refactor — บันทึก decisions ปัจจุบันเป็น "golden output"
+ *   หลัง refactor ให้รัน Dry Run ใหม่ + กด Compare เพื่อตรวจ regression
+ */
+function snapshotSaveBaseline_UI() {
+  try {
+    if (typeof requirePermission_ === 'function') requirePermission_('action:run_pipeline');
+
+    const ui = SpreadsheetApp.getUi();
+    const confirm = ui.alert(
+      '📸 [V6.0.028] Snapshot — Save Baseline',
+      'บันทึก TEST_MATCH_RESULTS ปัจจุบันเป็น baseline\n\n' +
+        '⚠️  ถ้ามี baseline เดิมอยู่ → จะถูก overwrite\n\n' +
+        'วิธีใช้:\n' +
+        '1. รัน Dry Run (Force All 400 rows) บนเวอร์ชันปัจจุบัน\n' +
+        '2. กดเมนูนี้เพื่อบันทึก baseline\n' +
+        '3. Refactor code (เช่น แตก makeMatchDecision)\n' +
+        '4. รัน Dry Run (Force All 400 rows) อีกครั้ง\n' +
+        '5. กด "Snapshot — Compare" เพื่อตรวจ regression\n\n' +
+        'ยืนยันบันทึก baseline?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่บันทึก baseline');
+      return;
+    }
+
+    const result = snapshotSaveBaseline_();
+    if (result.ok) {
+      safeUiAlert_('✅ ' + result.message);
+    } else {
+      safeUiAlert_('❌ ' + result.message);
+    }
+  } catch (e) {
+    logError('App', 'snapshotSaveBaseline_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+/**
+ * snapshotCompare_UI — [V6.0.028] Menu wrapper — compare current vs baseline
+ *   หลัง refactor — เปรียบเทียบ decisions ว่าเหมือนเดิมหรือไม่
+ */
+function snapshotCompare_UI() {
+  try {
+    if (typeof requirePermission_ === 'function') requirePermission_('action:run_pipeline');
+
+    const result = snapshotCompare_();
+    if (!result.ok && result.message.indexOf('ไม่พบ baseline') === 0) {
+      safeUiAlert_('❌ ' + result.message);
+      return;
+    }
+
+    const lines = [];
+    lines.push('📸 [V6.0.028] Snapshot — Compare Results\n');
+    lines.push('─── Baseline ───');
+    lines.push('Version: ' + (result.baselineVersion || 'unknown'));
+    lines.push('Saved at: ' + (result.baselineSavedAt || 'unknown'));
+    lines.push('Rows: ' + result.baselineRows);
+    lines.push('');
+    lines.push('─── Current ───');
+    lines.push('Rows: ' + result.currentRows);
+    lines.push('');
+    lines.push('─── Result ───');
+    lines.push(result.message);
+    lines.push('');
+
+    if (result.differences.length > 0) {
+      lines.push('─── Differences (สูงสุด 20) ───');
+      const showCount = Math.min(20, result.differences.length);
+      for (let i = 0; i < showCount; i++) {
+        const d = result.differences[i];
+        if (d.type === 'CHANGED') {
+          lines.push('• Row ' + d.sourceRow + ' [CHANGED]:');
+          lines.push(
+            '    baseline: ' + d.baseline.action + '/' + d.baseline.reason + ' (conf=' + d.baseline.confidence + ')'
+          );
+          lines.push(
+            '    current:  ' + d.current.action + '/' + d.current.reason + ' (conf=' + d.current.confidence + ')'
+          );
+        } else if (d.type === 'NEW_IN_CURRENT') {
+          lines.push('• Row ' + d.sourceRow + ' [NEW — not in baseline]: ' + d.current[1] + '/' + d.current[2]);
+        } else if (d.type === 'MISSING_IN_CURRENT') {
+          lines.push('• Row ' + d.sourceRow + ' [MISSING — was in baseline]: ' + d.baseline[1] + '/' + d.baseline[2]);
+        }
+      }
+      if (result.differences.length > 20) {
+        lines.push('... และอีก ' + (result.differences.length - 20) + ' differences');
+      }
+      lines.push('');
+      lines.push('⚠️  พบ regression — อย่า merge จนกว่าจะแก้ครบ');
+    } else {
+      lines.push('✅ ปลอดภัย — สามารถ merge refactor ได้');
+    }
+
+    safeUiAlert_(lines.join('\n'));
+  } catch (e) {
+    logError('App', 'snapshotCompare_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}
+
+/**
+ * snapshotClearBaseline_UI — [V6.0.028] Menu wrapper — clear baseline
+ *   ใช้หลัง merge refactor PR — ล้าง baseline เก่าเพื่อเริ่ม cycle ใหม่
+ */
+function snapshotClearBaseline_UI() {
+  try {
+    if (typeof requirePermission_ === 'function') requirePermission_('action:run_pipeline');
+
+    const ui = SpreadsheetApp.getUi();
+    const confirm = ui.alert(
+      '📸 [V6.0.028] Snapshot — Clear Baseline',
+      'ล้าง baseline ออกจาก PropertiesService\n\n' +
+        'ใช้หลัง merge refactor PR — เพื่อเริ่ม cycle ใหม่\n\n' +
+        'ยืนยันล้าง baseline?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) {
+      safeUiAlert_('ℹ️ ยกเลิก — ไม่ล้าง baseline');
+      return;
+    }
+
+    const result = snapshotClearBaseline_();
+    safeUiAlert_(result.ok ? '✅ ' + result.message : '❌ ' + result.message);
+  } catch (e) {
+    logError('App', 'snapshotClearBaseline_UI failed: ' + e.message, e);
+    safeUiAlert_('❌ ล้มเหลว: ' + e.message);
+  }
+}

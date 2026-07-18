@@ -1,0 +1,426 @@
+<script>
+  /**
+   * MobileActionsView — [V6.0.021] Mobile menu สำหรับ WebApp
+   *   แสดงปุ่มทั้งหมดจาก action registry (mirror Google Sheet menu)
+   *   แบ่งตาม group: top, group1, group2, system
+   *   ปุ่ม danger/warning มี two-press confirm pattern
+   *
+   *   โหลด registry → render → bind clicks → execute via api.runWebAppAction
+   */
+  globalThis.MobileActionsView = (function () {
+    let registry = [];
+    let pendingAction = null; // action ที่รอ confirm ครั้งที่ 2
+    let pendingBtn = null;
+
+    // ──────────────────────────────────────────────────────────
+    // Helpers
+    // ──────────────────────────────────────────────────────────
+
+    function showToast_(title, message, type, duration) {
+      if (globalThis.LMDSApp && globalThis.LMDSApp.showToast) {
+        globalThis.LMDSApp.showToast(title, message, type, duration);
+      } else {
+        console.log('[' + type + '] ' + title + ': ' + message);
+      }
+    }
+
+    function renderIcons_() {
+      if (typeof lucide !== 'undefined' && lucide.createIcons) {
+        lucide.createIcons();
+      }
+    }
+
+    // [V6.0.024] escapeHtml_ — alias to shared ViewHelpers.escapeHtml (DRY)
+    //   Was: duplicated 7 times across views — now centralized in ViewHelpers.html
+    const escapeHtml_ = globalThis.ViewHelpers.escapeHtml;
+
+    // ──────────────────────────────────────────────────────────
+    // Loading + Error states
+    // ──────────────────────────────────────────────────────────
+
+    function renderLoading_(container) {
+      container.innerHTML =
+        '<div class="p-8 text-center text-gray-500">' +
+        '<div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-3"></div>' +
+        '<div>กำลังโหลดเมนู...</div>' +
+        '</div>';
+    }
+
+    function renderError_(container, message) {
+      container.innerHTML =
+        '<div class="p-8 text-center text-red-600">' +
+        '<div class="text-4xl mb-3">⚠️</div>' +
+        '<div class="font-medium mb-2">ล้มเหลว</div>' +
+        '<div class="text-sm text-gray-600">' +
+        escapeHtml_(message) +
+        '</div>' +
+        '<button type="button" onclick="globalThis.MobileActionsView.render()" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">ลองใหม่</button>' +
+        '</div>';
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Group labels
+    // ──────────────────────────────────────────────────────────
+
+    function groupLabel_(group) {
+      switch (group) {
+        case 'top':
+          return '🚀 เมนูหลัก';
+        case 'group1':
+          return '🟩 กลุ่ม 1: ล้างข้อมูล & Master';
+        case 'group2':
+          return '🟦 กลุ่ม 2: งานประจำวัน (SCG)';
+        case 'system':
+          return '🔧 ระบบ & ตั้งค่า';
+        default:
+          return group;
+      }
+    }
+
+    function groupOrder_(group) {
+      switch (group) {
+        case 'top':
+          return 0;
+        case 'group1':
+          return 1;
+        case 'group2':
+          return 2;
+        case 'system':
+          return 3;
+        default:
+          return 9;
+      }
+    }
+
+    function dangerColor_(danger) {
+      switch (danger) {
+        case 'safe':
+          return {
+            bg: 'bg-blue-50 hover:bg-blue-100 border-blue-200',
+            text: 'text-blue-700',
+            icon: 'text-blue-500'
+          };
+        case 'warning':
+          return {
+            bg: 'bg-yellow-50 hover:bg-yellow-100 border-yellow-200',
+            text: 'text-yellow-800',
+            icon: 'text-yellow-600'
+          };
+        case 'danger':
+          return {
+            bg: 'bg-red-50 hover:bg-red-100 border-red-200',
+            text: 'text-red-700',
+            icon: 'text-red-600'
+          };
+        default:
+          return {
+            bg: 'bg-gray-50 hover:bg-gray-100 border-gray-200',
+            text: 'text-gray-700',
+            icon: 'text-gray-500'
+          };
+      }
+    }
+
+    function dangerBadge_(danger) {
+      switch (danger) {
+        case 'safe':
+          return '<span class="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">safe</span>';
+        case 'warning':
+          return '<span class="text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800">warning</span>';
+        case 'danger':
+          return '<span class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700">danger</span>';
+        default:
+          return '';
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Render buttons grouped by category
+    // ──────────────────────────────────────────────────────────
+
+    function renderActions_(container, registryData) {
+      // Group actions by their group field
+      const groups = {};
+      registryData.forEach(function (action) {
+        if (!groups[action.group]) groups[action.group] = [];
+        groups[action.group].push(action);
+      });
+
+      // Sort groups by order
+      const sortedGroupKeys = Object.keys(groups).sort(function (a, b) {
+        return groupOrder_(a) - groupOrder_(b);
+      });
+
+      let html = '';
+      html += '<div class="p-4 space-y-6">';
+
+      // Header
+      html +=
+        '<div class="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">' +
+        '<div class="flex items-center gap-2 text-blue-800 font-medium">' +
+        '<i data-lucide="smartphone" class="w-5 h-5"></i>' +
+        '<span>เมนูการทำงาน (Mobile Actions)</span>' +
+        '</div>' +
+        '<div class="text-xs text-blue-600 mt-1">' +
+        'ปุ่มทั้งหมดเหมือนใน Google Sheet — ใช้ได้จากมือถือ ' +
+        registryData.length +
+        ' actions' +
+        '</div>' +
+        '</div>';
+
+      sortedGroupKeys.forEach(function (groupKey) {
+        const actions = groups[groupKey];
+        html += '<div>';
+        html += '<h3 class="text-sm font-semibold text-gray-700 mb-2 px-1">' + groupLabel_(groupKey) + '</h3>';
+        html += '<div class="space-y-2">';
+
+        actions.forEach(function (action) {
+          const colors = dangerColor_(action.danger);
+          html += '<button type="button" data-action-id="' + escapeHtml_(action.id) + '" ';
+          html +=
+            'class="mobile-action-btn w-full text-left p-3 border rounded-lg transition-colors ' +
+            colors.bg +
+            ' ' +
+            colors.text +
+            '">';
+          html += '<div class="flex items-start gap-3">';
+          html +=
+            '<i data-lucide="' +
+            escapeHtml_(action.icon || 'circle') +
+            '" class="w-5 h-5 mt-0.5 flex-shrink-0 ' +
+            colors.icon +
+            '"></i>';
+          html += '<div class="flex-1 min-w-0">';
+          html += '<div class="flex items-center gap-2">';
+          html += '<span class="font-medium text-sm">' + escapeHtml_(action.label) + '</span>';
+          html += dangerBadge_(action.danger);
+          html += '</div>';
+          if (action.description) {
+            html += '<div class="text-xs text-gray-500 mt-0.5">' + escapeHtml_(action.description) + '</div>';
+          }
+          html += '</div>';
+          html += '</div>';
+          html += '</button>';
+        });
+
+        html += '</div>';
+        html += '</div>';
+      });
+
+      // Footer note
+      html +=
+        '<div class="text-xs text-gray-400 text-center py-4 border-t border-gray-200">' +
+        '💡 ปุ่ม warning/danger ต้องกดสองครั้งเพื่อยืนยัน<br>' +
+        'V6.0.021 — Mobile Actions View' +
+        '</div>';
+
+      html += '</div>';
+
+      container.innerHTML = html;
+
+      // Bind click handlers
+      const btns = container.querySelectorAll('.mobile-action-btn');
+      btns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          const actionId = btn.dataset.actionId;
+          handleActionClick_(actionId, btn);
+        });
+      });
+
+      // Render Lucide icons
+      renderIcons_();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Click handler — two-press confirm for warning/danger
+    // ──────────────────────────────────────────────────────────
+
+    function handleActionClick_(actionId, btn) {
+      const action = registry.find(function (a) {
+        return a.id === actionId;
+      });
+      if (!action) {
+        showToast_('ล้มเหลว', 'ไม่พบ action: ' + actionId, 'error', 3000);
+        return;
+      }
+
+      // Safe actions — execute immediately
+      if (action.danger === 'safe') {
+        executeAction_(action, btn);
+        return;
+      }
+
+      // Warning/Danger — two-press confirm
+      if (pendingAction === actionId) {
+        // Second press — execute
+        clearPending_(true);
+        executeAction_(action, btn);
+      } else {
+        // First press — show confirm
+        clearPending_(false);
+        pendingAction = actionId;
+        pendingBtn = btn;
+
+        const confirmText = action.confirmMsg || 'กดอีกครั้งเพื่อยืนยัน';
+        const originalHTML = btn.innerHTML;
+        btn.dataset.originalHtml = originalHTML;
+
+        const warnColor =
+          action.danger === 'danger'
+            ? 'bg-red-600 text-white hover:bg-red-700'
+            : 'bg-yellow-500 text-white hover:bg-yellow-600';
+
+        btn.className =
+          'mobile-action-btn w-full text-left p-3 border-2 border-red-400 rounded-lg transition-colors ' +
+          warnColor +
+          ' animate-pulse';
+        btn.innerHTML =
+          '<div class="flex items-center gap-3">' +
+          '<i data-lucide="alert-triangle" class="w-5 h-5"></i>' +
+          '<div class="flex-1">' +
+          '<div class="font-medium text-sm">⚠️ กดอีกครั้งเพื่อยืนยัน</div>' +
+          '<div class="text-xs mt-0.5 opacity-90">' +
+          escapeHtml_(confirmText) +
+          '</div>' +
+          '<div class="text-xs mt-1 opacity-75">กดที่อื่นเพื่อยกเลิก</div>' +
+          '</div>' +
+          '</div>';
+
+        renderIcons_();
+
+        // Auto-clear pending after 5 seconds
+        setTimeout(function () {
+          if (pendingAction === actionId) {
+            clearPending_(false);
+          }
+        }, 5000);
+      }
+    }
+
+    function clearPending_(restoreBtn) {
+      if (pendingBtn && restoreBtn && pendingBtn.dataset.originalHtml) {
+        pendingBtn.innerHTML = pendingBtn.dataset.originalHtml;
+        // Restore class — find action to get danger color
+        const action = registry.find(function (a) {
+          return a.id === pendingAction;
+        });
+        if (action) {
+          const colors = dangerColor_(action.danger);
+          pendingBtn.className =
+            'mobile-action-btn w-full text-left p-3 border rounded-lg transition-colors ' +
+            colors.bg +
+            ' ' +
+            colors.text;
+        }
+        delete pendingBtn.dataset.originalHtml;
+        renderIcons_();
+      }
+      pendingAction = null;
+      pendingBtn = null;
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Execute action via API
+    // ──────────────────────────────────────────────────────────
+
+    async function executeAction_(action, btn) {
+      // Disable button + show loading
+      const originalHTML = btn.innerHTML;
+      btn.disabled = true;
+      btn.className = 'mobile-action-btn w-full text-left p-3 border rounded-lg bg-gray-100 text-gray-500 cursor-wait';
+      btn.innerHTML =
+        '<div class="flex items-center gap-3">' +
+        '<div class="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-gray-500"></div>' +
+        '<div class="font-medium text-sm">กำลังรัน ' +
+        escapeHtml_(action.label) +
+        '...</div>' +
+        '</div>';
+
+      // Full-screen overlay (block UI during long-running actions)
+      const overlay = document.createElement('div');
+      overlay.id = 'mobile-action-overlay';
+      overlay.style.cssText =
+        'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+      overlay.innerHTML =
+        '<div class="bg-white rounded-lg p-6 max-w-sm mx-4 text-center shadow-xl">' +
+        '<div class="inline-block animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mb-3"></div>' +
+        '<div class="font-medium text-gray-800">กำลังรัน ' +
+        escapeHtml_(action.label) +
+        '</div>' +
+        '<div class="text-xs text-gray-500 mt-1">โปรดรอ... อาจใช้เวลา 1-5 นาที</div>' +
+        '</div>';
+      document.body.appendChild(overlay);
+
+      // Click outside to dismiss pending (but not during execution)
+      document.addEventListener('click', dismissPendingOnOutside_, true);
+
+      try {
+        const params = {};
+        // Special case: Force All Dry Run — default maxRows=100
+        if (action.id === 'runTestMatchDryRunForceAll') {
+          params.maxRows = 100;
+        }
+
+        const result = await globalThis.api.runWebAppAction(action.id, params);
+
+        if (result && result.ok) {
+          showToast_('✅ สำเร็จ', result.message || action.label, 'success', 5000);
+        } else {
+          const errMsg = (result && result.message) || 'ไม่ทราบสาเหตุ';
+          showToast_('❌ ล้มเหลว', errMsg, 'error', 8000);
+        }
+      } catch (err) {
+        showToast_('❌ ล้มเหลว', err.message || 'Network error', 'error', 8000);
+      } finally {
+        // Remove overlay
+        const ov = document.getElementById('mobile-action-overlay');
+        if (ov) ov.remove();
+
+        // Restore button
+        btn.disabled = false;
+        btn.innerHTML = originalHTML;
+        const colors = dangerColor_(action.danger);
+        btn.className =
+          'mobile-action-btn w-full text-left p-3 border rounded-lg transition-colors ' + colors.bg + ' ' + colors.text;
+        renderIcons_();
+
+        document.removeEventListener('click', dismissPendingOnOutside_, true);
+      }
+    }
+
+    function dismissPendingOnOutside_(e) {
+      if (!pendingAction) return;
+      if (pendingBtn && pendingBtn.contains(e.target)) return;
+      clearPending_(true);
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Public API
+    // ──────────────────────────────────────────────────────────
+
+    return {
+      /**
+       * render — โหลด registry + render ปุ่มทั้งหมด
+       * @param {Object} data — app data (unused, for signature compat)
+       * @param {HTMLElement} container — render target
+       */
+      render: async function (data, container) {
+        if (!container) container = document.getElementById('viewContainer');
+        if (!container) return;
+
+        renderLoading_(container);
+
+        try {
+          registry = await globalThis.api.getWebAppActionRegistry();
+          if (!registry || registry.length === 0) {
+            renderError_(container, 'ไม่พบ action ใน registry — ตรวจ 28_WebAppActions.gs');
+            return;
+          }
+          renderActions_(container, registry);
+        } catch (err) {
+          renderError_(container, err.message || 'โหลด registry ล้มเหลว');
+        }
+      }
+    };
+  })();
+</script>

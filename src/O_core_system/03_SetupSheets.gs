@@ -1,0 +1,529 @@
+/**
+ * VERSION: 6.0.069
+ * FILE: 03_SetupSheets.gs
+ * LMDS V6.0 — Sheet Setup & Configuration Service
+ * ===================================================
+ * PURPOSE:
+ *   สร้างโครงสร้างชีตเริ่มต้นทั้งหมดในระบบ LMDS
+ *   เป็น Single Source of Truth สำหรับโครงสร้าง Spreadsheet
+ *   ยังเป็นที่ตั้งของ logInfo/logWarn/logError/logDebug (System Logger)
+ *
+ * CHANGELOG:
+ *   See /docs/CHANGELOG.md for full history.
+ *
+ * DEPENDENCIES:
+ *   REQUIRES: (Load Order)
+ *     - 01_Config.gs            (SHEET.* names, ENV constants)
+ *     - 02_Schema.gs            (SCHEMA definitions for column setup)
+ *     - 14_Utils.gs             (safeUiAlert_, hash helpers)
+ *     - 27_RbacService.gs       (isAuthorizedUser_ for protected setup menu)
+ *   CALLS: (Invokes)
+ *     - validateConfig()                          → 01_Config.gs
+ *     - isAuthorizedUser_()                       → 27_RbacService.gs
+ *     - safeUiAlert_()                            → 14_Utils.gs
+ *   EXPORTS TO:
+ *     - 00_App.gs (setupAllSheets, setupEnvironment menus)
+ *     - All Service files (getSheetByNameSafe_, logInfo/logWarn/logError/logDebug)
+ *     - 14_Utils.gs (log functions used in util helpers)
+ *   SHEETS ACCESSED:
+ *     - All sheets (Write — setupAllSheets creates columns/formatting on every SHEET.* listed in 01_Config)
+ *     - SHEET.SYS_LOG            (Write — logInfo/logWarn/logError append rows)
+ *   TRIGGERS: None
+ *
+ * ARCHITECTURE:
+ *   Group 0 — Core infrastructure (config, schema, utils, audit, RBAC, web app gateway)
+ * ===================================================
+ */
+
+// ============================================================
+// MODULE-LEVEL GUARD: prevent clearOldLogs_() recursion
+// (logInfo → writeLog_ → clearOldLogs_ → logInfo → …)
+// ============================================================
+let _isClearingOldLogs_ = false;
+
+// [PERF-012] Log Buffer — สะสม log entries ใน RAM แล้ว flush เป็น batch ทุก 50 entries
+let _LOG_BUFFER = [];
+const _LOG_BUFFER_LIMIT = 50;
+
+// ============================================================
+// SECTION 1: setupAllSheets — Entry Point
+// ============================================================
+
+/**
+ * setupAllSheets — สร้างชีตทั้งหมดที่จำเป็น
+ * [ADD v003] LockService กัน setup ซ้ำซ้อน
+ */
+function setupAllSheets() {
+  // [SEC-002] Authorization Guard
+  if (typeof isAuthorizedUser_ === 'function' && !isAuthorizedUser_()) {
+    safeUiAlert_('🔒 คุณไม่มีสิทธิ์สร้าง/แก้ไขชีต\nกรุณาติดต่อ Admin');
+    return;
+  }
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(5000)) {
+    // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+    safeUiAlert_('⚠️ Setup กำลังทำงานอยู่แล้ว\nกรุณารอให้เสร็จก่อน');
+    return;
+  }
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    ss.toast('🏗️ กำลังตรวจสอบและสร้างชีตทั้งหมด...', APP_NAME, -1);
+
+    setupGroupOneSheets_(ss);
+    setupGroupTwoSheets_(ss);
+    setupSystemSheets_(ss);
+
+    // ตรวจสอบ Schema หลัง Setup
+    try {
+      validateSchemaConsistency();
+    } catch (e) {
+      // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+      safeUiAlert_(`⚠️ Schema Warning:\n${e.message}`);
+    }
+
+    ss.toast('✅ Setup เสร็จสมบูรณ์!', APP_NAME, 5);
+    // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+    safeUiAlert_(
+      '✅ Setup เสร็จสมบูรณ์!\n\n' +
+        'ชีตที่ถูกสร้าง/ตรวจสอบ:\n' +
+        Object.values(SHEET)
+          .map((n) => `  • ${n}`)
+          .join('\n')
+    );
+  } catch (err) {
+    logError('SetupSheets', `setupAllSheets ล้มเหลว: ${err.message}`, err);
+    // [FIX BUG-04 v5.5.001] เปลี่ยน ui.alert() เป็น safeUiAlert_()
+    safeUiAlert_(`❌ Setup ล้มเหลว:\n${err.message}`);
+    throw err;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ============================================================
+// SECTION 2: Group 1 — Master Data Sheets
+// ============================================================
+
+function setupGroupOneSheets_(ss) {
+  // [FIX v003] ทุก call ใช้ getSheetHeaders(SHEET.xxx) แทน SCHEMA.xxx
+  createSheetIfMissing_(ss, SHEET.M_PERSON, getSheetHeaders(SHEET.M_PERSON));
+
+  createSheetIfMissing_(ss, SHEET.M_PERSON_ALIAS, getSheetHeaders(SHEET.M_PERSON_ALIAS));
+
+  createSheetIfMissing_(ss, SHEET.M_PLACE, getSheetHeaders(SHEET.M_PLACE));
+
+  createSheetIfMissing_(ss, SHEET.M_PLACE_ALIAS, getSheetHeaders(SHEET.M_PLACE_ALIAS));
+
+  // [NEW v5.4.000] สร้างชีต M_ALIAS สำหรับ Hybrid Alias Architecture
+  createSheetIfMissing_(ss, SHEET.M_ALIAS, getSheetHeaders(SHEET.M_ALIAS));
+
+  createSheetIfMissing_(ss, SHEET.M_GEO_POINT, getSheetHeaders(SHEET.M_GEO_POINT));
+
+  createSheetIfMissing_(ss, SHEET.M_DESTINATION, getSheetHeaders(SHEET.M_DESTINATION));
+
+  createSheetIfMissing_(ss, SHEET.FACT_DELIVERY, getSheetHeaders(SHEET.FACT_DELIVERY));
+
+  createSheetIfMissing_(ss, SHEET.Q_REVIEW, getSheetHeaders(SHEET.Q_REVIEW));
+
+  createSheetIfMissing_(ss, SHEET.RPT_QUALITY, getSheetHeaders(SHEET.RPT_QUALITY));
+
+  // [REMOVE v5.5.013] MAPS_CACHE sheet ไม่ถูกสร้างอีกต่อไป — ไม่ได้ใช้ใน pipeline
+
+  logInfo('SetupSheets', 'Group 1 Sheets เสร็จสิ้น');
+}
+
+// ============================================================
+// SECTION 3: Group 2 — Daily Ops Sheets
+// ============================================================
+
+function setupGroupTwoSheets_(ss) {
+  createSheetIfMissing_(ss, SHEET.DAILY_JOB, getSheetHeaders(SHEET.DAILY_JOB));
+
+  setupInputSheet_(ss);
+
+  createSheetIfMissing_(ss, SHEET.EMPLOYEE, getSheetHeaders(SHEET.EMPLOYEE));
+
+  // [FIX v003] SCHEMA.OWNER_SUMMARY → getSheetHeaders(SHEET.OWNER_SUMMARY)
+  createSheetIfMissing_(ss, SHEET.OWNER_SUMMARY, getSheetHeaders(SHEET.OWNER_SUMMARY));
+
+  // [FIX v003] SCHEMA.SHIPMENT_SUMMARY → getSheetHeaders(SHEET.SHIPMENT_SUM)
+  createSheetIfMissing_(ss, SHEET.SHIPMENT_SUM, getSheetHeaders(SHEET.SHIPMENT_SUM));
+
+  logInfo('SetupSheets', 'Group 2 Sheets เสร็จสิ้น');
+}
+
+// ============================================================
+// SECTION 4: System Sheets
+// ============================================================
+
+function setupSystemSheets_(ss) {
+  createSheetIfMissing_(ss, SHEET.SYS_LOG, getSheetHeaders(SHEET.SYS_LOG));
+
+  createSheetIfMissing_(ss, SHEET.SYS_CONFIG, getSheetHeaders(SHEET.SYS_CONFIG));
+
+  // [FIX v003] SYS_TH_GEO ต้องสร้างถ้าไม่มี
+  createSheetIfMissing_(ss, SHEET.SYS_TH_GEO, getSheetHeaders(SHEET.SYS_TH_GEO));
+
+  // [V6.0.001] SYS_NOTES — Semantic Note Parser storage (parseAndStoreSemanticNotes)
+  //   สร้างชีตถ้ายังไม่มี — ใช้สำหรับ audit trail + entity enrichment
+  createSheetIfMissing_(ss, SHEET.SYS_NOTES, getSheetHeaders(SHEET.SYS_NOTES));
+
+  // [V6.0.003] SYS_NEGATIVE_SAMPLES — System Learning negative feedback storage
+  //   สร้างชีตถ้ายังไม่มี — ใช้สำหรับเก็บ raw name/address ที่ Admin IGNORE
+  //   ป้องกัน autoEnrich สร้าง alias ผิดในรอบถัดไป
+  createSheetIfMissing_(ss, SHEET.SYS_NEGATIVE_SAMPLES, getSheetHeaders(SHEET.SYS_NEGATIVE_SAMPLES));
+
+  // [V6.0.007] SYS_AUDIT_TRAIL — Audit Trail storage (Critical-Only scope)
+  //   สร้างชีตถ้ายังไม่มี — ใช้สำหรับเก็บ CREATE/UPDATE/DELETE/MERGE records บน M_ALIAS + Q_REVIEW
+  //   11 columns (audit_id, entity_type, entity_id, action, field_changed, old_value, new_value,
+  //     changed_by, changed_at, change_reason, ip_address)
+  //   Append-only pattern: ไม่มี operation อื่นลบ row (ยกเว้น cleanupAuditTrail_UI retention pruning)
+  createSheetIfMissing_(ss, SHEET.SYS_AUDIT_TRAIL, getSheetHeaders(SHEET.SYS_AUDIT_TRAIL));
+
+  // [V6.0.012 P1.6] PIPELINE_RUN_LOG — stats per pipeline run
+  //   สร้างชีตถ้ายังไม่มี — ใช้สำหรับ before/after comparison เมื่อปรับ matching algorithm
+  //   12 columns (run_id, run_at, app_version, total_rows, processed, auto_matched,
+  //     created_new, queued_review, errors, match_rate, elapsed_sec, notes)
+  //   Append-only pattern: ไม่มี auto-prune (manual cleanup only)
+  createSheetIfMissing_(ss, SHEET.PIPELINE_RUN_LOG, getSheetHeaders(SHEET.PIPELINE_RUN_LOG));
+
+  // [V6.0.012 P1.7] TEST_MATCH_RESULTS — Dry Run output sheet
+  //   สร้างชีตถ้ายังไม่มี — ใช้สำหรับเขียนผลลัพธ์ Dry Run โดยไม่บันทึกลง master sheets
+  //   8 columns (source_row, invoice_no, person_name, place_name, action, reason, confidence, evidence)
+  //   Replace pattern: clear ข้อมูลเก่าก่อนเขียนใหม่ทุกครั้ง
+  createSheetIfMissing_(ss, SHEET.TEST_MATCH_RESULTS, getSheetHeaders(SHEET.TEST_MATCH_RESULTS));
+
+  // เพิ่มค่า Config เริ่มต้น
+  setupDefaultConfig_(ss);
+
+  // ตั้ง Dropdown สำหรับ Q_REVIEW
+  setupReviewDropdowns_(ss);
+
+  logInfo('SetupSheets', 'System Sheets เสร็จสิ้น');
+}
+
+// ============================================================
+// SECTION 5: createSheetIfMissing_
+// ============================================================
+
+/**
+ * createSheetIfMissing_ — สร้างชีตพร้อม Header ถ้ายังไม่มี
+ * [RULE 4] ถ้ามีอยู่แล้วให้ตรวจสอบ Header แทนสร้างใหม่
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ * @param {string} sheetName
+ * @param {string[]} headers - Header Array จาก getSheetHeaders()
+ */
+function createSheetIfMissing_(ss, sheetName, headers) {
+  let sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    // สร้างชีตใหม่
+    sheet = ss.insertSheet(sheetName);
+    sheet
+      .getRange(1, 1, 1, headers.length)
+      .setValues([headers])
+      .setFontWeight('bold')
+      .setBackground('#4a86e8')
+      .setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidths(1, headers.length, 150);
+
+    logInfo('SetupSheets', `สร้างชีต: ${sheetName} (${headers.length} cols)`);
+    return sheet;
+  }
+
+  // ชีตมีอยู่แล้ว → ตรวจ Header
+  const validation = validateSheetHeaders(sheet, headers);
+
+  if (!validation.isValid) {
+    if (validation.missing.length > 0) {
+      logWarn(
+        'SetupSheets',
+        `${sheetName}: Header หายไป [${validation.missing.join(', ')}] -> กำลังเพิ่มให้อัตโนมัติ...`
+      );
+
+      // [NEW v5.2.008] Auto-Repair: เพิ่มคอลัมน์ที่หายไปต่อท้ายชีต
+      const lastCol = sheet.getLastColumn();
+      const missingHeaders = validation.missing;
+
+      sheet
+        .getRange(1, lastCol + 1, 1, missingHeaders.length)
+        .setValues([missingHeaders])
+        .setFontWeight('bold')
+        .setBackground('#e06666') // สีแดงอ่อนเพื่อให้รู้ว่าเป็นการ Auto-Repair
+        .setFontColor('#ffffff');
+
+      logInfo('SetupSheets', `${sheetName}: เติม ${missingHeaders.length} คอลัมน์เรียบร้อย`);
+    }
+    if (validation.wrongOrder) {
+      logWarn('SetupSheets', `${sheetName}: Header ลำดับผิด (กรุณาตรวจสอบลำดับคอลัมน์ด้วยตนเอง)`);
+    }
+  }
+
+  return sheet;
+}
+
+// ============================================================
+// SECTION 6: setupReviewDropdowns_
+// ============================================================
+
+/**
+ * setupReviewDropdowns_ — ตั้ง Dropdown สำหรับคอลัมน์ใน Q_REVIEW
+ * [FIX v003] maxRows = 1000 → sheet.getMaxRows() - 1
+ */
+function setupReviewDropdowns_(ss) {
+  const sheet = ss.getSheetByName(SHEET.Q_REVIEW);
+  if (!sheet) return;
+
+  // [FIX v003] ใช้จำนวนแถวจริงจากชีต ไม่ hardcode 1000
+  const maxRows = sheet.getMaxRows() - 1;
+  if (maxRows <= 0) return;
+
+  const startRow = 2;
+
+  // Dropdown: STATUS
+  const statusRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Pending', 'In_Review', 'Done', 'Escalated'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(startRow, REVIEW_IDX.STATUS + 1, maxRows, 1).setDataValidation(statusRule);
+
+  // Dropdown: DECISION
+  const decisionRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['CREATE_NEW', 'MERGE_TO_CANDIDATE', 'ESCALATE', 'IGNORE'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(startRow, REVIEW_IDX.DECISION + 1, maxRows, 1).setDataValidation(decisionRule);
+
+  // Dropdown: PRIORITY
+  const priorityRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['1', '2', '3', '4'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(startRow, REVIEW_IDX.PRIORITY + 1, maxRows, 1).setDataValidation(priorityRule);
+
+  logDebug('SetupSheets', `setupReviewDropdowns_: Q_REVIEW ${maxRows} แถว`);
+}
+
+// ============================================================
+// SECTION 7: setupDefaultConfig_
+// ============================================================
+
+function setupDefaultConfig_(ss) {
+  const sheet = ss.getSheetByName(SHEET.SYS_CONFIG);
+  if (!sheet) return;
+  if (sheet.getLastRow() > 1) return; // มีค่าอยู่แล้ว
+
+  const now = new Date();
+  const configs = [
+    ['SCHEMA_VERSION', SCHEMA_VERSION, 'เวอร์ชัน Schema ของระบบ', now],
+    ['GEO_RADIUS_M', String(AI_CONFIG.GEO_RADIUS_M), 'รัศมีค้นหา Geo Point (เมตร)', now],
+    ['BATCH_SIZE', String(AI_CONFIG.BATCH_SIZE), 'จำนวน record ต่อ Batch', now],
+    ['THRESHOLD_AUTO', String(AI_CONFIG.THRESHOLD_AUTO), 'Score >= นี้ → Auto Match', now],
+    ['THRESHOLD_REVIEW', String(AI_CONFIG.THRESHOLD_REVIEW), 'Score >= นี้ → ส่ง Review', now],
+    ['LAST_SETUP', now.toISOString(), 'เวลาที่ Setup ล่าสุด', now],
+    ['REVIEWER_CONSENT', 'TRUE', 'ระบบบันทึกอีเมลผู้ Review (masked) เพื่อ Audit Trail', now]
+  ];
+
+  sheet.getRange(2, 1, configs.length, getSheetHeaders(SHEET.SYS_CONFIG).length).setValues(configs);
+
+  logInfo('SetupSheets', `setupDefaultConfig_: ${configs.length} ค่า`);
+}
+
+// ============================================================
+// SECTION 8: Logging Functions (shared scope)
+// ============================================================
+
+/**
+ * logInfo / logWarn / logError / logDebug
+ * เขียน Log ลง SYS_LOG + Console
+ */
+function logInfo(module, message) {
+  writeLog_('INFO', module, message);
+  console.log(`[INFO][${module}] ${message}`);
+}
+
+function logWarn(module, message) {
+  writeLog_('WARN', module, message);
+  console.warn(`[WARN][${module}] ${message}`);
+}
+
+function logError(module, message, error) {
+  // [FIX v5.4.003] เพิ่ม stack trace parameter — กฎข้อ 13 (Logging with Context)
+  let stackTrace = '';
+  if (error && error.stack) {
+    stackTrace = '\n' + error.stack;
+  }
+  writeLog_('ERROR', module, message + stackTrace);
+  console.error(`[ERROR][${module}] ${message}` + stackTrace);
+}
+
+function logDebug(module, message) {
+  // Debug: เขียนแค่ Console ไม่เขียนลง Sheet (ลด API calls)
+  console.log(`[DEBUG][${module}] ${message}`);
+}
+
+function writeLog_(level, module, message) {
+  try {
+    // [PERF-012] สะสม log entries ใน RAM buffer แทน appendRow ทุกครั้ง
+    // ลดจาก 1 API call ต่อ log entry เหลือ 1 API call ต่อ 50 entries
+    _LOG_BUFFER.push([generateShortId('L'), new Date(), module, level, String(message).substring(0, 500), '']);
+
+    if (_LOG_BUFFER.length >= _LOG_BUFFER_LIMIT) {
+      flushLogBuffer_();
+    }
+  } catch (e) {
+    // ถ้าเขียน Log ไม่ได้ ไม่ throw
+  }
+}
+
+/**
+ * flushLogBuffer_ — [PERF-012] เขียน log entries ที่สะสมใน buffer ลง Sheet เป็น batch
+ * เรียกเมื่อ buffer เต็ม หรือเมื่อ execution ใกล้จบ
+ */
+function flushLogBuffer_() {
+  if (_LOG_BUFFER.length === 0) return;
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET.SYS_LOG);
+    if (sheet) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, _LOG_BUFFER.length, _LOG_BUFFER[0].length).setValues(_LOG_BUFFER);
+    }
+    _LOG_BUFFER = [];
+
+    // ล้าง Log เก่าถ้าเกิน 5000 แถว
+    if (sheet && sheet.getLastRow() > 5001) {
+      clearOldLogs_(sheet, 1000);
+    }
+  } catch (e) {
+    // ถ้าเขียน Log ไม่ได้ ไม่ throw
+  }
+}
+
+// ============================================================
+// SECTION 9: clearOldLogs_
+// ============================================================
+
+/**
+ * clearOldLogs_ — ล้าง Log เก่า
+ * [FIX v003] เปลี่ยนจาก deleteRow ทีละแถว (ช้ามาก) → filter + batch rewrite
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} logSheet
+ * @param {number} keepRows - จำนวนแถวที่จะเก็บไว้ (ล่าสุด)
+ */
+function clearOldLogs_(logSheet, keepRows) {
+  // [FIX v5.5.001] Guard flag ป้องกัน recursive call (logInfo → writeLog_ → clearOldLogs_)
+  if (_isClearingOldLogs_) return;
+  _isClearingOldLogs_ = true;
+
+  try {
+    const totalRows = logSheet.getLastRow() - 1; // ไม่นับ Header
+    if (totalRows <= keepRows) return;
+
+    const schemaLen = getSheetHeaders(SHEET.SYS_LOG).length;
+    const allData = logSheet.getRange(2, 1, totalRows, schemaLen).getValues();
+
+    // เก็บเฉพาะ keepRows แถวล่าสุด
+    const keepData = allData.slice(allData.length - keepRows);
+
+    // [FIX v5.4.001] ใช้ clearContent + setValues แทน deleteRows
+    // เพื่อป้องกัน Google Sheets แวปเป็น Table format (dropdown filter ปรากฏชั่วขณะ)
+    // 1. ล้างข้อมูลเก่าทั้งหมด (ไม่ลบแถว จะได้ไม่ trigger Table auto-detect)
+    logSheet.getRange(2, 1, totalRows, schemaLen).clearContent();
+
+    // 2. เขียนข้อมูลที่ต้องการเก็บกลับลงไป
+    if (keepData.length > 0) {
+      logSheet.getRange(2, 1, keepData.length, schemaLen).setValues(keepData);
+    }
+
+    // 3. ลบแถวว่างที่เหลือ (ถ้ามี) — ทำหลังเขียนข้อมูลแล้วเพื่อลดการกระพริบ
+    const remainingEmpty = totalRows - keepData.length;
+    if (remainingEmpty > 0) {
+      try {
+        logSheet.deleteRows(2 + keepData.length, remainingEmpty);
+      } catch (e) {
+        // ถ้าลบไม่ได้ (แถวน้อยเกินไป) ไม่เป็นไร — แถวว่างไม่มีผลกระทบ
+      }
+    }
+
+    // [FIX v5.5.001] ใช้ console.log แทน logInfo เพื่อหลีกเลี่ยง recursion
+    console.log(`[INFO][SetupSheets] clearOldLogs_: เก็บ ${keepRows} แถวล่าสุด`);
+  } finally {
+    _isClearingOldLogs_ = false;
+  }
+}
+
+// ============================================================
+// SECTION 10: setupInputSheet_ — [NEW v5.2.014]
+// ============================================================
+
+/**
+ * setupInputSheet_ — จัดโครงสร้างชีต Input เป็นฟอร์มแนวตั้ง (Vertical Form Layout)
+ * A1 = "COOKIE"
+ * A3 = "ShipmentNos"
+ * ไม่มี frozen rows, ไม่มีหัวตาราง Row 1
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ */
+function setupInputSheet_(ss) {
+  let sheet = ss.getSheetByName(SHEET.INPUT);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET.INPUT);
+    logInfo('SetupSheets', `สร้างชีต: ${SHEET.INPUT} (ฟอร์มแนวตั้ง)`);
+  }
+
+  // ปลดล็อกการแช่แข็งแถว (Frozen Rows) เพื่อไม่ให้ขวางฟอร์มแนวตั้ง
+  if (sheet.getFrozenRows() > 0) {
+    sheet.setFrozenRows(0);
+  }
+
+  // เซ็ตป้ายกำกับของเซลล์หลัก
+  sheet
+    .getRange('A1')
+    .setValue('COOKIE')
+    .setFontWeight('bold')
+    .setBackground('#4a86e8')
+    .setFontColor('#ffffff')
+    .setHorizontalAlignment('center');
+
+  sheet
+    .getRange('A3')
+    .setValue('ShipmentNos')
+    .setFontWeight('bold')
+    .setBackground('#4a86e8')
+    .setFontColor('#ffffff')
+    .setHorizontalAlignment('center');
+
+  // ล้างค่าและสไตล์ของหัวตารางเดิมที่หลงเหลือหรือสร้างขึ้นมาผิดในแถวที่ 1 คอลัมน์ B และ C
+  const b1Range = sheet.getRange('B1');
+  const b1Val = String(b1Range.getValue()).trim();
+  if (b1Val === 'Shipment_No' || b1Val === 'COOKIE') {
+    b1Range.clearContent();
+  }
+
+  const c1Range = sheet.getRange('C1');
+  const c1Val = String(c1Range.getValue()).trim();
+  if (c1Val === 'หมายเหตุ') {
+    c1Range.clearContent();
+  }
+
+  // ตรวจสอบและทำความสะอาดแถว 1 คอลัมน์ที่เหลือ
+  // [PERF-010] Batch read row 1 (1 API call แทน N calls ในลูป)
+  //   เดิม: getValue() ในลูป — N API calls, ~1s สำหรับ sheet 100+ cols
+  //   ใหม่: getValues() ครั้งเดียว + iterate array — 1 API call, ~0.05s
+  const lastCol = Math.max(3, sheet.getLastColumn());
+  const row1Values = sheet.getRange(1, 2, 1, Math.max(0, lastCol - 1)).getValues()[0];
+
+  for (let colIdx = 0; colIdx < row1Values.length; colIdx++) {
+    const val = String(row1Values[colIdx] || '').trim();
+    if (val === 'Shipment_No' || val === 'หมายเหตุ') {
+      const col = colIdx + 2; // convert 0-based array index → 1-based column number (offset by 2  because we started at col 2)
+      sheet.getRange(1, col).clearContent().setFontWeight('normal').setBackground(null).setFontColor(null);
+    }
+  }
+
+  logInfo('SetupSheets', 'จัดโครงสร้างฟอร์มแนวตั้งชีต Input (A1=COOKIE, A3=ShipmentNos) เรียบร้อยครับ');
+}

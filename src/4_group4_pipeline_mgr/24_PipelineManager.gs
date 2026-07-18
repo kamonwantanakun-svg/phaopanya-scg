@@ -1,0 +1,1530 @@
+/**
+ * VERSION: 6.0.069
+ * FILE: 24_PipelineManager.gs
+ * LMDS V6.0 — Pipeline Manager (Standalone Module)
+ * ===================================================
+ * PURPOSE:
+ *   จัดการการรัน runMatchEngine() แบบ batch สำหรับข้อมูลหลักหมื่นแถว
+ *   ไม่ให้เกิน quota รายวันของ Google Apps Script (Free tier: 90 นาที/วัน)
+ *   STANDALONE — ใช้ Script Properties เก็บ state ของตัวเอง (prefix: PIPELINE_*)
+ *
+ * CHANGELOG:
+ *   See /docs/CHANGELOG.md for full history.
+ *
+ * DEPENDENCIES:
+ *   REQUIRES: (Load Order)
+ *     - 10_MatchEngine.gs       (runMatchEngine — the only call into the engine)
+ *     - 01_Config.gs            (PIPELINE_* constants, sheet names for diagnostics)
+ *   CALLS: (Invokes)
+ *     - runMatchEngine()                        → 10_MatchEngine.gs
+ *     - PropertiesService.getScriptProperties() (Apps Script runtime — state)
+ *     - ScriptApp.newTrigger() (time-based auto-resume + daily quota reset)
+ *   EXPORTS TO:
+ *     - Time-driven trigger (auto-run 08:00–22:00 every hour)
+ *     - 00_App.gs (manual pipeline menu — optional wrapper)
+ *   SHEETS ACCESSED:
+ *     - SHEET.SOURCE / M_ALIAS / M_PERSON / M_PLACE / SYS_TH_GEO (Read — diagnostics + progress counts)
+ *   TRIGGERS: time-based (hourly runPipelineBatch + daily resetDailyQuotaJob at 00:05)
+ *
+ * ARCHITECTURE:
+ *   Group 4 — Pipeline manager (batched runMatchEngine with quota/timeout guards)
+ * ===================================================
+ */
+
+// ============================================================
+// SECTION 1: Configuration
+// ============================================================
+
+/**
+ * PIPELINE_CONFIG — ค่าคงที่สำหรับ Pipeline Manager
+ *   ปรับค่าตรงนี้เพื่อเปลี่ยนพฤติกรรม
+ */
+const PIPELINE_CONFIG = Object.freeze({
+  // === Quota Limits (Free Gmail tier: 90 min/day total runtime) ===
+  //   เหลือ buffer 15 นาที → ใช้จริง 75 นาที/วัน
+  MAX_RUNTIME_MS_PER_DAY: 75 * 60 * 1000, // 4,500,000 ms = 75 นาที
+  MAX_RUNTIME_MS_PER_RUN: 4 * 60 * 1000, // 240,000 ms = 4 นาที (buffer ก่อน 6 นาที hard limit)
+  MAX_RUNS_PER_DAY: 15, // 15 รอบ/วัน (user requirement)
+
+  // === Circuit Breaker ===
+  MAX_CONSECUTIVE_ERRORS: 3, // ถ้า error ติดๆ กัน 3 ครั้ง → PAUSE
+  ERROR_COOLDOWN_MS: 60 * 60 * 1000, // รอ 1 ชม ก่อนลองใหม่หลัง error (ถ้ายังไม่ pause)
+
+  // === Trigger Schedule (Time-based) ===
+  BATCH_RUN_INTERVAL_HOURS: 1, // รันทุก 1 ชม
+  BATCH_RUN_START_HOUR: 8, // เริ่ม 08:00 น.
+  BATCH_RUN_END_HOUR: 22, // หยุด 22:00 น. (รวม 15 รอบ: 8,9,...,22)
+
+  // === Behavior ===
+  CLEAN_MATCH_ENGINE_TRIGGERS: true, // ลบ auto-resume trigger ของ MatchEngine หลังรัน
+  LOG_TO_SYS_LOG: true // เขียน log ไป SYS_LOG (ถ้ามี logInfo)
+});
+
+// === Notification Config (5.1 Failure Alert) ===
+//   ตั้งค่า Script Properties: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+//   (ใช้ Bot เดียวกับระบบแจ้งเตือน Billing ที่มีอยู่แล้วได้เลย หรือสร้าง chat ใหม่แยก)
+const PIPELINE_ALERT_CONFIG = Object.freeze({
+  Q_REVIEW_BACKLOG_THRESHOLD: 100 // แจ้งเตือนเมื่อ Q_REVIEW pending เกินจำนวนนี้
+});
+
+// Pipeline States
+const PIPELINE_STATES = Object.freeze({
+  IDLE: 'IDLE', // ยังไม่เริ่ม
+  RUNNING: 'RUNNING', // กำลังรัน
+  PAUSED_QUOTA: 'PAUSED_QUOTA', // หยุดเพราะ quota เต็ม
+  PAUSED_ERRORS: 'PAUSED_ERRORS', // หยุดเพราะ error ซ้ำ
+  PAUSED_MANUAL: 'PAUSED_MANUAL', // หยุดโดย admin
+  COMPLETED: 'COMPLETED' // เสร็จสมบูรณ์
+});
+
+// Script Properties keys (prefix PIPELINE_ เพื่อกันชนกับ module อื่น)
+const PIPELINE_PROPS = Object.freeze({
+  STATE: 'PIPELINE_STATE',
+  CHECKPOINT: 'PIPELINE_CHECKPOINT',
+  QUOTA: 'PIPELINE_DAILY_QUOTA',
+  CIRCUIT: 'PIPELINE_CIRCUIT_BREAKER',
+  HISTORY: 'PIPELINE_HISTORY'
+});
+
+// ============================================================
+// SECTION 2: Script Properties State Management
+// ============================================================
+
+/**
+ * getPipelineState_ — อ่านสถานะปัจจุบันของ pipeline
+ * @return {Object} { state, lastUpdated, message }
+ * @private
+ */
+function getPipelineState_() {
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty(PIPELINE_PROPS.STATE);
+  if (raw === null || raw === '') {
+    return {
+      state: PIPELINE_STATES.IDLE,
+      lastUpdated: null,
+      message: ''
+    };
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset เพื่อให้วินิจฉัย state corruption ได้
+    logPipeline_(
+      'warn',
+      'getPipelineState_: JSON.parse ล้มเหลว — reset to IDLE. raw="' +
+        String(raw).substring(0, 200) +
+        '", error=' +
+        e.message
+    );
+    return {
+      state: PIPELINE_STATES.IDLE,
+      lastUpdated: null,
+      message: 'Invalid state JSON — reset to IDLE'
+    };
+  }
+}
+
+/**
+ * setPipelineState_ — บันทึกสถานะ pipeline
+ * @param {string} state - ค่าจาก PIPELINE_STATES
+ * @param {string} message - ข้อความอธิบาย (optional)
+ * @private
+ */
+function setPipelineState_(state, message) {
+  const props = PropertiesService.getScriptProperties();
+  const stateObj = {
+    state: state,
+    lastUpdated: new Date().toISOString(),
+    message: message || ''
+  };
+  props.setProperty(PIPELINE_PROPS.STATE, JSON.stringify(stateObj));
+  logPipeline_('info', 'State changed: ' + state + (message ? ' — ' + message : ''));
+}
+
+/**
+ * getPipelineCheckpoint_ — อ่าน checkpoint ปัจจุบัน
+ * @return {Object} { lastRunAt, runCount, totalRuntimeMs, lastBatchRows }
+ * @private
+ */
+function getPipelineCheckpoint_() {
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty(PIPELINE_PROPS.CHECKPOINT);
+  if (raw === null || raw === '') {
+    return {
+      lastRunAt: null,
+      runCount: 0,
+      totalRuntimeMs: 0,
+      lastBatchRows: 0,
+      startedAt: null
+    };
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset checkpoint
+    logPipeline_(
+      'warn',
+      'getPipelineCheckpoint_: JSON.parse ล้มเหลว — reset to defaults. raw="' +
+        String(raw).substring(0, 200) +
+        '", error=' +
+        e.message
+    );
+    return {
+      lastRunAt: null,
+      runCount: 0,
+      totalRuntimeMs: 0,
+      lastBatchRows: 0,
+      startedAt: null
+    };
+  }
+}
+
+/**
+ * setPipelineCheckpoint_ — บันทึก checkpoint
+ * @param {Object} checkpoint
+ * @private
+ */
+function setPipelineCheckpoint_(checkpoint) {
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty(PIPELINE_PROPS.CHECKPOINT, JSON.stringify(checkpoint));
+}
+
+/**
+ * clearPipelineCheckpoint_ — ล้าง checkpoint (ใช้ตอน reset หรือ complete)
+ * @private
+ */
+function clearPipelineCheckpoint_() {
+  const props = PropertiesService.getScriptProperties();
+  props.deleteProperty(PIPELINE_PROPS.CHECKPOINT);
+}
+
+// ============================================================
+// SECTION 3: Quota Tracker
+// ============================================================
+
+/**
+ * getDailyQuota_ — อ่านการใช้ quota วันนี้
+ * @return {Object} { date, runtimeMs, runCount, lastResetAt }
+ * @private
+ */
+function getDailyQuota_() {
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty(PIPELINE_PROPS.QUOTA);
+  const today = formatDateYMD_(new Date());
+
+  if (raw === null || raw === '') {
+    return {
+      date: today,
+      runtimeMs: 0,
+      runCount: 0,
+      lastResetAt: new Date().toISOString()
+    };
+  }
+
+  try {
+    const quota = JSON.parse(raw);
+    // ถ้าขึ้นวันใหม่ → รีเซ็ต
+    if (quota.date !== today) {
+      return {
+        date: today,
+        runtimeMs: 0,
+        runCount: 0,
+        lastResetAt: new Date().toISOString()
+      };
+    }
+    return quota;
+  } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset quota
+    logPipeline_(
+      'warn',
+      'getDailyQuota_: JSON.parse ล้มเหลว — reset to 0. raw="' + String(raw).substring(0, 200) + '", error=' + e.message
+    );
+    return {
+      date: today,
+      runtimeMs: 0,
+      runCount: 0,
+      lastResetAt: new Date().toISOString()
+    };
+  }
+}
+
+/**
+ * setDailyQuota_ — บันทึกการใช้ quota วันนี้
+ * @param {Object} quota
+ * @private
+ */
+function setDailyQuota_(quota) {
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty(PIPELINE_PROPS.QUOTA, JSON.stringify(quota));
+}
+
+/**
+ * incrementQuotaUsage_ — เพิ่มการใช้ quota หลังรัน batch
+ * @param {number} runtimeMs - เวลาที่ใช้ (millisecond)
+ * @private
+ */
+function incrementQuotaUsage_(runtimeMs) {
+  const quota = getDailyQuota_();
+  quota.runtimeMs = (quota.runtimeMs || 0) + runtimeMs;
+  quota.runCount = (quota.runCount || 0) + 1;
+  setDailyQuota_(quota);
+}
+
+/**
+ * isQuotaAvailable_ — ตรวจว่ายังมี quota เหลือพอสำหรับรัน batch ถัดไปไหม
+ * @return {Object} { available, reason, remainingMs, remainingRuns }
+ * @private
+ */
+function isQuotaAvailable_() {
+  const quota = getDailyQuota_();
+  const remainingMs = PIPELINE_CONFIG.MAX_RUNTIME_MS_PER_DAY - (quota.runtimeMs || 0);
+  const remainingRuns = PIPELINE_CONFIG.MAX_RUNS_PER_DAY - (quota.runCount || 0);
+
+  // ตรวจ runtime
+  if (remainingMs < PIPELINE_CONFIG.MAX_RUNTIME_MS_PER_RUN) {
+    return {
+      available: false,
+      reason: 'RUNTIME_LIMIT',
+      remainingMs: remainingMs,
+      remainingRuns: remainingRuns
+    };
+  }
+
+  // ตรวจ run count
+  if (remainingRuns <= 0) {
+    return {
+      available: false,
+      reason: 'RUN_COUNT_LIMIT',
+      remainingMs: remainingMs,
+      remainingRuns: 0
+    };
+  }
+
+  return {
+    available: true,
+    reason: 'OK',
+    remainingMs: remainingMs,
+    remainingRuns: remainingRuns
+  };
+}
+
+// ============================================================
+// SECTION 4: Circuit Breaker
+// ============================================================
+
+/**
+ * getCircuitBreaker_ — อ่านสถานะ circuit breaker
+ * @return {Object} { consecutiveErrors, lastError, lastErrorAt, pausedAt }
+ * @private
+ */
+function getCircuitBreaker_() {
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty(PIPELINE_PROPS.CIRCUIT);
+  if (raw === null || raw === '') {
+    return {
+      consecutiveErrors: 0,
+      lastError: '',
+      lastErrorAt: null,
+      pausedAt: null
+    };
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset circuit breaker
+    logPipeline_(
+      'warn',
+      'getCircuitBreaker_: JSON.parse ล้มเหลว — reset to 0 errors. raw="' +
+        String(raw).substring(0, 200) +
+        '", error=' +
+        e.message
+    );
+    return {
+      consecutiveErrors: 0,
+      lastError: '',
+      lastErrorAt: null,
+      pausedAt: null
+    };
+  }
+}
+
+/**
+ * setCircuitBreaker_ — บันทึกสถานะ circuit breaker
+ * @param {Object} cb
+ * @private
+ */
+function setCircuitBreaker_(cb) {
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty(PIPELINE_PROPS.CIRCUIT, JSON.stringify(cb));
+}
+
+/**
+ * recordBatchSuccess_ — รีเซ็ต error count เมื่อ batch สำเร็จ
+ * @private
+ */
+function recordBatchSuccess_() {
+  const cb = getCircuitBreaker_();
+  cb.consecutiveErrors = 0;
+  cb.lastError = '';
+  cb.lastErrorAt = null;
+  setCircuitBreaker_(cb);
+}
+
+/**
+ * recordBatchError_ — บันทึก error และตรวจ circuit breaker
+ * @param {string} errorMsg - ข้อความ error
+ * @return {boolean} true ถ้า circuit breaker ถูก trigger (ควรหยุด pipeline)
+ * @private
+ */
+function recordBatchError_(errorMsg) {
+  const cb = getCircuitBreaker_();
+  cb.consecutiveErrors = (cb.consecutiveErrors || 0) + 1;
+  cb.lastError = errorMsg;
+  cb.lastErrorAt = new Date().toISOString();
+
+  if (cb.consecutiveErrors >= PIPELINE_CONFIG.MAX_CONSECUTIVE_ERRORS) {
+    cb.pausedAt = new Date().toISOString();
+    setCircuitBreaker_(cb);
+    logPipeline_(
+      'error',
+      'Circuit Breaker TRIGGERED — ' + cb.consecutiveErrors + ' consecutive errors. Last: ' + errorMsg
+    );
+    return true; // ถูก trigger — ควรหยุด
+  }
+
+  setCircuitBreaker_(cb);
+  logPipeline_(
+    'warn',
+    'Batch error ' + cb.consecutiveErrors + '/' + PIPELINE_CONFIG.MAX_CONSECUTIVE_ERRORS + ': ' + errorMsg
+  );
+  return false;
+}
+
+/**
+ * isCircuitBreakerTripped_ — ตรวจว่า circuit breaker ถูก trigger อยู่ไหม
+ * @return {boolean}
+ * @private
+ */
+function isCircuitBreakerTripped_() {
+  const cb = getCircuitBreaker_();
+  return cb.pausedAt !== null && cb.pausedAt !== undefined;
+}
+
+/**
+ * resetCircuitBreaker_ — รีเซ็ต circuit breaker (admin action)
+ * @private
+ */
+function resetCircuitBreaker_() {
+  setCircuitBreaker_({
+    consecutiveErrors: 0,
+    lastError: '',
+    lastErrorAt: null,
+    pausedAt: null
+  });
+  logPipeline_('info', 'Circuit Breaker reset by admin');
+}
+
+// ============================================================
+// SECTION 5: Trigger Manager
+// ============================================================
+
+/**
+ * installPipelineTriggers — ติดตั้ง time-based triggers สำหรับ Pipeline Manager
+ *   รันทุก 1 ชม ตั้งแต่ 08:00 ถึง 22:00 (15 รอบ/วัน)
+ *   เรียกครั้งเดียว — trigger จะอยู่ถาวรจนกว่าจะลบ
+ *
+ *   หากมี trigger เดิมอยู่แล้ว → ลบก่อนแล้วสร้างใหม่ (idempotent)
+ *
+ * @return {Object} { installed, count }
+ */
+function installPipelineTriggers() {
+  // ลบ trigger เดิมของ Pipeline Manager ก่อน
+  removeAllPipelineTriggers_();
+
+  // สร้าง trigger ใหม่ — รันทุก 1 ชม
+  //  ใช้ nearMinute เพื่อกระจาย load (ไม่ใช่ 00 นาทีพอดี)
+  ScriptApp.newTrigger('runPipelineBatch')
+    .timeBased()
+    .everyHours(PIPELINE_CONFIG.BATCH_RUN_INTERVAL_HOURS)
+    .atHour(PIPELINE_CONFIG.BATCH_RUN_START_HOUR)
+    .nearMinute(15) // 08:15, 09:15, 10:15, ... (avoid 00:00 congestion)
+    .create();
+
+  // สร้าง trigger รีเซ็ต quota รายวัน — 00:05 น. ทุกวัน
+  ScriptApp.newTrigger('resetDailyQuotaJob').timeBased().atHour(0).nearMinute(5).everyDays(1).create();
+
+  logPipeline_(
+    'info',
+    'Pipeline triggers installed — every ' +
+      PIPELINE_CONFIG.BATCH_RUN_INTERVAL_HOURS +
+      'h, ' +
+      PIPELINE_CONFIG.BATCH_RUN_START_HOUR +
+      ':00-' +
+      PIPELINE_CONFIG.BATCH_RUN_END_HOUR +
+      ':00'
+  );
+
+  return { installed: true, count: 2 };
+}
+
+/**
+ * removeAllPipelineTriggers_ — ลบ trigger ทั้งหมดของ Pipeline Manager
+ *   (ไม่ลบ trigger ของ module อื่น)
+ * @return {number} จำนวน trigger ที่ลบ
+ * @private
+ */
+function removeAllPipelineTriggers_() {
+  const triggers = ScriptApp.getProjectTriggers();
+  let deleted = 0;
+  const pipelineHandlers = ['runPipelineBatch', 'resetDailyQuotaJob'];
+
+  triggers.forEach(function (t) {
+    if (pipelineHandlers.indexOf(t.getHandlerFunction()) !== -1) {
+      ScriptApp.deleteTrigger(t);
+      deleted++;
+    }
+  });
+
+  if (deleted > 0) {
+    logPipeline_('info', 'Removed ' + deleted + ' pipeline trigger(s)');
+  }
+  return deleted;
+}
+
+/**
+ * removeMatchEngineAutoResumeTriggers_ — ลบ auto-resume trigger ที่ MatchEngine ติดตั้ง
+ *   ป้องกัน run ซ้อนกันระหว่าง Pipeline Manager กับ MatchEngine's auto-resume
+ * @return {number} จำนวน trigger ที่ลบ
+ * @private
+ */
+function removeMatchEngineAutoResumeTriggers_() {
+  if (PIPELINE_CONFIG.CLEAN_MATCH_ENGINE_TRIGGERS === false) return 0;
+
+  const triggers = ScriptApp.getProjectTriggers();
+  let deleted = 0;
+  // MatchEngine ใช้ handler ชื่อ 'runMatchEngine' สำหรับ auto-resume
+  const matchEngineHandlers = ['runMatchEngine'];
+
+  triggers.forEach(function (t) {
+    if (matchEngineHandlers.indexOf(t.getHandlerFunction()) !== -1) {
+      ScriptApp.deleteTrigger(t);
+      deleted++;
+    }
+  });
+
+  if (deleted > 0) {
+    logPipeline_('info', 'Removed ' + deleted + ' MatchEngine auto-resume trigger(s)');
+  }
+  return deleted;
+}
+
+/**
+ * getPipelineTriggerCount_ — นับ trigger ของ Pipeline Manager ที่ติดตั้งอยู่
+ * @return {Object} { pipelineTriggers, matchEngineTriggers, total }
+ * @private
+ */
+function getPipelineTriggerCount_() {
+  const triggers = ScriptApp.getProjectTriggers();
+  const pipelineHandlers = ['runPipelineBatch', 'resetDailyQuotaJob'];
+  const matchEngineHandlers = ['runMatchEngine'];
+
+  let pipelineCount = 0;
+  let matchEngineCount = 0;
+
+  triggers.forEach(function (t) {
+    const handler = t.getHandlerFunction();
+    if (pipelineHandlers.indexOf(handler) !== -1) {
+      pipelineCount++;
+    } else if (matchEngineHandlers.indexOf(handler) !== -1) {
+      matchEngineCount++;
+    }
+  });
+
+  return {
+    pipelineTriggers: pipelineCount,
+    matchEngineTriggers: matchEngineCount,
+    total: triggers.length
+  };
+}
+
+// ============================================================
+// SECTION 6: Main Pipeline Functions
+// ============================================================
+
+/**
+ * runPipelineBatch — MAIN ENTRY POINT (เรียกโดย time-based trigger)
+ *
+ *   Flow:
+ *   1. ตรวจ pipeline state — ถ้า PAUSED หรือ COMPLETED → return
+ *   2. ตรวจ quota — ถ้าเต็ม → set state PAUSED_QUOTA + return
+ *   3. ตรวจ circuit breaker — ถ้า tripped → set state PAUSED_ERRORS + return
+ *   4. ลบ MatchEngine auto-resume triggers (กัน run ซ้อน)
+ *   5. ตรวจ Lock — ถ้ามีคนรันอยู่ → return (skip รอบนี้)
+ *   6. เรียก runMatchEngine() — รันจนกว่าจะหมดเวลา (~4-5 นาที)
+ *   7. บันทึก quota + checkpoint
+ *   8. ตรวจผล: สำเร็จ? error? ครบแล้ว?
+ *   9. อัปเดต state ตามผล
+ */
+function runPipelineBatch() {
+  const batchStart = new Date();
+
+  // [FIX BUG-PM-005 V5.5.041] Enforce BATCH_RUN_END_HOUR at runtime
+  //   สาเหตุ: GAS .everyHours(1).atHour(8) จะ trigger ทุกชม ไม่หยุดที่ 22:00
+  //   → ถ้า quota ถูกรีเซ็ตที่ 00:05 แล้ว trigger 01:15, 02:15, ... จะรันต่อ
+  //   แม้ quota cap (15 runs/day) จะช่วยกัน cross-day run แต่ก็ยังมี window
+  //   23:15 ที่รันได้ (หลัง 22:00) ก่อน reset 00:05
+  //   ป้องกันโดยตรวจชั่วโมงปัจจุบันที่ runtime — ถ้านอกช่วง 08:00-22:59 ให้ SKIP
+  const currentHour = batchStart.getHours();
+  if (currentHour < PIPELINE_CONFIG.BATCH_RUN_START_HOUR || currentHour > PIPELINE_CONFIG.BATCH_RUN_END_HOUR) {
+    logPipeline_(
+      'info',
+      'Outside business hours (' +
+        currentHour +
+        ':00) — skip (window: ' +
+        PIPELINE_CONFIG.BATCH_RUN_START_HOUR +
+        ':00-' +
+        PIPELINE_CONFIG.BATCH_RUN_END_HOUR +
+        ':59)'
+    );
+    return { action: 'SKIP', reason: 'OUTSIDE_BUSINESS_HOURS' };
+  }
+
+  logPipeline_('info', '=== Pipeline Batch START ===');
+
+  // ─── Step 1: ตรวจ state ───
+  const state = getPipelineState_();
+  if (state.state === PIPELINE_STATES.COMPLETED) {
+    logPipeline_('info', 'Pipeline already COMPLETED — skip');
+    return { action: 'SKIP', reason: 'COMPLETED' };
+  }
+  if (state.state === PIPELINE_STATES.PAUSED_MANUAL) {
+    logPipeline_('info', 'Pipeline PAUSED by admin — skip');
+    return { action: 'SKIP', reason: 'PAUSED_MANUAL' };
+  }
+  if (state.state === PIPELINE_STATES.PAUSED_QUOTA) {
+    // อาจจะขึ้นวันใหม่ → ตรวจ quota ใหม่
+    const quotaCheck = isQuotaAvailable_();
+    if (quotaCheck.available === false) {
+      logPipeline_('info', 'Still quota-limited — skip (reason: ' + quotaCheck.reason + ')');
+      return { action: 'SKIP', reason: 'PAUSED_QUOTA' };
+    }
+    logPipeline_('info', 'Quota reset — resuming pipeline');
+    setPipelineState_(PIPELINE_STATES.RUNNING, 'Resumed after quota reset');
+  }
+  if (state.state === PIPELINE_STATES.PAUSED_ERRORS) {
+    // ต้องรอ admin reset circuit breaker
+    logPipeline_('info', 'Pipeline PAUSED due to errors — admin reset required');
+    return { action: 'SKIP', reason: 'PAUSED_ERRORS' };
+  }
+
+  // ─── Step 2: ตรวจ quota ───
+  const quotaCheck = isQuotaAvailable_();
+  if (quotaCheck.available === false) {
+    setPipelineState_(PIPELINE_STATES.PAUSED_QUOTA, quotaCheck.reason);
+    logPipeline_(
+      'warn',
+      'Quota limit reached — pausing (reason: ' +
+        quotaCheck.reason +
+        ', remaining: ' +
+        quotaCheck.remainingMs +
+        'ms, ' +
+        quotaCheck.remainingRuns +
+        ' runs)'
+    );
+    return { action: 'PAUSE', reason: 'QUOTA_' + quotaCheck.reason };
+  }
+
+  // ─── Step 3: ตรวจ circuit breaker ───
+  if (isCircuitBreakerTripped_()) {
+    setPipelineState_(PIPELINE_STATES.PAUSED_ERRORS, 'Circuit breaker tripped');
+    logPipeline_('error', 'Circuit breaker tripped — pausing');
+    // [NEW v5.5.047 Failure Alert 5.1] แจ้งเตือนเมื่อ circuit breaker ตัด
+    sendPipelineAlert_(
+      'Circuit Breaker ตัดการทำงาน — error ติดกันเกิน ' +
+        PIPELINE_CONFIG.MAX_CONSECUTIVE_ERRORS +
+        ' ครั้ง\nต้องรีเซ็ตด้วยเมนู resetCircuitBreakerMenu() หรือ resumePipeline()',
+      'ERROR'
+    );
+    return { action: 'PAUSE', reason: 'CIRCUIT_BREAKER' };
+  }
+
+  // ─── Step 4: ลบ MatchEngine auto-resume triggers (กัน run ซ้อน) ───
+  removeMatchEngineAutoResumeTriggers_();
+
+  // ─── Step 5: Lock (กัน concurrent runs) ───
+  const lock = LockService.getScriptLock();
+  const lockAcquired = lock.tryLock(30000); // รอ 30 วิ
+  if (lockAcquired === false) {
+    logPipeline_('warn', 'Cannot acquire lock — another batch running, skip');
+    return { action: 'SKIP', reason: 'LOCK_BUSY' };
+  }
+
+  try {
+    // ─── Step 6: เรียก runMatchEngine ───
+    setPipelineState_(PIPELINE_STATES.RUNNING, 'Batch started');
+
+    // [FIX CodeQL js/useless-assignment-to-local V5.5.035] ไม่กำหนดค่าเริ่มต้น — try/catch จะกำหนดให้แน่
+    // [FIX V5.5.036] ลบ batchResult ออก — runMatchEngine() ไม่ return ค่าที่ใช้
+    let batchError;
+    try {
+      // runMatchEngine มี Time Guard ในตัว (5 นาที) + มี auto-resume trigger ของมันเอง
+      // Pipeline Manager จะคุม schedule เอง จึงลบ auto-resume ทิ้งหลังรัน
+      runMatchEngine();
+    } catch (err) {
+      batchError = err;
+      logPipeline_('error', 'runMatchEngine threw: ' + err.message);
+    }
+
+    const batchEnd = new Date();
+    const runtimeMs = batchEnd.getTime() - batchStart.getTime();
+
+    // ─── Step 7: บันทึก quota + checkpoint ───
+    incrementQuotaUsage_(runtimeMs);
+
+    // [NEW v5.5.047 — Failure Alert 5.1] เช็ค Q_REVIEW backlog ทุกรอบ batch
+    //   ถ้า pending เกินเกณฑ์ → ส่ง alert (WARN) ให้ admin เข้าไปตรวจสอบ
+    try {
+      if (typeof getReviewStats === 'function') {
+        const reviewStats = getReviewStats();
+        if (reviewStats.pending > PIPELINE_ALERT_CONFIG.Q_REVIEW_BACKLOG_THRESHOLD) {
+          sendPipelineAlert_(
+            'Q_REVIEW มีรายการค้าง ' +
+              reviewStats.pending +
+              ' แถว (เกินเกณฑ์ ' +
+              PIPELINE_ALERT_CONFIG.Q_REVIEW_BACKLOG_THRESHOLD +
+              ')\nควรเข้าไปตรวจสอบและอนุมัติที่เมนู Q_REVIEW',
+            'WARN'
+          );
+        }
+      }
+    } catch (alertErr) {
+      // [Rule 12] ไม่ให้ alert check ทำ pipeline พัง
+      logError('PipelineManager', 'Q_REVIEW backlog check ล้มเหลว: ' + alertErr.message, alertErr);
+    }
+
+    const checkpoint = getPipelineCheckpoint_();
+    if (checkpoint.startedAt === null) {
+      checkpoint.startedAt = batchStart.toISOString();
+    }
+    checkpoint.lastRunAt = batchEnd.toISOString();
+    checkpoint.runCount = (checkpoint.runCount || 0) + 1;
+    checkpoint.totalRuntimeMs = (checkpoint.totalRuntimeMs || 0) + runtimeMs;
+    setPipelineCheckpoint_(checkpoint);
+
+    // ─── Step 8: ลบ MatchEngine auto-resume trigger ที่อาจจะติดตั้งระหว่างรัน ───
+    removeMatchEngineAutoResumeTriggers_();
+
+    // ─── Step 9: ตรวจผล ───
+    // [FIX BUG-PM-001 V5.5.041] เปลี่ยนจาก !== null เป็น truthy check
+    //   สาเหตุ: V5.5.035 ลบ `let batchError = null;` ออกตามคำแนะนำ CodeQL
+    //   js/useless-assignment-to-local ทำให้ batchError เริ่มเป็น undefined
+    //   แต่ check `!== null` ของ undefined คืน true → เรียก recordBatchError_
+    //   ทุกครั้งที่ batch สำเร็จ → TypeError ใน logs + state machine พัง
+    if (batchError) {
+      const tripped = recordBatchError_(batchError.message);
+      if (tripped) {
+        setPipelineState_(PIPELINE_STATES.PAUSED_ERRORS, 'Circuit breaker tripped');
+        logPipeline_('error', '=== Pipeline Batch END (PAUSED_ERRORS) — ' + formatDuration_(runtimeMs) + ' ===');
+        // [NEW v5.5.047 Failure Alert 5.1] แจ้งเตือนเมื่อ batch error จน trip
+        sendPipelineAlert_(
+          'Pipeline หยุดทำงาน (PAUSED_ERRORS) หลัง batch error:\n' +
+            batchError.message +
+            '\nRuntime: ' +
+            formatDuration_(runtimeMs),
+          'ERROR'
+        );
+        return { action: 'PAUSE', reason: 'CIRCUIT_BREAKER', error: batchError.message };
+      }
+      setPipelineState_(PIPELINE_STATES.RUNNING, 'Batch error but continuing');
+      logPipeline_('warn', '=== Pipeline Batch END (ERROR but continuing) — ' + formatDuration_(runtimeMs) + ' ===');
+      return { action: 'CONTINUE', reason: 'ERROR_RECOVERED', error: batchError.message };
+    }
+
+    // สำเร็จ — reset error count
+    recordBatchSuccess_();
+
+    // ตรวจว่ายังมีงานเหลือไหม (ถ้า Source sheet ไม่มี SYNC_STATUS ที่ != SUCCESS → เสร็จ)
+    const hasMoreWork = checkHasMoreWork_();
+
+    if (hasMoreWork === false) {
+      completePipeline_();
+      logPipeline_('info', '=== Pipeline Batch END (COMPLETED) — ' + formatDuration_(runtimeMs) + ' ===');
+      return { action: 'COMPLETE', reason: 'NO_MORE_WORK' };
+    }
+
+    setPipelineState_(PIPELINE_STATES.RUNNING, 'Batch completed, more work remaining');
+    logPipeline_('info', '=== Pipeline Batch END (CONTINUE) — ' + formatDuration_(runtimeMs) + ' ===');
+    return { action: 'CONTINUE', reason: 'MORE_WORK' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * checkHasMoreWork_ — ตรวจว่ายังมีแถวที่ต้องประมวลผลหรือไม่
+ *   อ่าน Source sheet แล้วนับแถวที่ SYNC_STATUS != SUCCESS
+ * @return {boolean} true ถ้ายังมีงานเหลือ
+ * @private
+ */
+function checkHasMoreWork_() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (ss === null) return false;
+
+    // ใช้ SHEET constant จาก 01_Config ถ้ามี — ไม่งั้น hardcode
+    const sourceSheetName = typeof SHEET !== 'undefined' && SHEET.SOURCE ? SHEET.SOURCE : 'SCGนครหลวงJWDภูมิภาค';
+
+    const sheet = ss.getSheetByName(sourceSheetName);
+    if (sheet === null) {
+      logPipeline_('warn', 'Source sheet not found: ' + sourceSheetName);
+      return false;
+    }
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return false; // มีแค่ header
+
+    // [FIX Static Audit Issue 3] ใช้ SRC_IDX.SYNC_STATUS แทน hardcoded 37
+    //   กรณี standalone (ไม่มี SRC_IDX) ใช้ fallback 37 (1-based, index 36)
+    const syncStatusCol =
+      typeof SRC_IDX !== 'undefined' && typeof SRC_IDX.SYNC_STATUS === 'number' ? SRC_IDX.SYNC_STATUS + 1 : 37;
+    const data = sheet.getRange(2, syncStatusCol, lastRow - 1, 1).getValues();
+
+    // นับแถวที่ SYNC_STATUS != SUCCESS
+    let pendingCount = 0;
+    for (let i = 0; i < data.length; i++) {
+      const status = String(data[i][0] || '').toUpperCase();
+      if (status !== 'SUCCESS') {
+        pendingCount++;
+      }
+    }
+
+    logPipeline_('info', 'checkHasMoreWork: ' + pendingCount + ' pending rows');
+    return pendingCount > 0;
+  } catch (e) {
+    logPipeline_('warn', 'checkHasMoreWork_ error: ' + e.message + ' — assume yes');
+    return true; // ถ้าตรวจไม่ได้ → assume ยังมีงาน (ปลอดภัยกว่า)
+  }
+}
+
+/**
+ * completePipeline_ — finalize pipeline เมื่อเสร็จสมบูรณ์
+ *   ไม่ลบ triggers (รอข้อมูลใหม่เข้ามาในวันถัดไป)
+ * @private
+ */
+function completePipeline_() {
+  setPipelineState_(PIPELINE_STATES.COMPLETED, 'All pending rows processed');
+
+  // ล้าง checkpoint (แต่เก็บ history)
+  const checkpoint = getPipelineCheckpoint_();
+  savePipelineHistory_(checkpoint);
+  clearPipelineCheckpoint_();
+
+  logPipeline_('info', '✅ Pipeline COMPLETED — waiting for new data');
+}
+
+/**
+ * resetDailyQuotaJob — trigger รายวัน 00:05 น. สำหรับรีเซ็ต quota
+ *   ถ้า pipeline อยู่ในสถานะ PAUSED_QUOTA → เปลี่ยนเป็น IDLE เพื่อรอรอบใหม่
+ */
+function resetDailyQuotaJob() {
+  logPipeline_('info', '=== Daily Quota Reset Job ===');
+
+  // บังคับรีเซ็ต quota
+  const today = formatDateYMD_(new Date());
+  setDailyQuota_({
+    date: today,
+    runtimeMs: 0,
+    runCount: 0,
+    lastResetAt: new Date().toISOString()
+  });
+
+  // ถ้า pipeline อยู่ในสถานะ PAUSED_QUOTA → เปลี่ยนเป็น IDLE
+  const state = getPipelineState_();
+  if (state.state === PIPELINE_STATES.PAUSED_QUOTA) {
+    setPipelineState_(PIPELINE_STATES.IDLE, 'Daily quota reset — ready to resume');
+    logPipeline_('info', 'Pipeline unpaused from PAUSED_QUOTA');
+  }
+
+  // ลบ MatchEngine auto-resume triggers ที่ค้างจากเมื่อวาน
+  removeMatchEngineAutoResumeTriggers_();
+
+  logPipeline_('info', 'Daily quota reset complete');
+}
+
+// ============================================================
+// SECTION 7: Admin Menu Actions
+// ============================================================
+
+/**
+ * startPipeline — Admin action: เริ่ม pipeline ใหม่
+ *   - รีเซ็ต state + checkpoint + circuit breaker
+ *   - ติดตั้ง triggers ถ้ายังไม่มี
+ *   - รัน batch แรกทันที
+ */
+function startPipeline() {
+  logPipeline_('info', '=== Admin: START PIPELINE ===');
+
+  // รีเซ็ต state
+  setPipelineState_(PIPELINE_STATES.RUNNING, 'Started by admin');
+  clearPipelineCheckpoint_();
+  resetCircuitBreaker_();
+
+  // รีเซ็ต quota ของวันนี้ด้วย (เริ่มนับใหม่)
+  const today = formatDateYMD_(new Date());
+  setDailyQuota_({
+    date: today,
+    runtimeMs: 0,
+    runCount: 0,
+    lastResetAt: new Date().toISOString()
+  });
+
+  // ติดตั้ง triggers ถ้ายังไม่มี
+  const triggerInfo = getPipelineTriggerCount_();
+  if (triggerInfo.pipelineTriggers === 0) {
+    installPipelineTriggers();
+  }
+
+  // ลบ MatchEngine auto-resume triggers ที่ค้าง
+  removeMatchEngineAutoResumeTriggers_();
+
+  // รัน batch แรกทันที
+  const result = runPipelineBatch();
+
+  return {
+    action: 'STARTED',
+    result: result,
+    message:
+      'Pipeline started — will run every ' +
+      PIPELINE_CONFIG.BATCH_RUN_INTERVAL_HOURS +
+      'h, ' +
+      PIPELINE_CONFIG.BATCH_RUN_START_HOUR +
+      ':00-' +
+      PIPELINE_CONFIG.BATCH_RUN_END_HOUR +
+      ':00'
+  };
+}
+
+/**
+ * pausePipeline — Admin action: หยุด pipeline ชั่วคราว
+ *   - หยุดรับ batch ใหม่ (batch ที่รันอยู่จะรันจนจบ)
+ *   - ไม่ลบ triggers (รอ resume)
+ */
+function pausePipeline() {
+  logPipeline_('info', '=== Admin: PAUSE PIPELINE ===');
+  setPipelineState_(PIPELINE_STATES.PAUSED_MANUAL, 'Paused by admin');
+  removeMatchEngineAutoResumeTriggers_();
+  return {
+    action: 'PAUSED',
+    message: 'Pipeline paused — current batch will finish, no new batches will start'
+  };
+}
+
+/**
+ * resumePipeline — Admin action: ทำต่อหลัง pause
+ *   - ใช้หลังจาก pausePipeline() หรือหลัง reset Circuit Breaker
+ */
+function resumePipeline() {
+  logPipeline_('info', '=== Admin: RESUME PIPELINE ===');
+
+  const state = getPipelineState_();
+
+  // ถ้า PAUSED_ERRORS → ต้อง reset circuit breaker ก่อน
+  if (state.state === PIPELINE_STATES.PAUSED_ERRORS) {
+    resetCircuitBreaker_();
+  }
+
+  setPipelineState_(PIPELINE_STATES.RUNNING, 'Resumed by admin');
+
+  // รัน batch ทันที
+  const result = runPipelineBatch();
+
+  return {
+    action: 'RESUMED',
+    result: result,
+    message: 'Pipeline resumed'
+  };
+}
+
+/**
+ * resetPipeline — Admin action: รีเซ็ต pipeline ทั้งหมด
+ *   - ลบ state + checkpoint + circuit breaker + quota
+ *   - ไม่ลบ triggers (คงไว้สำหรับการรันในอนาคต)
+ *   - ไม่รัน batch ทันที (ให้ admin เรียก startPipeline เอง)
+ */
+function resetPipeline() {
+  logPipeline_('info', '=== Admin: RESET PIPELINE ===');
+
+  const props = PropertiesService.getScriptProperties();
+  props.deleteProperty(PIPELINE_PROPS.STATE);
+  props.deleteProperty(PIPELINE_PROPS.CHECKPOINT);
+  props.deleteProperty(PIPELINE_PROPS.CIRCUIT);
+  props.deleteProperty(PIPELINE_PROPS.QUOTA);
+
+  removeMatchEngineAutoResumeTriggers_();
+
+  return {
+    action: 'RESET',
+    message: 'Pipeline reset complete — call startPipeline() to begin fresh'
+  };
+}
+
+/**
+ * showPipelineStatus — Admin action: แสดงสถานะปัจจุบัน
+ *   ใช้ Log หรือ Execution console ดูผล
+ * @return {Object} status object
+ */
+function showPipelineStatus() {
+  const state = getPipelineState_();
+  const checkpoint = getPipelineCheckpoint_();
+  const quota = getDailyQuota_();
+  const cb = getCircuitBreaker_();
+  const triggers = getPipelineTriggerCount_();
+
+  const status = {
+    timestamp: new Date().toISOString(),
+    state: state,
+    checkpoint: {
+      runCount: checkpoint.runCount || 0,
+      totalRuntimeMs: checkpoint.totalRuntimeMs || 0,
+      totalRuntimeFormatted: formatDuration_(checkpoint.totalRuntimeMs || 0),
+      startedAt: checkpoint.startedAt,
+      lastRunAt: checkpoint.lastRunAt
+    },
+    quota: {
+      date: quota.date,
+      runtimeMs: quota.runtimeMs || 0,
+      runtimeFormatted: formatDuration_(quota.runtimeMs || 0),
+      runCount: quota.runCount || 0,
+      remainingMs: PIPELINE_CONFIG.MAX_RUNTIME_MS_PER_DAY - (quota.runtimeMs || 0),
+      remainingRuns: PIPELINE_CONFIG.MAX_RUNS_PER_DAY - (quota.runCount || 0),
+      limitMs: PIPELINE_CONFIG.MAX_RUNTIME_MS_PER_DAY,
+      limitRuns: PIPELINE_CONFIG.MAX_RUNS_PER_DAY
+    },
+    circuitBreaker: {
+      consecutiveErrors: cb.consecutiveErrors || 0,
+      lastError: cb.lastError || '',
+      lastErrorAt: cb.lastErrorAt,
+      pausedAt: cb.pausedAt,
+      isTripped: cb.pausedAt !== null && cb.pausedAt !== undefined
+    },
+    triggers: triggers,
+    config: {
+      maxRuntimePerDay: formatDuration_(PIPELINE_CONFIG.MAX_RUNTIME_MS_PER_DAY),
+      maxRuntimePerRun: formatDuration_(PIPELINE_CONFIG.MAX_RUNTIME_MS_PER_RUN),
+      maxRunsPerDay: PIPELINE_CONFIG.MAX_RUNS_PER_DAY,
+      scheduleHours:
+        PIPELINE_CONFIG.BATCH_RUN_START_HOUR +
+        ':00-' +
+        PIPELINE_CONFIG.BATCH_RUN_END_HOUR +
+        ':00 every ' +
+        PIPELINE_CONFIG.BATCH_RUN_INTERVAL_HOURS +
+        'h',
+      maxConsecutiveErrors: PIPELINE_CONFIG.MAX_CONSECUTIVE_ERRORS
+    }
+  };
+
+  // Log สรุปสถานะ
+  logPipeline_('info', '=== PIPELINE STATUS ===');
+  logPipeline_('info', 'State: ' + state.state + (state.message ? ' — ' + state.message : ''));
+  logPipeline_('info', 'Runs today: ' + quota.runCount + '/' + PIPELINE_CONFIG.MAX_RUNS_PER_DAY);
+  logPipeline_(
+    'info',
+    'Runtime today: ' +
+      formatDuration_(quota.runtimeMs || 0) +
+      ' / ' +
+      formatDuration_(PIPELINE_CONFIG.MAX_RUNTIME_MS_PER_DAY)
+  );
+  logPipeline_(
+    'info',
+    'Total runs: ' + checkpoint.runCount + ' (total time: ' + formatDuration_(checkpoint.totalRuntimeMs || 0) + ')'
+  );
+  logPipeline_(
+    'info',
+    'Circuit breaker errors: ' +
+      cb.consecutiveErrors +
+      '/' +
+      PIPELINE_CONFIG.MAX_CONSECUTIVE_ERRORS +
+      (cb.pausedAt ? ' [TRIPPED]' : '')
+  );
+  logPipeline_(
+    'info',
+    'Triggers: pipeline=' +
+      triggers.pipelineTriggers +
+      ', matchEngine=' +
+      triggers.matchEngineTriggers +
+      ', total=' +
+      triggers.total
+  );
+
+  return status;
+}
+
+/**
+ * resetCircuitBreakerMenu — Admin action: รีเซ็ต circuit breaker
+ *   ใช้หลังจากแก้ปัญหาที่ทำให้ error ซ้ำ แล้วต้องการรันต่อ
+ */
+function resetCircuitBreakerMenu() {
+  logPipeline_('info', '=== Admin: RESET CIRCUIT BREAKER ===');
+  resetCircuitBreaker_();
+
+  // ถ้า state เป็น PAUSED_ERRORS → เปลี่ยนเป็น IDLE
+  const state = getPipelineState_();
+  if (state.state === PIPELINE_STATES.PAUSED_ERRORS) {
+    setPipelineState_(PIPELINE_STATES.IDLE, 'Circuit breaker reset by admin');
+  }
+
+  return {
+    action: 'CIRCUIT_BREAKER_RESET',
+    message: 'Circuit breaker reset — call resumePipeline() to continue'
+  };
+}
+
+/**
+ * uninstallPipelineTriggers — Admin action: ลบ triggers ทั้งหมดของ Pipeline Manager
+ *   ใช้เมื่อต้องการหยุดใช้ Pipeline Manager โดยสมบูรณ์
+ */
+function uninstallPipelineTriggers() {
+  logPipeline_('info', '=== Admin: UNINSTALL PIPELINE TRIGGERS ===');
+  const deleted = removeAllPipelineTriggers_();
+  removeMatchEngineAutoResumeTriggers_();
+  return {
+    action: 'UNINSTALLED',
+    deleted: deleted,
+    message: 'Removed ' + deleted + ' pipeline trigger(s)'
+  };
+}
+
+// ============================================================
+// SECTION 7.5: Pre-flight Check (V6.0.004)
+// ============================================================
+
+/**
+ * runPipelinePreflight — [V6.0.004] Pre-flight check before running MatchEngine
+ *   [FIX V6.0.006] ลบ DAILY_JOB check — runFullPipeline ใช้ SOURCE sheet ไม่ใช่ DAILY_JOB
+ *   [V6.0.007] Strict dependency-aware mode:
+ *     - 6 checks (was 3): SOURCE rows + SYS_TH_GEO + GEMINI_API_KEY + M_PERSON + M_PLACE + schema integrity
+ *     - Returns structured report: { ready, issues, warnings, checks }
+ *     - Warnings are non-blocking (advisory); issues are blocking
+ *     - Optional strict mode: throw on any issue (for use in CI/CD-style runs)
+ *
+ * Checks:
+ *   1. (BLOCKING) SOURCE sheet has unprocessed rows (SYNC_STATUS ≠ SUCCESS/REVIEW)
+ *   2. (BLOCKING) SYS_TH_GEO dictionary exists with ≥100 rows
+ *   3. (CONDITIONAL) GEMINI_API_KEY set (only if AI_CONFIG.USE_AI_REASONING = true)
+ *   4. (BLOCKING) M_PERSON sheet exists with header matching PERSON_IDX
+ *   5. (BLOCKING) M_PLACE sheet exists with header matching PLACE_IDX
+ *   6. (WARNING) M_ALIAS has the V6.0.003 +3 columns (variant_norm, phonetic_primary, phonetic_secondary)
+ *
+ * @param {Object} [opts] - optional config
+ * @param {boolean} [opts.strict=false] - if true, throw on any issue instead of returning
+ * @return {{ ready: boolean, issues: string[], warnings: string[], checks: Array<{name,status,detail}> }}
+ */
+function runPipelinePreflight(opts) {
+  const issues = []; // BLOCKING — pipeline will abort if any
+  const warnings = []; // NON-BLOCKING — advisory only
+  const checks = []; // audit trail of each check
+  const strict = !!(opts && opts.strict);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // ───────────────────────────────────────────────────────────
+  // Check 1: SOURCE sheet has unprocessed rows (BLOCKING)
+  // [FIX V6.0.006] SOURCE ไม่ใช่ DAILY_JOB — runFullPipeline = Flow 1 (Source → MatchEngine)
+  // ───────────────────────────────────────────────────────────
+  const sourceSheet = ss.getSheetByName(SHEET.SOURCE);
+  if (!sourceSheet || sourceSheet.getLastRow() < 2) {
+    issues.push('SOURCE sheet (SCGนครหลวงJWDภูมิภาค) ว่าง — กรุณาโหลดข้อมูลดิบก่อน');
+    checks.push({ name: 'SOURCE rows', status: 'FAIL', detail: 'sheet empty or missing' });
+  } else {
+    const syncCol =
+      typeof SRC_IDX !== 'undefined' && typeof SRC_IDX.SYNC_STATUS === 'number' ? SRC_IDX.SYNC_STATUS + 1 : 37;
+    const data = sourceSheet.getRange(2, syncCol, sourceSheet.getLastRow() - 1, 1).getValues();
+    const pending = data.filter(function (r) {
+      return r[0] !== 'SUCCESS' && r[0] !== 'REVIEW';
+    }).length;
+    if (pending === 0) {
+      issues.push('SOURCE sheet ไม่มีแถวที่ต้องประมวลผล (SYNC_STATUS ทั้งหมด = SUCCESS/REVIEW)');
+      checks.push({ name: 'SOURCE rows', status: 'FAIL', detail: '0 pending rows' });
+    } else {
+      checks.push({ name: 'SOURCE rows', status: 'PASS', detail: pending + ' pending rows' });
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Check 2: SYS_TH_GEO dictionary exists with ≥100 rows (BLOCKING)
+  // ───────────────────────────────────────────────────────────
+  const geoSheet = ss.getSheetByName(SHEET.SYS_TH_GEO);
+  const geoRows = geoSheet ? geoSheet.getLastRow() - 1 : 0;
+  if (!geoSheet || geoRows < 100) {
+    issues.push(
+      'SYS_TH_GEO dictionary ไม่ครบ (พบ ' + geoRows + ' rows, ต้องการ ≥100) — กรุณารัน "buildGeoDictionary" ก่อน'
+    );
+    checks.push({ name: 'SYS_TH_GEO', status: 'FAIL', detail: geoRows + ' rows (need ≥100)' });
+  } else {
+    checks.push({ name: 'SYS_TH_GEO', status: 'PASS', detail: geoRows + ' rows' });
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Check 3: GEMINI_API_KEY (CONDITIONAL — only if USE_AI_REASONING)
+  // ───────────────────────────────────────────────────────────
+  if (typeof AI_CONFIG !== 'undefined' && AI_CONFIG.USE_AI_REASONING) {
+    try {
+      if (typeof getGeminiApiKey === 'function') getGeminiApiKey();
+      checks.push({ name: 'GEMINI_API_KEY', status: 'PASS', detail: 'set + valid format' });
+    } catch (e) {
+      issues.push('GEMINI_API_KEY ยังไม่ได้ตั้งค่า — กรุณารัน "ตั้งค่า API Key"');
+      checks.push({ name: 'GEMINI_API_KEY', status: 'FAIL', detail: e.message });
+    }
+  } else {
+    checks.push({ name: 'GEMINI_API_KEY', status: 'SKIP', detail: 'USE_AI_REASONING=false' });
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // [V6.0.007] Check 4: M_PERSON sheet exists + header matches PERSON_IDX (BLOCKING)
+  // ───────────────────────────────────────────────────────────
+  const personSheet = ss.getSheetByName(SHEET.M_PERSON);
+  if (!personSheet || personSheet.getLastColumn() < 12) {
+    issues.push('M_PERSON sheet ไม่พบหรือคอลัมน์ไม่ครบ (ต้องการ ≥12 สำหรับ V6.0.001 phonetic keys)');
+    checks.push({
+      name: 'M_PERSON',
+      status: 'FAIL',
+      detail: 'cols=' + (personSheet ? personSheet.getLastColumn() : 0)
+    });
+  } else {
+    // Spot-check header at PERSON_IDX.PHONETIC_PRIMARY (index 10)
+    const headers = personSheet.getRange(1, 1, 1, personSheet.getLastColumn()).getValues()[0];
+    if (String(headers[10] || '') !== 'phonetic_primary') {
+      issues.push('M_PERSON header ไม่ตรง schema — col[10]="' + headers[10] + '" แต่ต้องเป็น "phonetic_primary"');
+      checks.push({ name: 'M_PERSON', status: 'FAIL', detail: 'header mismatch at col[10]' });
+    } else {
+      checks.push({ name: 'M_PERSON', status: 'PASS', detail: personSheet.getLastColumn() + ' cols, header OK' });
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // [V6.0.007] Check 5: M_PLACE sheet exists + header matches PLACE_IDX (BLOCKING)
+  // ───────────────────────────────────────────────────────────
+  const placeSheet = ss.getSheetByName(SHEET.M_PLACE);
+  if (!placeSheet || placeSheet.getLastColumn() < 16) {
+    issues.push('M_PLACE sheet ไม่พบหรือคอลัมน์ไม่ครบ (ต้องการ ≥16 สำหรับ V6.0.001 phonetic keys)');
+    checks.push({ name: 'M_PLACE', status: 'FAIL', detail: 'cols=' + (placeSheet ? placeSheet.getLastColumn() : 0) });
+  } else {
+    // Spot-check header at PLACE_IDX.PHONETIC_PRIMARY (index 14)
+    const headers = placeSheet.getRange(1, 1, 1, placeSheet.getLastColumn()).getValues()[0];
+    if (String(headers[14] || '') !== 'phonetic_primary') {
+      issues.push('M_PLACE header ไม่ตรง schema — col[14]="' + headers[14] + '" แต่ต้องเป็น "phonetic_primary"');
+      checks.push({ name: 'M_PLACE', status: 'FAIL', detail: 'header mismatch at col[14]' });
+    } else {
+      checks.push({ name: 'M_PLACE', status: 'PASS', detail: placeSheet.getLastColumn() + ' cols, header OK' });
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // [V6.0.007] Check 6: M_ALIAS has V6.0.003 +3 columns (WARNING — non-blocking)
+  //   สาเหตุ: M_ALIAS sheet อาจยังไม่ได้รับการ auto-repair — pipeline ยังทำงานได้แต่
+  //   Self-Healing Alias features จะไม่ทำงานจนกว่าจะรัน setupAllSheets()
+  // ───────────────────────────────────────────────────────────
+  const aliasSheet = ss.getSheetByName(SHEET.M_ALIAS);
+  if (aliasSheet && aliasSheet.getLastColumn() < 11) {
+    warnings.push(
+      'M_ALIAS sheet มี ' +
+        aliasSheet.getLastColumn() +
+        ' cols (V6.0.003 ต้องการ 11) — รัน setupAllSheets() เพื่อ auto-repair'
+    );
+    checks.push({ name: 'M_ALIAS cols', status: 'WARN', detail: aliasSheet.getLastColumn() + ' cols (need 11)' });
+  } else if (aliasSheet) {
+    checks.push({ name: 'M_ALIAS cols', status: 'PASS', detail: aliasSheet.getLastColumn() + ' cols' });
+  }
+
+  // [V6.0.007] Check 4 ถูกรวมเข้า Check 1 แล้ว (V6.0.006) — ลบออกเพื่อไม่ให้ตรวจซ้ำ
+
+  // ───────────────────────────────────────────────────────────
+  // Build result
+  // ───────────────────────────────────────────────────────────
+  const ready = issues.length === 0;
+  const result = {
+    ready: ready,
+    issues: issues,
+    warnings: warnings,
+    checks: checks
+  };
+
+  // Log summary for observability
+  if (typeof logInfo === 'function') {
+    logInfo(
+      'Pipeline',
+      'runPipelinePreflight: ready=' +
+        ready +
+        ', issues=' +
+        issues.length +
+        ', warnings=' +
+        warnings.length +
+        ', checks=' +
+        checks.length
+    );
+  }
+
+  // Strict mode: throw on any issue
+  if (strict && !ready) {
+    throw new Error('Pipeline preflight FAILED (strict mode):\n' + issues.join('\n'));
+  }
+
+  return result;
+}
+
+// ============================================================
+// SECTION 8: Helpers
+// ============================================================
+
+/**
+ * savePipelineHistory_ — บันทึกประวัติการรันล่าสุด (keep last 7)
+ * @param {Object} checkpoint
+ * @private
+ */
+function savePipelineHistory_(checkpoint) {
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty(PIPELINE_PROPS.HISTORY);
+  let history = [];
+  try {
+    if (raw) history = JSON.parse(raw) || [];
+  } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน reset history
+    logPipeline_(
+      'warn',
+      'savePipelineHistory_: JSON.parse ล้มเหลว — reset to []. raw="' +
+        String(raw).substring(0, 200) +
+        '", error=' +
+        e.message
+    );
+    history = [];
+  }
+
+  // เพิ่ม entry ใหม่
+  history.unshift({
+    completedAt: new Date().toISOString(),
+    runCount: checkpoint.runCount,
+    totalRuntimeMs: checkpoint.totalRuntimeMs,
+    startedAt: checkpoint.startedAt,
+    lastRunAt: checkpoint.lastRunAt
+  });
+
+  // เก็บแค่ 7 รายการล่าสุด
+  if (history.length > 7) {
+    history = history.slice(0, 7);
+  }
+
+  props.setProperty(PIPELINE_PROPS.HISTORY, JSON.stringify(history));
+}
+
+/**
+ * getPipelineHistory — อ่านประวัติการรัน (last 7 completed pipelines)
+ * @return {Array}
+ */
+function getPipelineHistory() {
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty(PIPELINE_PROPS.HISTORY);
+  if (raw === null || raw === '') return [];
+  try {
+    return JSON.parse(raw) || [];
+  } catch (e) {
+    // [FIX BUG-AUDIT-007 V5.5.042] log ก่อน return empty
+    logPipeline_(
+      'warn',
+      'getPipelineHistory: JSON.parse ล้มเหลว — return []. raw="' +
+        String(raw).substring(0, 200) +
+        '", error=' +
+        e.message
+    );
+    return [];
+  }
+}
+
+/**
+ * logPipeline_ — เขียน log (ใช้ logInfo ถ้ามี, ไม่งั้น console.log)
+ * @param {string} level - 'info' | 'warn' | 'error'
+ * @param {string} message
+ * @private
+ */
+function logPipeline_(level, message) {
+  const prefix = '[PipelineManager] ';
+
+  // ใช้ logInfo/logWarn/logError ของระบบถ้ามี
+  if (PIPELINE_CONFIG.LOG_TO_SYS_LOG === true) {
+    if (level === 'info' && typeof logInfo === 'function') {
+      logInfo('PipelineManager', message);
+      return;
+    }
+    if (level === 'warn' && typeof logWarn === 'function') {
+      logWarn('PipelineManager', message);
+      return;
+    }
+    if (level === 'error' && typeof logError === 'function') {
+      logError('PipelineManager', message);
+      return;
+    }
+  }
+
+  // Fallback: console.log (จะเห็นใน Stackdriver Logs)
+  if (level === 'error') {
+    console.error(prefix + message);
+  } else if (level === 'warn') {
+    console.warn(prefix + message);
+  } else {
+    console.log(prefix + message);
+  }
+}
+
+/**
+ * formatDateYMD_ — format date เป็น YYYY-MM-DD (สำหรับเทียบวัน)
+ * @param {Date} date
+ * @return {string}
+ * @private
+ */
+function formatDateYMD_(date) {
+  if (date === null || date === undefined) return '';
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + d;
+}
+
+/**
+ * formatDuration_ — format millisecond เป็น "Xm Ys" หรือ "Xs"
+ * @param {number} ms
+ * @return {string}
+ * @private
+ */
+function formatDuration_(ms) {
+  if (ms === null || ms === undefined || ms === 0) return '0s';
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+
+  if (minutes > 0) {
+    return minutes + 'm ' + remainingSeconds + 's';
+  }
+  return seconds + 's';
+}
+
+// ============================================================
+// SECTION 9: [NEW v5.5.047] Failure Alert via Telegram (5.1)
+// ============================================================
+
+/**
+ * sendPipelineAlert_ — [NEW v5.5.047] ส่งแจ้งเตือนผ่าน Telegram Bot
+ *   Fail-safe: ส่งไม่สำเร็จ → log error แต่ไม่ throw (ห้ามให้ alert ทำ pipeline พัง — Rule 12)
+ *
+ *   Setup: ตั้งค่า Script Properties (Project Settings → Script Properties):
+ *     - TELEGRAM_BOT_TOKEN: token จาก @BotFather
+ *     - TELEGRAM_CHAT_ID: chat id ที่จะรับ alert (ใช้ Bot เดียวกับ Billing ได้)
+ *
+ * @param {string} message - ข้อความ alert (ไม่ต้องมี icon — ใส่ให้อัตโนมัติ)
+ * @param {'INFO'|'WARN'|'ERROR'} [severity='WARN'] - ระดับความรุนแรง (กำหนด icon)
+ * @private
+ */
+function sendPipelineAlert_(message, severity) {
+  const level = severity || 'WARN';
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const token = props.getProperty('TELEGRAM_BOT_TOKEN');
+    const chatId = props.getProperty('TELEGRAM_CHAT_ID');
+    if (!token || !chatId) {
+      // ไม่ตั้งค่า → ข้ามแบบเงียบ (ไม่ใช่ error — เป็น optional feature)
+      logDebug(
+        'PipelineManager',
+        'sendPipelineAlert_: ยังไม่ตั้งค่า TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID — ข้ามการแจ้งเตือน'
+      );
+      return;
+    }
+    let icon;
+    if (level === 'ERROR') {
+      icon = '🔴';
+    } else if (level === 'WARN') {
+      icon = '🟡';
+    } else {
+      icon = 'ℹ️';
+    }
+    // [FIX V6.0.006] ใช้ HTML tags แทน Markdown (* ไม่ทำงานใน HTML mode)
+    const text = icon + ' <b>LMDS Pipeline Alert</b>\n' + message;
+
+    // [V6.0.057] Exponential backoff retry for Telegram API (Reviewer 4 TD-004)
+    //   ถ้า Telegram ตอบ 429 (Rate Limit) หรือ 5xx → retry สูงสุด 3 ครั้ง
+    //   with exponential backoff (2s, 4s, 8s)
+    //   ถ้า retry หมดแล้วยัง fail → log warn (ไม่ throw — Rule 12: alert ห้ามพัง pipeline)
+    const maxRetries = 3;
+    const baseDelayMs = 2000;
+    let respCode = 0;
+    let respBody = '';
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+          method: 'post',
+          contentType: 'application/json',
+          muteHttpExceptions: true,
+          // [FIX V6.0.006] เปลี่ยนจาก Markdown → HTML เพื่อหลีกเลี่ยง parse error
+          payload: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'HTML' })
+        });
+
+        respCode = response.getResponseCode();
+        respBody = response.getContentText().substring(0, 200);
+
+        // Success or non-retryable error (400 Bad Request, 401 Unauthorized, etc.)
+        if (respCode === 200 || (respCode >= 400 && respCode < 500 && respCode !== 429)) {
+          break;
+        }
+
+        // Retryable: 429 (Rate Limit) or 5xx (Server Error)
+        if (attempt < maxRetries) {
+          const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
+          logDebug(
+            'PipelineManager',
+            'sendPipelineAlert_: Telegram ตอบ ' +
+              respCode +
+              ' — retry ' +
+              (attempt + 1) +
+              '/' +
+              maxRetries +
+              ' ใน ' +
+              delayMs +
+              'ms'
+          );
+          Utilities.sleep(delayMs);
+        }
+      } catch (fetchErr) {
+        lastError = fetchErr;
+        if (attempt < maxRetries) {
+          const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
+          logDebug(
+            'PipelineManager',
+            'sendPipelineAlert_: fetch error — retry ' +
+              (attempt + 1) +
+              '/' +
+              maxRetries +
+              ' ใน ' +
+              delayMs +
+              'ms — ' +
+              fetchErr.message
+          );
+          Utilities.sleep(delayMs);
+        }
+      }
+    }
+
+    if (respCode !== 200) {
+      logWarn(
+        'PipelineManager',
+        'sendPipelineAlert_: Telegram API ตอบ ' +
+          respCode +
+          ' หลัง ' +
+          maxRetries +
+          ' retries — ' +
+          respBody +
+          (lastError ? ' | lastError: ' + lastError.message : '')
+      );
+    }
+  } catch (err) {
+    // [Rule 12] ห้ามให้ alert ทำ pipeline พัง — log แล้ว continue
+    logError('PipelineManager', 'sendPipelineAlert_ ล้มเหลว: ' + err.message, err);
+  }
+}

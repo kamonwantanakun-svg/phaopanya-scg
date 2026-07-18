@@ -1,0 +1,326 @@
+<script>
+  /**
+   * js/components/DataTable.html — Reusable data table component
+   * ===================================================
+   * ตารางข้อมูลพร้อม sort, paginate, loading state
+   *
+   * ใช้งาน:
+   *   const table = new DataTable(container, {
+   *     columns: [
+   *       { key: 'tx_id', label: 'TX ID', sortable: true },
+   *       { key: 'invoice_no', label: 'Invoice', sortable: true },
+   *     ],
+   *     rows: [...],
+   *     pageSize: 25,
+   *     emptyMessage: 'ไม่มีข้อมูล',
+   *   });
+   *   table.render();
+   *
+   * Phase 2: จะใช้ component นี้สำหรับ FACT_DELIVERY, Q_REVIEW, Source Sheet
+   * ===================================================
+   */
+
+  globalThis.DataTable = (function () {
+    'use strict';
+
+    /**
+     * DataTable class
+     * @param {HTMLElement} container
+     * @param {Object} options
+     */
+    function DataTable(container, options) {
+      this.container = container;
+      this.columns = options.columns || [];
+      this.rows = options.rows || [];
+      this.pageSize = options.pageSize || 25;
+      this.emptyMessage = options.emptyMessage || 'ไม่มีข้อมูล';
+      this.currentPage = 1;
+      this.sortKey = null;
+      this.sortDir = 'asc';
+      this.loading = false;
+    }
+
+    /**
+     * updateRows — อัปเดตข้อมูลในตาราง (ใช้ตอน polling)
+     */
+    DataTable.prototype.updateRows = function (rows) {
+      this.rows = rows || [];
+      this.render();
+    };
+
+    /**
+     * setLoading — แสดง/ซ่อน loading state
+     */
+    DataTable.prototype.setLoading = function (isLoading) {
+      this.loading = isLoading;
+      this.render();
+    };
+
+    /**
+     * getSortedRows — คืน rows ที่ sort แล้ว
+     */
+    DataTable.prototype.getSortedRows = function () {
+      if (!this.sortKey) return this.rows;
+      const key = this.sortKey;
+      const dir = this.sortDir === 'asc' ? 1 : -1;
+      return this.rows.slice().sort((a, b) => {
+        const aVal = a[key];
+        const bVal = b[key];
+        if (aVal === bVal) return 0;
+        if (aVal === null || aVal === undefined) return 1;
+        if (bVal === null || bVal === undefined) return -1;
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return (aVal - bVal) * dir;
+        }
+        return String(aVal).localeCompare(String(bVal)) * dir;
+      });
+    };
+
+    /**
+     * getCurrentPageRows — คืน rows ในหน้าปัจจุบัน
+     */
+    DataTable.prototype.getCurrentPageRows = function () {
+      const sorted = this.getSortedRows();
+      const start = (this.currentPage - 1) * this.pageSize;
+      return sorted.slice(start, start + this.pageSize);
+    };
+
+    /**
+     * sortBy — sort ตามคอลัมน์ที่เลือก (toggle asc/desc)
+     */
+    DataTable.prototype.sortBy = function (key) {
+      if (this.sortKey === key) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortKey = key;
+        this.sortDir = 'asc';
+      }
+      this.currentPage = 1;
+      this.render();
+    };
+
+    /**
+     * goToPage — ไปหน้าที่กำหนด
+     */
+    DataTable.prototype.goToPage = function (page) {
+      const totalPages = Math.ceil(this.rows.length / this.pageSize) || 1;
+      this.currentPage = Math.max(1, Math.min(page, totalPages));
+      this.render();
+    };
+
+    /**
+     * render — วาดตารางใหม่
+     */
+    DataTable.prototype.render = function () {
+      if (!this.container) return;
+
+      if (this.loading) {
+        this.container.innerHTML =
+          '<div class="bg-white border border-gray-200 rounded-lg p-8 text-center">' +
+          '<div class="inline-block w-6 h-6 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>' +
+          '<p class="mt-2 text-sm text-gray-500">กำลังโหลด...</p>' +
+          '</div>';
+        return;
+      }
+
+      if (this.rows.length === 0) {
+        this.container.innerHTML =
+          '<div class="bg-white border border-gray-200 rounded-lg p-8 text-center text-gray-400">' +
+          '<p class="text-sm">' +
+          this.emptyMessage +
+          '</p>' +
+          '</div>';
+        return;
+      }
+
+      const pageRows = this.getCurrentPageRows();
+      const totalRows = this.rows.length;
+      const totalPages = Math.ceil(totalRows / this.pageSize) || 1;
+      const startIdx = (this.currentPage - 1) * this.pageSize;
+
+      let html = '<div class="bg-white border border-gray-200 rounded-lg overflow-hidden">';
+      html += renderTable_(this, pageRows, startIdx);
+      html += renderPagination_(this, totalRows, totalPages, startIdx);
+      html += '</div>';
+
+      this.container.innerHTML = html;
+
+      // Bind this ให้กับปุ่ม (workaround for inline onclick)
+      this.container.querySelectorAll('button[onclick], th[onclick]').forEach((el) => {
+        el._table = this;
+      });
+    };
+
+    /**
+     * getAlignClass_ — คืน Tailwind class สำหรับ text align
+     * @param {string} align — 'right' | 'center' | 'left' | undefined
+     * @return {string}
+     * @private
+     */
+    function getAlignClass_(align) {
+      if (align === 'right') return 'text-right';
+      if (align === 'center') return 'text-center';
+      return 'text-left';
+    }
+
+    /**
+     * renderTable_ — สร้าง HTML ส่วน <table> (thead + tbody)
+     * @param {DataTable} table — DataTable instance
+     * @param {Array<Object>} pageRows — rows ในหน้าปัจจุบัน
+     * @param {number} startIdx — index เริ่มต้น (0-based)
+     * @return {string} HTML
+     * @private
+     */
+    function renderTable_(table, pageRows, startIdx) {
+      let html = '<div class="overflow-x-auto">';
+      html += '<table class="w-full text-sm">';
+      html += renderTableHeader_(table);
+      html += renderTableBody_(table, pageRows, startIdx);
+      html += '</table>';
+      html += '</div>';
+      return html;
+    }
+
+    /**
+     * renderTableHeader_ — สร้าง <thead> พร้อม sort indicators
+     * @private
+     */
+    function renderTableHeader_(table) {
+      let html = '<thead class="bg-gray-50 border-b border-gray-200"><tr>';
+      html += '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide w-12">#</th>';
+      table.columns.forEach((col) => {
+        const isSorted = table.sortKey === col.key;
+        let sortIcon = '';
+        if (isSorted) {
+          sortIcon = table.sortDir === 'asc' ? ' ↑' : ' ↓';
+        }
+        const sortClass = isSorted ? 'text-blue-600' : 'text-gray-500';
+        const cursorClass = col.sortable ? 'cursor-pointer hover:text-gray-700' : '';
+        const onclick = col.sortable ? ' onclick="this._table && this._table.sortBy(\'' + col.key + '\')"' : '';
+        html +=
+          '<th class="px-3 py-2 text-left text-xs font-medium ' +
+          sortClass +
+          ' ' +
+          cursorClass +
+          ' uppercase tracking-wide"' +
+          onclick +
+          '>' +
+          (col.label || col.key) +
+          sortIcon +
+          '</th>';
+      });
+      html += '</tr></thead>';
+      return html;
+    }
+
+    /**
+     * renderTableBody_ — สร้าง <tbody> พร้อม cell rendering
+     * @private
+     */
+    function renderTableBody_(table, pageRows, startIdx) {
+      let html = '<tbody class="divide-y divide-gray-100">';
+      pageRows.forEach((row, i) => {
+        html += '<tr class="hover:bg-gray-50">';
+        html += '<td class="px-3 py-2 text-xs text-gray-400">' + (startIdx + i + 1) + '</td>';
+        table.columns.forEach((col) => {
+          const val = row[col.key];
+          const displayVal = renderCellValue_(val, col, row);
+          const alignClass = getAlignClass_(col.align);
+          html += '<td class="px-3 py-2 ' + alignClass + '">' + displayVal + '</td>';
+        });
+        html += '</tr>';
+      });
+      html += '</tbody>';
+      return html;
+    }
+
+    /**
+     * renderCellValue_ — เลือกวิธี render ค่าใน cell ตาม col config
+     * @param {*} val — cell value
+     * @param {Object} col — column config
+     * @param {Object} row — full row data (ส่งต่อให้ col.format callback)
+     * @return {string}
+     * @private
+     */
+    function renderCellValue_(val, col, row) {
+      if (val === null || val === undefined || val === '') {
+        return '<span class="text-gray-300">—</span>';
+      }
+      if (col.format && typeof col.format === 'function') {
+        return col.format(val, row);
+      }
+      if (col.badge) {
+        return renderBadge_(val, col.badge);
+      }
+      // [V6.0.064] XSS hardening — escape all cell values (Reviewer #2 TD-012 + #3 AUD3-NEW-004)
+      return ViewHelpers.escapeHtml(String(val));
+    }
+
+    /**
+     * renderPagination_ — สร้าง pagination footer (prev/next + page info)
+     * @private
+     */
+    function renderPagination_(table, totalRows, totalPages, startIdx) {
+      let html =
+        '<div class="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between text-xs">';
+      html += '<div class="text-gray-500">';
+      html +=
+        'แสดง <span class="font-medium">' +
+        (startIdx + 1) +
+        '</span>–<span class="font-medium">' +
+        Math.min(startIdx + table.pageSize, totalRows) +
+        '</span> ';
+      html += 'จาก <span class="font-medium">' + totalRows.toLocaleString() + '</span> รายการ';
+      html += '</div>';
+      html += '<div class="flex items-center gap-1">';
+      const prevDisabled = table.currentPage <= 1;
+      const nextDisabled = table.currentPage >= totalPages;
+      html += renderPageButton_(table.currentPage - 1, 'ก่อนหน้า', prevDisabled);
+      html += '<span class="px-3 py-1 text-gray-600">หน้า ' + table.currentPage + ' / ' + totalPages + '</span>';
+      html += renderPageButton_(table.currentPage + 1, 'ถัดไป', nextDisabled);
+      html += '</div>';
+      html += '</div>';
+      return html;
+    }
+
+    /**
+     * renderPageButton_ — สร้างปุ่ม pagination
+     * @private
+     */
+    function renderPageButton_(targetPage, label, disabled) {
+      const stateClass = disabled ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600 hover:bg-white';
+      return (
+        '<button onclick="this._table && this._table.goToPage(' +
+        targetPage +
+        ')" ' +
+        (disabled ? 'disabled' : '') +
+        ' class="px-2 py-1 rounded border border-gray-200 ' +
+        stateClass +
+        '">' +
+        label +
+        '</button>'
+      );
+    }
+
+    /**
+     * renderBadge_ — สร้าง badge HTML ตามค่า
+     */
+    function renderBadge_(value, badgeConfig) {
+      const colors = badgeConfig.colors || {};
+      const color = colors[value] || 'gray';
+      const colorClasses = {
+        green: 'bg-green-100 text-green-700',
+        yellow: 'bg-yellow-100 text-yellow-700',
+        red: 'bg-red-100 text-red-700',
+        blue: 'bg-blue-100 text-blue-700',
+        gray: 'bg-gray-100 text-gray-600'
+      };
+      const cls = colorClasses[color] || colorClasses.gray;
+      return '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ' + cls + '">' + value + '</span>';
+    }
+
+    return DataTable;
+  })();
+
+  console.log('[DataTable] component loaded');
+</script>
